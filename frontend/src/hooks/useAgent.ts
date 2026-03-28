@@ -14,16 +14,17 @@ import type {
     MeshNode,
 } from '../types/ipc';
 
-// Detect Tauri v2 environment
-const isTauri = typeof window !== 'undefined' && '__TAURI__' in window;
+// Detect Tauri v2 environment — v2 uses __TAURI_INTERNALS__
+const isTauri =
+    typeof window !== 'undefined' &&
+    ('__TAURI_INTERNALS__' in window || '__TAURI__' in window);
 
 async function callInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
     if (isTauri) {
-        // Tauri v2: import from @tauri-apps/api/core, commands prefixed with cmd_
         const { invoke } = await import('@tauri-apps/api/core');
         return invoke<T>(`cmd_${cmd}`, args);
     }
-    // Mock mode for browser dev
+    // Mock mode for browser dev only
     const { invoke } = await import('../mocks/tauri');
     return invoke<T>(cmd, args);
 }
@@ -65,9 +66,13 @@ export function useAgent() {
     const getUIElements = () => callInvoke<{ elements: UIElement[] }>('get_ui_elements');
     const listWindows = () => callInvoke<{ windows: WindowInfo[] }>('list_windows');
     const runPCTask = (description: string) => callInvoke<PCTaskResult>('run_pc_task', { description });
-    const getTaskSteps = (taskId: string) => callInvoke<{ steps: TaskStep[] }>('get_task_steps', { taskId });
+    const getTaskSteps = (taskId: string) => callInvoke<{ steps: TaskStep[] }>('get_task_steps', { task_id: taskId });
     const killSwitch = () => callInvoke<{ ok: boolean }>('kill_switch');
     const resetKillSwitch = () => callInvoke<{ ok: boolean }>('reset_kill_switch');
+
+    // Phase 3: Agents
+    const findAgent = (task: string) => callInvoke<{ name: string; category: string; level: string; system_prompt: string }>('find_agent', { task });
+    const getAgents = () => callInvoke<{ agents: any[] }>('get_agents');
 
     // Phase 5: Mesh
     const getMeshNodes = () => callInvoke<{ nodes: MeshNode[] }>('get_mesh_nodes');
@@ -81,6 +86,8 @@ export function useAgent() {
         // PC Control
         captureScreenshot, getUIElements, listWindows, runPCTask, getTaskSteps,
         killSwitch, resetKillSwitch,
+        // Agents
+        findAgent, getAgents,
         // Mesh
         getMeshNodes, sendMeshTask,
     };

@@ -22,7 +22,7 @@ const SUGGESTIONS = [
 ];
 
 export default function Chat() {
-  const { processMessage } = useAgent();
+  const { processMessage, runPCTask, getTaskSteps } = useAgent();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [typing, setTyping] = useState(false);
@@ -35,6 +35,20 @@ export default function Chat() {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages, typing]);
+
+  // Detect if the user is asking for a PC action vs a question
+  const isActionRequest = (text: string): boolean => {
+    const lower = text.toLowerCase();
+    const actionWords = [
+      'open', 'abre', 'abrir', 'click', 'ejecuta', 'run', 'launch',
+      'organize', 'organiza', 'move', 'mover', 'create folder', 'crear carpeta',
+      'install', 'instala', 'download', 'descarga', 'delete', 'borr',
+      'type', 'escrib', 'close', 'cerr', 'copy', 'copi', 'paste', 'peg',
+      'go to', 'navigate', 'navega', 'search for', 'busca',
+      'take screenshot', 'captura', 'screenshot',
+    ];
+    return actionWords.some(w => lower.includes(w));
+  };
 
   const handleSend = async (text?: string) => {
     const msg = (text ?? input).trim();
@@ -51,22 +65,67 @@ export default function Chat() {
     setTyping(true);
 
     try {
-      const result = await processMessage(msg);
-      const agentMsg: Message = {
-        id: result.task_id,
-        role: 'agent',
-        content: result.output || (result.error ? `Error: ${result.error}` : 'Task completed.'),
-        timestamp: new Date().toISOString(),
-        model: result.model ?? 'unknown',
-        cost: result.cost,
-        latency: result.duration_ms,
-        subtasks: [
-          { label: 'Parse input', status: 'done' },
-          { label: 'Execute command', status: 'done' },
-          { label: 'Format output', status: 'done' },
-        ],
-      };
-      setMessages((m) => [...m, agentMsg]);
+      if (isActionRequest(msg)) {
+        // PC Control mode — agent takes action on the computer
+        const pcResult = await runPCTask(msg);
+        const agentMsg: Message = {
+          id: pcResult.task_id,
+          role: 'agent',
+          content: `🖥️ **PC Task started**\n\nI'm now controlling your PC to: "${msg}"\n\nTask ID: \`${pcResult.task_id}\`\nStatus: ${pcResult.status}\n\n_Watch the screen — I'm working on it..._`,
+          timestamp: new Date().toISOString(),
+          model: 'vision',
+          subtasks: [
+            { label: 'Capture screen', status: 'running' },
+            { label: 'Plan actions', status: 'pending' },
+            { label: 'Execute actions', status: 'pending' },
+          ],
+        };
+        setMessages((m) => [...m, agentMsg]);
+
+        // Poll for completion (check steps every 3s)
+        const pollInterval = setInterval(async () => {
+          try {
+            const steps = await getTaskSteps(pcResult.task_id);
+            if (steps.steps.length > 0) {
+              const lastStep = steps.steps[steps.steps.length - 1];
+              if (lastStep.action_type === 'task_complete' || steps.steps.length >= 20) {
+                clearInterval(pollInterval);
+                const doneMsg: Message = {
+                  id: `done-${Date.now()}`,
+                  role: 'agent',
+                  content: `✅ **Task completed** in ${steps.steps.length} steps.\n\n${lastStep.description || 'Done.'}`,
+                  timestamp: new Date().toISOString(),
+                  subtasks: steps.steps.map((s: any, i: number) => ({
+                    label: `Step ${i + 1}: ${s.action_type}`,
+                    status: s.success ? 'done' as const : 'pending' as const,
+                  })),
+                };
+                setMessages((m) => [...m, doneMsg]);
+              }
+            }
+          } catch { /* ignore polling errors */ }
+        }, 3000);
+
+        // Auto-stop polling after 2 minutes
+        setTimeout(() => clearInterval(pollInterval), 120000);
+
+      } else {
+        // Chat mode — just talk to the LLM
+        const result = await processMessage(msg);
+        const agentMsg: Message = {
+          id: result.task_id,
+          role: 'agent',
+          content: result.output || (result.error ? `Error: ${result.error}` : 'Task completed.'),
+          timestamp: new Date().toISOString(),
+          model: result.model ?? 'unknown',
+          cost: result.cost,
+          latency: result.duration_ms,
+          subtasks: [
+            { label: `Agent: ${(result as any).agent || 'Assistant'}`, status: 'done' },
+          ],
+        };
+        setMessages((m) => [...m, agentMsg]);
+      }
     } catch (err: any) {
       const errorMsg: Message = {
         id: `err-${Date.now()}`,
