@@ -12,138 +12,103 @@ use std::time::Instant;
 use tauri::Emitter;
 use tracing::{info, warn};
 
-const MAX_STEPS: u32 = 30;
+const MAX_TURNS: u32 = 10;
 const MAX_RETRIES: u32 = 2;
 
-const PC_MASTER_PROMPT: &str = r#"You are AgentOS, an AI that CONTROLS a Windows 11 PC via PowerShell. You receive a task and you MUST execute it.
+const SYSTEM_PROMPT: &str = r#"You are AgentOS, an AI agent that CONTROLS a Windows 11 PC. You execute tasks step by step until they are FULLY completed.
 
-Respond with a JSON object in ONE of these formats:
+You work in a LOOP. Each turn you receive:
+- The original task
+- Results from previous steps (what commands ran, what output they produced, any errors)
+- You decide the NEXT action
 
-{"mode": "command", "commands": ["command1", "command2"], "explanation": "brief description"}
-{"mode": "screen", "reason": "why I need to see the screen"}
-{"mode": "done", "summary": "what was accomplished", "output": "data for the user"}
-{"mode": "need_info", "question": "what you need to know"}
-{"mode": "chat", "response": "conversational answer"}
+Respond with ONE JSON object per turn:
 
-CRITICAL POWERSHELL RULES:
-1. ALL commands in the "commands" array are joined with "; " and run as ONE script
-2. Use SINGLE QUOTES for literal strings: 'text here'
-3. Use DOUBLE QUOTES only when you need variable expansion: "$env:USERPROFILE\path"
-4. NEVER use backtick-escaping of $ inside double quotes. Instead use single quotes or -f format operator
-5. For iterating drives, use: Get-PSDrive -PSProvider FileSystem | ForEach-Object { $d = $_.Root; ... }
-6. Use -ErrorAction SilentlyContinue liberally to prevent non-critical errors from crashing the script
-7. Always end with Write-Output to produce visible results
-8. When a command might produce no output, add a fallback: Write-Output 'Done'
-9. For hidden files: Get-ChildItem -Force -Hidden
-10. For all drives: Get-PSDrive -PSProvider FileSystem gives you C, D, etc.
-11. NEVER use $drive:\ syntax — it's invalid. Use Join-Path or string concatenation: "$($d.Root)folder"
-12. Wrap complex scripts in try/catch: try { ... } catch { Write-Output "Error: $_" }
-13. Use Format-Table -AutoSize or Format-List for readable output
-14. For file sizes use: @{N='Size(MB)';E={[math]::Round($_.Length/1MB,2)}}
-15. Start-Process for GUI apps (they get their own window, don't block)
-16. For Windows Settings use: Start-Process 'ms-settings:page'
+{"mode":"command","commands":["ps command"],"explanation":"what this does"}
+{"mode":"multi","steps":[{"commands":["cmd1"],"explanation":"step 1"},{"commands":["cmd2"],"explanation":"step 2"}]}
+{"mode":"screen","reason":"why I need to see the screen"}
+{"mode":"done","summary":"what was accomplished","output":"final data for user"}
+{"mode":"chat","response":"conversational answer"}
+{"mode":"need_info","question":"what I need to know"}
 
-WHAT YOU CAN DO:
-- Open ANY app, folder, URL, Windows settings page
-- Create, read, edit, move, copy, rename, delete files and folders
-- Organize files by type, date, size, project
-- Search files by name, extension, content (Select-String)
-- Compress/extract archives (Compress-Archive, Expand-Archive)
-- Download files (Invoke-WebRequest)
-- System info: disks, memory, CPU, network, battery, OS version
-- Network: ping, DNS, adapters, wifi, IP config
-- Processes: list, kill, start, monitor
-- Services: list, start, stop, restart
-- Registry: read, write (HKCU, HKLM)
-- Installed programs: Get-Package, Get-WmiObject Win32_Product
-- Windows config: dark/light mode, wallpaper, display, sound, bluetooth
-- Environment variables: get, set, remove
-- Scheduled tasks: create, list, remove
-- User accounts: list, info
-- Clipboard: read, write
-- Date/time: get, set timezone
-- Power: sleep, restart, shutdown (ONLY if explicitly asked)
-- PDF text extraction: requires specific approach per tool available
-- Excel/CSV: Import-Csv, Export-Csv, basic data manipulation
-- JSON/XML: ConvertFrom-Json, ConvertTo-Json, [xml] cast
-- Web scraping: Invoke-WebRequest with HTML parsing
-- Git operations: git status, git log, git pull, etc.
-- Docker: docker ps, docker-compose, etc. (if installed)
-- Python/Node scripts: python -c "code", node -e "code" (if installed)
+KEY BEHAVIORS:
+1. For COMPLEX tasks, use "multi" mode — it runs steps sequentially, each step sees output of previous
+2. For SIMPLE tasks, use "command" mode — single execution
+3. After a command runs, you'll see its output. If it needs follow-up, you get another turn
+4. Use "done" when the ENTIRE task is finished — include useful output for the user
+5. If a previous step failed, analyze the error and try a different approach
+6. You have MEMORY of all previous steps in this task — use it
 
-WHEN TO USE CHAT MODE:
-- Abstract questions: "what is machine learning", "explain docker"
-- Opinions: "what's the best programming language"
-- General knowledge that doesn't require PC access
+POWERSHELL RULES:
+- Single quotes for literals: 'text'
+- Double quotes for variable expansion: "$env:USERPROFILE\path"
+- NEVER use $var:\ syntax — use Join-Path or "$($var)path"
+- Use -ErrorAction SilentlyContinue for non-critical ops
+- End scripts with Write-Output for visible results
+- try/catch for robustness
+- Start-Process for GUI apps (non-blocking)
+- For Windows Settings: Start-Process 'ms-settings:page'
+- For drives: Get-PSDrive -PSProvider FileSystem
+- For hidden files: Get-ChildItem -Force -Hidden
+- Format-Table -AutoSize for readable output
 
-WHEN TO USE SCREEN MODE:
-- Click buttons in GUI apps that can't be automated via command line
-- Read visual content (images, diagrams)
-- Interact with web apps in the browser
-- Fill forms in applications
+CAPABILITIES:
+Files: Create, read, edit, move, copy, rename, delete, search (Get-ChildItem, Select-String)
+Apps: Open any app, folder, URL, Windows settings
+System: Disk info, RAM, CPU, processes, services, network, battery, OS info
+Config: Dark mode, wallpaper, env vars, registry, scheduled tasks
+Archives: Compress-Archive, Expand-Archive
+Network: Invoke-WebRequest, Test-NetConnection, Get-NetAdapter
+Data: Import-Csv, ConvertFrom-Json, [xml], Excel COM automation
+Dev: git, docker, python, node, npm, cargo (if installed)
+Office: Word/Excel/PowerPoint via COM automation
+PDF: Text extraction approaches
 
-EXAMPLES:
+MULTI-STEP EXAMPLE:
+User: "descarga una imagen de internet, ponla como wallpaper, y crea un backup de mi wallpaper actual"
 
-"abre la carpeta descargas"
-{"mode":"command","commands":["Start-Process explorer.exe \"$env:USERPROFILE\\Downloads\""],"explanation":"Opening Downloads"}
+{"mode":"multi","steps":[
+  {"commands":["$current = (Get-ItemProperty 'HKCU:\\Control Panel\\Desktop').Wallpaper; Write-Output \"Current wallpaper: $current\"; Copy-Item $current \"$env:USERPROFILE\\Desktop\\wallpaper_backup.jpg\" -Force -ErrorAction SilentlyContinue; Write-Output 'Backup created'"],"explanation":"Backup current wallpaper"},
+  {"commands":["Invoke-WebRequest -Uri 'https://picsum.photos/1920/1080' -OutFile \"$env:USERPROFILE\\Pictures\\new_wallpaper.jpg\"; Write-Output 'Downloaded new wallpaper'"],"explanation":"Download new image"},
+  {"commands":["Add-Type -TypeDefinition 'using System.Runtime.InteropServices; public class W { [DllImport(\"user32.dll\", CharSet=CharSet.Auto)] public static extern int SystemParametersInfo(int a, int b, string c, int d); }'; [W]::SystemParametersInfo(0x0014, 0, \"$env:USERPROFILE\\Pictures\\new_wallpaper.jpg\", 0x01|0x02); Write-Output 'Wallpaper changed!'"],"explanation":"Set as wallpaper"}
+],"explanation":"Backing up wallpaper, downloading new one, setting it"}
 
-"que archivos hay en mi escritorio"
-{"mode":"command","commands":["Get-ChildItem \"$env:USERPROFILE\\Desktop\" | Format-Table Name, Length, LastWriteTime -AutoSize"],"explanation":"Listing Desktop"}
+CHAIN EXAMPLE:
+User: "analiza mi disco, encuentra los 5 archivos mas grandes, y crea un reporte en el escritorio"
 
-"cuanto espacio libre tengo"
-{"mode":"command","commands":["Get-PSDrive -PSProvider FileSystem | Where-Object {$_.Used -gt 0} | Select-Object Name, @{N='Used(GB)';E={[math]::Round($_.Used/1GB,2)}}, @{N='Free(GB)';E={[math]::Round($_.Free/1GB,2)}}, @{N='Total(GB)';E={[math]::Round(($_.Used+$_.Free)/1GB,2)}} | Format-Table -AutoSize"],"explanation":"Disk space info"}
-
-"tengo archivos ocultos?"
-{"mode":"command","commands":["$drives = (Get-PSDrive -PSProvider FileSystem).Root; $total = 0; foreach($r in $drives){ try{ $hidden = Get-ChildItem -Path $r -Hidden -File -ErrorAction SilentlyContinue | Measure-Object; $total += $hidden.Count; Write-Output \"$r : $($hidden.Count) hidden files\" }catch{} }; Write-Output \"`nTotal hidden files: $total\""],"explanation":"Counting hidden files per drive"}
-
-"crea un archivo en el escritorio que diga hola"
-{"mode":"command","commands":["Set-Content -Path \"$env:USERPROFILE\\Desktop\\hola.txt\" -Value 'Hola Mundo' -Encoding UTF8; Write-Output 'Created hola.txt on Desktop'"],"explanation":"Creating text file"}
-
-"organiza mis descargas por tipo"
-{"mode":"command","commands":["$dl = \"$env:USERPROFILE\\Downloads\"; $map = @{Imagenes='.jpg','.jpeg','.png','.gif','.bmp','.svg','.webp';Documentos='.pdf','.doc','.docx','.xls','.xlsx','.ppt','.pptx','.txt';Videos='.mp4','.avi','.mkv','.mov';Audio='.mp3','.wav','.flac','.aac';Archivos='.zip','.rar','.7z';Codigo='.py','.js','.ts','.html','.css','.rs'}; foreach($cat in $map.Keys){ $dir = Join-Path $dl $cat; if(!(Test-Path $dir)){New-Item -ItemType Directory -Path $dir -Force | Out-Null}; foreach($ext in $map[$cat]){ Get-ChildItem -Path \"$dl\\*$ext\" -File -ErrorAction SilentlyContinue | Move-Item -Destination $dir -Force } }; Get-ChildItem $dl -Directory | ForEach-Object { Write-Output \"$($_.Name): $((Get-ChildItem $_.FullName -File).Count) files\" }"],"explanation":"Organizing by file type"}
-
-"pon modo oscuro"
-{"mode":"command","commands":["Set-ItemProperty -Path 'HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize' -Name 'AppsUseLightTheme' -Value 0; Set-ItemProperty -Path 'HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize' -Name 'SystemUsesLightTheme' -Value 0; Write-Output 'Dark mode enabled'"],"explanation":"Enabling dark mode"}
-
-"cual es el archivo mas grande en descargas"
-{"mode":"command","commands":["Get-ChildItem \"$env:USERPROFILE\\Downloads\" -File -Recurse -ErrorAction SilentlyContinue | Sort-Object Length -Descending | Select-Object -First 10 Name, @{N='Size(MB)';E={[math]::Round($_.Length/1MB,2)}}, LastWriteTime | Format-Table -AutoSize"],"explanation":"Top 10 largest files in Downloads"}
-
-"que programas tengo instalados"
-{"mode":"command","commands":["Get-Package -ErrorAction SilentlyContinue | Select-Object Name, Version | Sort-Object Name | Format-Table -AutoSize"],"explanation":"Listing installed packages"}
-
-"busca archivos que contengan 'password' en documentos"
-{"mode":"command","commands":["Get-ChildItem \"$env:USERPROFILE\\Documents\" -File -Recurse -Include '*.txt','*.doc','*.csv','*.log' -ErrorAction SilentlyContinue | Select-String -Pattern 'password' -SimpleMatch | Select-Object -First 20 Path, LineNumber, Line | Format-Table -AutoSize"],"explanation":"Searching file contents"}
-
-"abre youtube"
-{"mode":"command","commands":["Start-Process 'https://www.youtube.com'"],"explanation":"Opening YouTube in default browser"}
-
-"que hora es"
-{"mode":"command","commands":["Get-Date -Format 'dddd, dd MMMM yyyy HH:mm:ss'"],"explanation":"Current date and time"}
-
-"informacion de mi sistema"
-{"mode":"command","commands":["$os = Get-CimInstance Win32_OperatingSystem; $cpu = Get-CimInstance Win32_Processor; $ram = [math]::Round($os.TotalVisibleMemorySize/1MB,1); $freeRam = [math]::Round($os.FreePhysicalMemory/1MB,1); Write-Output \"OS: $($os.Caption) $($os.Version)`nCPU: $($cpu.Name)`nRAM: $($freeRam)GB free / $($ram)GB total`nComputer: $env:COMPUTERNAME`nUser: $env:USERNAME\""],"explanation":"System information summary"}
+{"mode":"multi","steps":[
+  {"commands":["Get-PSDrive -PSProvider FileSystem | Where-Object {$_.Used -gt 0} | Select-Object Name, @{N='Used(GB)';E={[math]::Round($_.Used/1GB,2)}}, @{N='Free(GB)';E={[math]::Round($_.Free/1GB,2)}} | Format-Table -AutoSize"],"explanation":"Get disk usage"},
+  {"commands":["$big = Get-ChildItem 'C:\\Users' -Recurse -File -ErrorAction SilentlyContinue | Sort-Object Length -Descending | Select-Object -First 5 FullName, @{N='Size(MB)';E={[math]::Round($_.Length/1MB,2)}}; $big | Format-Table -AutoSize; $big"],"explanation":"Find 5 largest files"},
+  {"commands":["$report = \"Disk Report - $(Get-Date)`n`nDisk Usage:`n\"; Get-PSDrive -PSProvider FileSystem | Where-Object {$_.Used -gt 0} | ForEach-Object { $report += \"$($_.Name): $([math]::Round($_.Used/1GB,2))GB used, $([math]::Round($_.Free/1GB,2))GB free`n\" }; $report += \"`nTop 5 Largest Files:`n\"; Get-ChildItem 'C:\\Users' -Recurse -File -ErrorAction SilentlyContinue | Sort-Object Length -Descending | Select-Object -First 5 | ForEach-Object { $report += \"$([math]::Round($_.Length/1MB,2))MB - $($_.FullName)`n\" }; Set-Content \"$env:USERPROFILE\\Desktop\\disk_report.txt\" $report -Encoding UTF8; Write-Output $report"],"explanation":"Create report on desktop"}
+],"explanation":"Full disk analysis with report"}
 "#;
 
-const RETRY_PROMPT: &str = r#"The PowerShell command you generated FAILED with this error:
-
+const RETRY_PROMPT: &str = r#"The command FAILED with this error:
 ```
 {ERROR}
 ```
+Original command: {COMMAND}
 
-The original command was:
-```
-{COMMAND}
-```
-
-Fix the command. Common issues:
-- Don't use $variable:\ syntax (invalid). Use Join-Path or "$($var)\path"
-- Use single quotes for literals, double quotes only for variable expansion
-- Add -ErrorAction SilentlyContinue for non-critical operations
-- Wrap in try/catch for robustness
-
-Respond with the SAME JSON format: {"mode":"command","commands":[...],"explanation":"..."}
+Fix it. Common issues: don't use $var:\ syntax, use Join-Path, add -ErrorAction SilentlyContinue, wrap in try/catch.
+Respond with: {"mode":"command","commands":[...],"explanation":"..."}
 "#;
 
+const FOLLOWUP_PROMPT: &str = r#"PREVIOUS STEP RESULT:
+Command: {COMMAND}
+Success: {SUCCESS}
+Output:
+```
+{OUTPUT}
+```
+
+The original task was: "{TASK}"
+{REMAINING}
+
+Based on this result, what should happen next? If the task is complete, use "done" mode with the final output. If more steps are needed, use "command" mode.
+"#;
+
+// ═══════════════════════════════════════════════════════════════════
+// MAIN ENGINE — MULTI-TURN EXECUTION LOOP
 // ═══════════════════════════════════════════════════════════════════
 
 pub async fn run_task(
@@ -159,212 +124,273 @@ pub async fn run_task(
     let gateway = Gateway::new(settings);
     let mut step_history: Vec<StepRecord> = Vec::new();
     let mut accumulated_output = String::new();
+    let mut conversation: Vec<(String, String)> = Vec::new(); // (role, content) history
 
-    info!(task_id, description, "Starting PC task execution");
+    info!(task_id, description, "Starting PC task");
 
-    let _ = app_handle.emit("agent:step_started", serde_json::json!({
-        "task_id": task_id, "step_number": 0,
-    }));
+    emit(app_handle, "agent:step_started", task_id, 0, "Planning...");
 
-    // Ask LLM what to do
-    let plan = gateway
-        .complete_with_system(description, Some(PC_MASTER_PROMPT), settings)
+    // Initial LLM call
+    let plan = gateway.complete_with_system(description, Some(SYSTEM_PROMPT), settings)
         .await
-        .map_err(|e| {
-            save_task_output(db_path, task_id, &format!("LLM error: {}", e));
-            update_task_status(db_path, task_id, "failed");
-            e
-        })?;
+        .map_err(|e| { fail(db_path, task_id, &e); e })?;
 
-    let plan_text = plan.content.trim().to_string();
-    info!(task_id, plan = %plan_text, "LLM response");
+    let mut current_response = plan.content.trim().to_string();
+    conversation.push(("user".into(), description.to_string()));
+    conversation.push(("assistant".into(), current_response.clone()));
 
-    let plan_json = match extract_json(&plan_text) {
-        Some(json) => json,
-        None => {
-            // LLM didn't return JSON — show raw response as chat
-            save_task_output(db_path, task_id, &plan_text);
-            update_task_status(db_path, task_id, "completed");
-            accumulated_output = plan_text;
-            // Jump to emit
-            let duration_ms = start.elapsed().as_millis() as u64;
-            let _ = app_handle.emit("agent:task_completed", serde_json::json!({
-                "task_id": task_id, "success": true, "output": accumulated_output,
-                "steps": 0, "duration_ms": duration_ms,
-            }));
-            return Ok(TaskExecutionResult {
-                task_id: task_id.to_string(), success: true,
-                steps: vec![], total_cost: 0.0, duration_ms,
-            });
+    // Multi-turn execution loop
+    for turn in 0..MAX_TURNS {
+        if kill_switch.load(Ordering::Relaxed) {
+            update_task_status(db_path, task_id, "killed");
+            return Err("Kill switch activated".to_string());
         }
-    };
 
-    let mode = plan_json["mode"].as_str().unwrap_or("command");
-
-    match mode {
-        "command" => {
-            let commands = plan_json["commands"]
-                .as_array()
-                .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
-                .unwrap_or_default();
-            let explanation = plan_json["explanation"].as_str().unwrap_or("");
-
-            if commands.is_empty() {
-                accumulated_output = if !explanation.is_empty() {
-                    explanation.to_string()
-                } else {
-                    "No commands generated".to_string()
-                };
-                save_task_output(db_path, task_id, &accumulated_output);
+        let plan_json = match extract_json(&current_response) {
+            Some(j) => j,
+            None => {
+                // Raw text response — treat as chat
+                accumulated_output = current_response.clone();
                 update_task_status(db_path, task_id, "completed");
-            } else {
-                let full_script = commands.join("; ");
-                info!(task_id, script = %full_script, "Executing PowerShell");
-
-                let _ = app_handle.emit("agent:step_started", serde_json::json!({
-                    "task_id": task_id, "step_number": 1, "description": explanation,
-                }));
-
-                let is_gui = full_script.to_lowercase().contains("start-process");
-                let timeout = if is_gui { 30 } else { settings.cli_timeout };
-
-                // Execute with retry on failure
-                let (success, output) = execute_with_retry(
-                    &full_script, timeout, description, &gateway, settings, task_id,
-                ).await;
-
-                if is_gui {
-                    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
-                }
-
-                let screenshot_path = take_screenshot(screenshots_dir).await;
-                let sp = screenshot_path.as_ref().map(|p| p.to_string_lossy().to_string());
-
-                let action = AgentAction::RunCommand { command: full_script.clone(), shell: ShellType::PowerShell };
-                let result = ExecutionResult {
-                    method: ExecutionMethod::Terminal, success,
-                    output: Some(output.clone()), screenshot_path: sp.clone(),
-                    duration_ms: start.elapsed().as_millis() as u64,
-                };
-                save_step(db_path, task_id, 1, &action, &screenshot_path.unwrap_or_default(), &result);
-
-                let _ = app_handle.emit("agent:step_completed", serde_json::json!({
-                    "task_id": task_id, "step_number": 1, "success": success,
-                }));
-
-                step_history.push(StepRecord {
-                    step_number: 1,
-                    action: AgentAction::TaskComplete { summary: output.clone() },
-                    result, screenshot_path: sp,
-                });
-
-                accumulated_output = output;
-                update_task_status(db_path, task_id, if success { "completed" } else { "failed" });
+                break;
             }
-        }
+        };
 
-        "screen" => {
-            let reason = plan_json["reason"].as_str().unwrap_or("Complex UI task");
-            info!(task_id, reason, "Entering vision mode");
+        let mode = plan_json["mode"].as_str().unwrap_or("command");
+        info!(task_id, turn, mode, "Processing turn");
 
-            for step_number in 1..=MAX_STEPS {
-                if kill_switch.load(Ordering::Relaxed) {
-                    update_task_status(db_path, task_id, "killed");
-                    return Err("Kill switch activated".to_string());
-                }
+        match mode {
+            "multi" => {
+                // Multi-step: execute each step sequentially, feeding output forward
+                let steps = plan_json["steps"].as_array().cloned().unwrap_or_default();
+                let mut all_outputs = Vec::new();
 
-                let screenshot = tokio::task::spawn_blocking({
-                    let sd = screenshots_dir.to_path_buf();
-                    move || {
-                        let data = capture::capture_full_screen().map_err(|e| e.to_string())?;
-                        let path = capture::save_screenshot(&data, &sd).map_err(|e| e.to_string())?;
-                        let b64 = capture::to_base64_jpeg(&data, 80).map_err(|e| e.to_string())?;
-                        Ok::<_, String>((path, b64))
-                    }
-                }).await.map_err(|e| e.to_string())??;
+                for (i, step_def) in steps.iter().enumerate() {
+                    if kill_switch.load(Ordering::Relaxed) { break; }
 
-                let (screenshot_path, screenshot_b64) = screenshot;
-                let _ = app_handle.emit("agent:step_started", serde_json::json!({
-                    "task_id": task_id, "step_number": step_number,
-                }));
+                    let cmds = step_def["commands"].as_array()
+                        .map(|a| a.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
+                        .unwrap_or_default();
+                    let expl = step_def["explanation"].as_str().unwrap_or("");
 
-                let action = match vision::plan_next_action(
-                    &screenshot_b64, description, &step_history, settings, &gateway,
-                ).await {
-                    Ok(a) => a,
-                    Err(e) => {
-                        warn!(task_id, error = %e, "Vision failed");
-                        accumulated_output = format!("Vision error: {}", e);
-                        update_task_status(db_path, task_id, "failed");
+                    if cmds.is_empty() { continue; }
+
+                    let script = cmds.join("; ");
+                    let step_num = (turn * 10 + i as u32) + 1;
+
+                    emit(app_handle, "agent:step_started", task_id, step_num, expl);
+                    info!(task_id, step = step_num, script = %script, "Multi-step executing");
+
+                    let is_gui = script.to_lowercase().contains("start-process");
+                    let timeout = if is_gui { 30 } else { settings.cli_timeout };
+
+                    let (success, output) = execute_with_retry(
+                        &script, timeout, description, &gateway, settings, task_id,
+                    ).await;
+
+                    if is_gui { tokio::time::sleep(std::time::Duration::from_millis(1500)).await; }
+
+                    let sp = take_screenshot(screenshots_dir).await;
+                    let sp_str = sp.as_ref().map(|p| p.to_string_lossy().to_string());
+
+                    let action = AgentAction::RunCommand { command: script.clone(), shell: ShellType::PowerShell };
+                    let result = ExecutionResult {
+                        method: ExecutionMethod::Terminal, success,
+                        output: Some(output.clone()), screenshot_path: sp_str.clone(),
+                        duration_ms: start.elapsed().as_millis() as u64,
+                    };
+                    save_step(db_path, task_id, step_num, &action, &sp.unwrap_or_default(), &result);
+
+                    emit(app_handle, "agent:step_completed", task_id, step_num, &format!("success={}", success));
+
+                    step_history.push(StepRecord {
+                        step_number: step_num, action, result, screenshot_path: sp_str,
+                    });
+
+                    all_outputs.push(format!("Step {} ({}): {}", i + 1, expl, if success { &output } else { "FAILED" }));
+
+                    if !success {
+                        // Step failed — ask LLM to handle
+                        let followup = format!(
+                            "Step {} failed.\nCommand: {}\nError: {}\n\nOriginal task: \"{}\"\nShould I retry differently or skip this step?",
+                            i + 1, script, output, description
+                        );
+                        conversation.push(("user".into(), followup.clone()));
+
+                        if let Ok(fix) = gateway.complete_with_system(&followup, Some(SYSTEM_PROMPT), settings).await {
+                            current_response = fix.content.trim().to_string();
+                            conversation.push(("assistant".into(), current_response.clone()));
+                            // Will be processed in the next turn
+                        }
                         break;
                     }
-                };
+                }
 
-                if let AgentAction::TaskComplete { ref summary } = action {
-                    accumulated_output = summary.clone();
+                accumulated_output = all_outputs.join("\n\n");
+
+                // If all steps completed successfully, we're done
+                if step_history.last().map(|s| s.result.success).unwrap_or(false) {
                     update_task_status(db_path, task_id, "completed");
-                    step_history.push(StepRecord {
-                        step_number, action,
-                        result: ExecutionResult {
-                            method: ExecutionMethod::Screen, success: true,
-                            output: Some(accumulated_output.clone()),
-                            screenshot_path: Some(screenshot_path.to_string_lossy().to_string()),
-                            duration_ms: 0,
-                        },
-                        screenshot_path: Some(screenshot_path.to_string_lossy().to_string()),
-                    });
+                    break;
+                }
+            }
+
+            "command" => {
+                let cmds = plan_json["commands"].as_array()
+                    .map(|a| a.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
+                    .unwrap_or_default();
+                let expl = plan_json["explanation"].as_str().unwrap_or("");
+
+                if cmds.is_empty() {
+                    accumulated_output = if !expl.is_empty() { expl.to_string() } else { "No commands".to_string() };
+                    update_task_status(db_path, task_id, "completed");
                     break;
                 }
 
-                let result = match executor::execute(&action, settings.cli_timeout, kill_switch).await {
-                    Ok(r) => r,
-                    Err(e) => ExecutionResult {
-                        method: ExecutionMethod::Screen, success: false,
-                        output: Some(e), screenshot_path: None, duration_ms: 0,
-                    },
-                };
+                let script = cmds.join("; ");
+                let step_num = (turn + 1) as u32;
 
-                save_step(db_path, task_id, step_number, &action, &screenshot_path, &result);
-                let _ = app_handle.emit("agent:step_completed", serde_json::json!({
-                    "task_id": task_id, "step_number": step_number, "success": result.success,
-                }));
+                emit(app_handle, "agent:step_started", task_id, step_num, expl);
+
+                let is_gui = script.to_lowercase().contains("start-process");
+                let timeout = if is_gui { 30 } else { settings.cli_timeout };
+
+                let (success, output) = execute_with_retry(
+                    &script, timeout, description, &gateway, settings, task_id,
+                ).await;
+
+                if is_gui { tokio::time::sleep(std::time::Duration::from_millis(1500)).await; }
+
+                let sp = take_screenshot(screenshots_dir).await;
+                let sp_str = sp.as_ref().map(|p| p.to_string_lossy().to_string());
+
+                let action = AgentAction::RunCommand { command: script.clone(), shell: ShellType::PowerShell };
+                let result = ExecutionResult {
+                    method: ExecutionMethod::Terminal, success,
+                    output: Some(output.clone()), screenshot_path: sp_str.clone(),
+                    duration_ms: start.elapsed().as_millis() as u64,
+                };
+                save_step(db_path, task_id, step_num, &action, &sp.unwrap_or_default(), &result);
+                emit(app_handle, "agent:step_completed", task_id, step_num, &format!("success={}", success));
 
                 step_history.push(StepRecord {
-                    step_number, action, result,
-                    screenshot_path: Some(screenshot_path.to_string_lossy().to_string()),
+                    step_number: step_num, action, result, screenshot_path: sp_str,
                 });
 
-                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                // Decide if we need a follow-up turn
+                let remaining_steps = plan_json["remaining_steps"].as_u64().unwrap_or(0);
+                if remaining_steps > 0 || (!success && turn < MAX_TURNS - 1) {
+                    // Ask LLM what to do next
+                    let remaining_msg = if remaining_steps > 0 {
+                        format!("There are {} more steps planned.", remaining_steps)
+                    } else if !success {
+                        "The command failed. Try a different approach.".to_string()
+                    } else {
+                        "Decide if the task is complete or needs more work.".to_string()
+                    };
+                    let followup = FOLLOWUP_PROMPT
+                        .replace("{COMMAND}", &script)
+                        .replace("{SUCCESS}", if success { "true" } else { "false" })
+                        .replace("{OUTPUT}", &output[..output.len().min(2000)])
+                        .replace("{TASK}", description)
+                        .replace("{REMAINING}", &remaining_msg);
+
+                    conversation.push(("user".into(), followup.clone()));
+
+                    if let Ok(next) = gateway.complete_with_system(&followup, Some(SYSTEM_PROMPT), settings).await {
+                        current_response = next.content.trim().to_string();
+                        conversation.push(("assistant".into(), current_response.clone()));
+                        continue; // Next turn
+                    }
+                }
+
+                accumulated_output = output;
+                update_task_status(db_path, task_id, if success { "completed" } else { "failed" });
+                break;
             }
 
-            if !step_history.last().map(|s| matches!(s.action, AgentAction::TaskComplete { .. })).unwrap_or(false) {
-                if accumulated_output.is_empty() { accumulated_output = "Task did not complete within step limit".to_string(); }
-                update_task_status(db_path, task_id, "failed");
+            "screen" => {
+                let reason = plan_json["reason"].as_str().unwrap_or("UI task");
+                info!(task_id, reason, "Vision mode");
+
+                // Run vision loop for up to 10 steps within this turn
+                for vs in 1..=10u32 {
+                    if kill_switch.load(Ordering::Relaxed) { break; }
+
+                    let screenshot = tokio::task::spawn_blocking({
+                        let sd = screenshots_dir.to_path_buf();
+                        move || {
+                            let data = capture::capture_full_screen().map_err(|e| e.to_string())?;
+                            let path = capture::save_screenshot(&data, &sd).map_err(|e| e.to_string())?;
+                            let b64 = capture::to_base64_jpeg(&data, 80).map_err(|e| e.to_string())?;
+                            Ok::<_, String>((path, b64))
+                        }
+                    }).await.map_err(|e| e.to_string())??;
+
+                    let (sp, b64) = screenshot;
+
+                    let action = match vision::plan_next_action(&b64, description, &step_history, settings, &gateway).await {
+                        Ok(a) => a,
+                        Err(e) => { accumulated_output = format!("Vision error: {}", e); break; }
+                    };
+
+                    if let AgentAction::TaskComplete { ref summary } = action {
+                        accumulated_output = summary.clone();
+                        update_task_status(db_path, task_id, "completed");
+                        break;
+                    }
+
+                    let result = match executor::execute(&action, settings.cli_timeout, kill_switch).await {
+                        Ok(r) => r,
+                        Err(e) => ExecutionResult {
+                            method: ExecutionMethod::Screen, success: false,
+                            output: Some(e), screenshot_path: None, duration_ms: 0,
+                        },
+                    };
+
+                    save_step(db_path, task_id, turn * 10 + vs, &action, &sp, &result);
+                    step_history.push(StepRecord {
+                        step_number: turn * 10 + vs, action, result,
+                        screenshot_path: Some(sp.to_string_lossy().to_string()),
+                    });
+
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                }
+
+                if accumulated_output.is_empty() {
+                    accumulated_output = "Screen task completed".to_string();
+                }
+                update_task_status(db_path, task_id, "completed");
+                break;
             }
-        }
 
-        "done" => {
-            accumulated_output = plan_json["output"].as_str()
-                .or(plan_json["summary"].as_str())
-                .unwrap_or("Task completed").to_string();
-            update_task_status(db_path, task_id, "completed");
-        }
+            "done" => {
+                accumulated_output = plan_json["output"].as_str()
+                    .or(plan_json["summary"].as_str())
+                    .unwrap_or("Task completed").to_string();
+                update_task_status(db_path, task_id, "completed");
+                break;
+            }
 
-        "need_info" => {
-            accumulated_output = plan_json["question"].as_str()
-                .unwrap_or("I need more information").to_string();
-            update_task_status(db_path, task_id, "completed");
-        }
+            "chat" => {
+                accumulated_output = plan_json["response"].as_str()
+                    .unwrap_or("").to_string();
+                update_task_status(db_path, task_id, "completed");
+                break;
+            }
 
-        "chat" => {
-            accumulated_output = plan_json["response"].as_str()
-                .unwrap_or("I'm not sure how to help with that.").to_string();
-            update_task_status(db_path, task_id, "completed");
-        }
+            "need_info" => {
+                accumulated_output = plan_json["question"].as_str()
+                    .unwrap_or("I need more information").to_string();
+                update_task_status(db_path, task_id, "completed");
+                break;
+            }
 
-        _ => {
-            accumulated_output = format!("Unknown response mode: {}", mode);
-            update_task_status(db_path, task_id, "failed");
+            _ => {
+                accumulated_output = current_response.clone();
+                update_task_status(db_path, task_id, "completed");
+                break;
+            }
         }
     }
 
@@ -392,82 +418,45 @@ pub async fn run_task(
 // ═══════════════════════════════════════════════════════════════════
 
 async fn execute_with_retry(
-    script: &str,
-    timeout: u64,
-    original_task: &str,
-    gateway: &Gateway,
-    settings: &Settings,
-    task_id: &str,
+    script: &str, timeout: u64, task: &str,
+    gateway: &Gateway, settings: &Settings, task_id: &str,
 ) -> (bool, String) {
-    let mut current_script = script.to_string();
+    let mut current = script.to_string();
 
     for attempt in 0..=MAX_RETRIES {
-        let exec_result = hands::cli::run_powershell(&current_script, timeout).await;
-
-        match exec_result {
-            Ok(output) => {
-                if output.exit_code == 0 {
-                    // Success
-                    let out = if !output.stdout.trim().is_empty() {
-                        output.stdout
-                    } else {
-                        "Command executed successfully.".to_string()
-                    };
-                    return (true, out);
+        match hands::cli::run_powershell(&current, timeout).await {
+            Ok(out) => {
+                if out.exit_code == 0 {
+                    let text = if !out.stdout.trim().is_empty() { out.stdout }
+                        else { "Command executed successfully.".into() };
+                    return (true, text);
                 }
 
-                // Command failed — try to auto-correct
-                let error_msg = if !output.stderr.trim().is_empty() {
-                    output.stderr.clone()
-                } else {
-                    format!("Exit code: {}", output.exit_code)
-                };
+                let err = if !out.stderr.trim().is_empty() { out.stderr.clone() }
+                    else { format!("Exit code: {}", out.exit_code) };
 
                 if attempt < MAX_RETRIES {
-                    info!(task_id, attempt, error = %error_msg, "Command failed, asking LLM to fix");
+                    info!(task_id, attempt, "Auto-correcting failed command");
+                    let prompt = format!("Original task: \"{}\"\n\n{}",
+                        task, RETRY_PROMPT.replace("{ERROR}", &err).replace("{COMMAND}", &current));
 
-                    let retry_prompt = RETRY_PROMPT
-                        .replace("{ERROR}", &error_msg)
-                        .replace("{COMMAND}", &current_script);
-
-                    let fix_prompt = format!(
-                        "Original task: \"{}\"\n\n{}",
-                        original_task, retry_prompt
-                    );
-
-                    match gateway.complete_with_system(&fix_prompt, Some(PC_MASTER_PROMPT), settings).await {
-                        Ok(fix_response) => {
-                            if let Some(fix_json) = extract_json(fix_response.content.trim()) {
-                                if let Some(cmds) = fix_json["commands"].as_array() {
-                                    let new_cmds: Vec<&str> = cmds.iter().filter_map(|v| v.as_str()).collect();
-                                    if !new_cmds.is_empty() {
-                                        current_script = new_cmds.join("; ");
-                                        info!(task_id, attempt, new_script = %current_script, "LLM provided fixed command");
-                                        continue;
-                                    }
-                                }
+                    if let Ok(fix) = gateway.complete_with_system(&prompt, Some(SYSTEM_PROMPT), settings).await {
+                        if let Some(j) = extract_json(fix.content.trim()) {
+                            if let Some(cmds) = j["commands"].as_array() {
+                                let new: Vec<&str> = cmds.iter().filter_map(|v| v.as_str()).collect();
+                                if !new.is_empty() { current = new.join("; "); continue; }
                             }
-                        }
-                        Err(e) => {
-                            warn!(task_id, error = %e, "LLM retry failed");
                         }
                     }
                 }
-
-                // All retries exhausted
-                return (false, format!("Error: {}", error_msg));
+                return (false, format!("Error: {}", err));
             }
             Err(e) => {
-                let err = format!("Execution error: {}", e);
-                if attempt >= MAX_RETRIES {
-                    return (false, err);
-                }
-                warn!(task_id, attempt, error = %err, "Execution failed, retrying");
+                if attempt >= MAX_RETRIES { return (false, format!("Execution error: {}", e)); }
             }
         }
     }
-
-    (false, "Failed after all retries".to_string())
+    (false, "Failed after retries".into())
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -475,67 +464,50 @@ async fn execute_with_retry(
 // ═══════════════════════════════════════════════════════════════════
 
 fn extract_json(text: &str) -> Option<serde_json::Value> {
-    if let Ok(v) = serde_json::from_str::<serde_json::Value>(text) {
-        return Some(v);
-    }
-    if let Some(start) = text.find('{') {
-        if let Some(end) = text.rfind('}') {
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text[start..=end]) {
-                return Some(v);
-            }
-        }
-    }
-    None
+    serde_json::from_str(text).ok().or_else(|| {
+        let s = text.find('{')?;
+        let e = text.rfind('}')?;
+        serde_json::from_str(&text[s..=e]).ok()
+    })
+}
+
+fn emit(app: &tauri::AppHandle, event: &str, task_id: &str, step: u32, desc: &str) {
+    let _ = app.emit(event, serde_json::json!({
+        "task_id": task_id, "step_number": step, "description": desc,
+    }));
+}
+
+fn fail(db_path: &Path, task_id: &str, error: &str) {
+    save_task_output(db_path, task_id, &format!("Error: {}", error));
+    update_task_status(db_path, task_id, "failed");
 }
 
 async fn take_screenshot(dir: &Path) -> Option<std::path::PathBuf> {
-    let sd = dir.to_path_buf();
+    let d = dir.to_path_buf();
     tokio::task::spawn_blocking(move || {
-        capture::capture_full_screen()
-            .ok()
-            .and_then(|data| capture::save_screenshot(&data, &sd).ok())
+        capture::capture_full_screen().ok().and_then(|data| capture::save_screenshot(&data, &d).ok())
     }).await.ok().flatten()
 }
 
-fn update_task_status(db_path: &Path, task_id: &str, status: &str) {
-    if let Ok(db) = Database::new(db_path) {
-        let _ = db.update_task_status(task_id, status);
-    }
+fn update_task_status(p: &Path, id: &str, s: &str) {
+    if let Ok(db) = Database::new(p) { let _ = db.update_task_status(id, s); }
 }
 
-fn save_task_output(db_path: &Path, task_id: &str, output: &str) {
-    if let Ok(db) = Database::new(db_path) {
-        let _ = db.update_task_output(task_id, output);
-    }
+fn save_task_output(p: &Path, id: &str, o: &str) {
+    if let Ok(db) = Database::new(p) { let _ = db.update_task_output(id, o); }
 }
 
-fn save_step(
-    db_path: &Path, task_id: &str, step_number: u32,
-    action: &AgentAction, screenshot_path: &Path, result: &ExecutionResult,
-) {
-    if let Ok(db) = Database::new(db_path) {
-        let action_type = match action {
-            AgentAction::Click { .. } => "click",
-            AgentAction::DoubleClick { .. } => "double_click",
-            AgentAction::RightClick { .. } => "right_click",
-            AgentAction::Type { .. } => "type",
-            AgentAction::KeyCombo { .. } => "key_combo",
-            AgentAction::Scroll { .. } => "scroll",
-            AgentAction::RunCommand { .. } => "run_command",
-            AgentAction::Wait { .. } => "wait",
-            AgentAction::Screenshot => "screenshot",
-            AgentAction::TaskComplete { .. } => "task_complete",
+fn save_step(p: &Path, id: &str, n: u32, a: &AgentAction, sp: &Path, r: &ExecutionResult) {
+    if let Ok(db) = Database::new(p) {
+        let at = match a {
+            AgentAction::Click{..}=>"click", AgentAction::DoubleClick{..}=>"double_click",
+            AgentAction::RightClick{..}=>"right_click", AgentAction::Type{..}=>"type",
+            AgentAction::KeyCombo{..}=>"key_combo", AgentAction::Scroll{..}=>"scroll",
+            AgentAction::RunCommand{..}=>"run_command", AgentAction::Wait{..}=>"wait",
+            AgentAction::Screenshot=>"screenshot", AgentAction::TaskComplete{..}=>"task_complete",
         };
-        let description = serde_json::to_string(action).unwrap_or_default();
-        let exec_method = match result.method {
-            ExecutionMethod::Api => "api",
-            ExecutionMethod::Terminal => "terminal",
-            ExecutionMethod::Screen => "screen",
-        };
-        let _ = db.insert_task_step(
-            task_id, step_number, action_type, &description,
-            &screenshot_path.to_string_lossy(), exec_method,
-            result.success, result.duration_ms,
-        );
+        let em = match r.method { ExecutionMethod::Api=>"api", ExecutionMethod::Terminal=>"terminal", ExecutionMethod::Screen=>"screen" };
+        let _ = db.insert_task_step(id, n, at, &serde_json::to_string(a).unwrap_or_default(),
+            &sp.to_string_lossy(), em, r.success, r.duration_ms);
     }
 }
