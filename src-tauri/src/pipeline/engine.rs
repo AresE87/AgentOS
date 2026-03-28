@@ -33,6 +33,16 @@ You have TWO modes of operation. Respond with a JSON object in ONE of these form
 ═══ MODE 4: NEED_INFO (when you need clarification) ═══
 {"mode": "need_info", "question": "what you need to know"}
 
+═══ MODE 5: CHAT (for questions that don't need PC action) ═══
+{"mode": "chat", "response": "your conversational answer here"}
+
+Use CHAT mode ONLY for abstract questions like "what is python" or "explain machine learning".
+For ANYTHING that involves checking, reading, showing, listing, or doing something on the PC, use COMMAND mode.
+"cuanto espacio tengo" → COMMAND (run Get-PSDrive)
+"que archivos hay" → COMMAND (run Get-ChildItem)
+"que hora es" → COMMAND (run Get-Date)
+"que programas tengo instalados" → COMMAND (run Get-Package)
+
 RULES:
 1. ALWAYS respond with valid JSON. Nothing else.
 2. Prefer MODE 1 (commands) — it's faster and more reliable than screen interaction.
@@ -350,6 +360,13 @@ pub async fn run_task(
         "need_info" => {
             let question = plan_json["question"].as_str().unwrap_or("I need more information");
             accumulated_output = question.to_string();
+            update_task_status(db_path, task_id, "completed");
+        }
+
+        "chat" => {
+            accumulated_output = plan_json["response"].as_str()
+                .unwrap_or("I'm not sure how to help with that.")
+                .to_string();
             update_task_status(db_path, task_id, "completed");
         }
 

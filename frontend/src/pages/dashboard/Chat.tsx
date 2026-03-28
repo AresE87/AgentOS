@@ -36,18 +36,19 @@ export default function Chat() {
     }
   }, [messages, typing]);
 
-  // Detect if the user is asking for a PC action vs a question
-  const isActionRequest = (text: string): boolean => {
-    const lower = text.toLowerCase();
-    const actionWords = [
-      'open', 'abre', 'abrir', 'click', 'ejecuta', 'run', 'launch',
-      'organize', 'organiza', 'move', 'mover', 'create folder', 'crear carpeta',
-      'install', 'instala', 'download', 'descarga', 'delete', 'borr',
-      'type', 'escrib', 'close', 'cerr', 'copy', 'copi', 'paste', 'peg',
-      'go to', 'navigate', 'navega', 'search for', 'busca',
-      'take screenshot', 'captura', 'screenshot',
+  // Detect if this is ONLY a pure conversational question (no action needed)
+  // Everything else goes to PC task pipeline where the LLM decides
+  const isPureQuestion = (text: string): boolean => {
+    const lower = text.toLowerCase().trim();
+    // Only treat as pure chat if it's clearly just a question with no action intent
+    const chatOnlyPatterns = [
+      /^(hi|hello|hola|hey|buenos?\s+d[ií]as?|buenas?\s+(tardes?|noches?))[\s!.?]*$/,
+      /^(who|what|que|quién|qué)\s+(are you|eres|is agentos)/,
+      /^(help|ayuda|how do (i|you)|como (puedo|funciona))[\s?]*$/,
+      /^(thanks?|gracias|thx)[\s!.]*$/,
+      /^(ok|okay|si|yes|no|nope)[\s!.]*$/,
     ];
-    return actionWords.some(w => lower.includes(w));
+    return chatOnlyPatterns.some(p => p.test(lower));
   };
 
   const handleSend = async (text?: string) => {
@@ -65,7 +66,7 @@ export default function Chat() {
     setTyping(true);
 
     try {
-      if (isActionRequest(msg)) {
+      if (!isPureQuestion(msg)) {
         // PC Control mode — agent takes action on the computer
         const pcResult = await runPCTask(msg);
         const agentMsg: Message = {
@@ -82,50 +83,42 @@ export default function Chat() {
         };
         setMessages((m) => [...m, agentMsg]);
 
-        // Poll for completion (check steps every 2s)
+        // Listen for task completion via polling
+        let resolved = false;
         const pollInterval = setInterval(async () => {
+          if (resolved) return;
           try {
             const steps = await getTaskSteps(pcResult.task_id);
             if (steps.steps.length > 0) {
-              const lastStep = steps.steps[steps.steps.length - 1];
+              resolved = true;
               clearInterval(pollInterval);
 
-              // Parse command from description if available
-              let cmdInfo = '';
+              const lastStep = steps.steps[steps.steps.length - 1];
+              let output = '';
+
+              // Extract the actual output/summary
               try {
                 const desc = JSON.parse(lastStep.description || '{}');
-                if (desc.command) cmdInfo = `\n\n\`\`\`powershell\n${desc.command}\n\`\`\``;
-              } catch {}
-
-              // Show output if there's execution_method = terminal
-              let outputInfo = '';
-              if (lastStep.execution_method === 'terminal' && lastStep.description) {
-                try {
-                  const desc = JSON.parse(lastStep.description);
-                  if (desc.summary) outputInfo = `\n\n${desc.summary}`;
-                } catch {}
+                output = desc.summary || desc.command || '';
+              } catch {
+                output = lastStep.description || '';
               }
 
               const statusIcon = lastStep.success ? '✅' : '❌';
               const doneMsg: Message = {
                 id: `done-${Date.now()}`,
                 role: 'agent',
-                content: `${statusIcon} **Task ${lastStep.success ? 'completed' : 'failed'}**${cmdInfo}${outputInfo}`,
+                content: output || `${statusIcon} Task ${lastStep.success ? 'completed' : 'failed'}`,
                 timestamp: new Date().toISOString(),
                 model: lastStep.execution_method || 'terminal',
                 latency: lastStep.duration_ms,
-                subtasks: steps.steps.map((s: any, i: number) => ({
-                  label: `Step ${i + 1}: ${s.action_type}`,
-                  status: s.success ? 'done' as const : 'pending' as const,
-                })),
               };
               setMessages((m) => [...m, doneMsg]);
             }
-          } catch { /* ignore polling errors */ }
-        }, 2000);
+          } catch { /* ignore */ }
+        }, 1500);
 
-        // Auto-stop polling after 2 minutes
-        setTimeout(() => clearInterval(pollInterval), 120000);
+        setTimeout(() => { if (!resolved) clearInterval(pollInterval); }, 120000);
 
       } else {
         // Chat mode — just talk to the LLM
