@@ -1,0 +1,7 @@
+name: "Code Reviewer"
+description: "Reviews code for quality and bugs"
+tier: 3
+timeout: 120
+permissions:
+  - cli
+  - files

@@ -1,0 +1,80 @@
+# LLM Routing Configuration — AgentOS
+# Maps (task_type, tier) → ordered list of models to try
+
+providers:
+  anthropic:
+    models:
+      haiku:
+        id: "claude-sonnet-4-20250514"
+        cost_per_1m_input: 3.00
+        cost_per_1m_output: 15.00
+        max_tokens: 8192
+      sonnet:
+        id: "claude-sonnet-4-20250514"
+        cost_per_1m_input: 3.00
+        cost_per_1m_output: 15.00
+        max_tokens: 8192
+      opus:
+        id: "claude-opus-4-20250514"
+        cost_per_1m_input: 15.00
+        cost_per_1m_output: 75.00
+        max_tokens: 8192
+  openai:
+    models:
+      gpt4o-mini:
+        id: "gpt-4o-mini"
+        cost_per_1m_input: 0.15
+        cost_per_1m_output: 0.60
+        max_tokens: 4096
+      gpt4o:
+        id: "gpt-4o"
+        cost_per_1m_input: 2.50
+        cost_per_1m_output: 10.00
+        max_tokens: 4096
+  google:
+    models:
+      flash:
+        id: "gemini/gemini-1.5-flash"
+        cost_per_1m_input: 0.10
+        cost_per_1m_output: 0.40
+        max_tokens: 4096
+      pro:
+        id: "gemini/gemini-1.5-pro"
+        cost_per_1m_input: 1.25
+        cost_per_1m_output: 5.00
+        max_tokens: 8192
+  local:
+    models:
+      llama3:
+        id: "ollama/llama3"
+        cost_per_1m_input: 0.0
+        cost_per_1m_output: 0.0
+        max_tokens: 4096
+      mistral:
+        id: "ollama/mistral"
+        cost_per_1m_input: 0.0
+        cost_per_1m_output: 0.0
+        max_tokens: 4096
+
+# Routing table: task_type → tier (1/2/3) → ordered list of "provider/model"
+routing:
+  text:
+    1: ["local/llama3", "openai/gpt4o-mini", "google/flash", "anthropic/haiku"]
+    2: ["anthropic/haiku", "openai/gpt4o-mini", "google/flash"]
+    3: ["anthropic/sonnet", "openai/gpt4o", "google/pro"]
+  code:
+    1: ["local/llama3", "anthropic/haiku", "openai/gpt4o-mini", "google/flash"]
+    2: ["anthropic/sonnet", "openai/gpt4o", "google/pro"]
+    3: ["anthropic/opus", "anthropic/sonnet", "openai/gpt4o"]
+  vision:
+    1: ["google/flash", "openai/gpt4o-mini"]
+    2: ["openai/gpt4o", "anthropic/sonnet", "google/pro"]
+    3: ["anthropic/sonnet", "openai/gpt4o", "google/pro"]
+  generation:
+    1: ["local/llama3", "openai/gpt4o-mini", "google/flash", "anthropic/haiku"]
+    2: ["anthropic/sonnet", "openai/gpt4o", "google/pro"]
+    3: ["anthropic/opus", "anthropic/sonnet", "openai/gpt4o"]
+  data:
+    1: ["local/llama3", "openai/gpt4o-mini", "google/flash", "anthropic/haiku"]
+    2: ["anthropic/sonnet", "openai/gpt4o", "google/pro"]
+    3: ["anthropic/opus", "anthropic/sonnet", "openai/gpt4o"]

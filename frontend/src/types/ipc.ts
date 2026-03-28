@@ -1,0 +1,98 @@
+// Agent status
+export interface AgentStatus {
+    state: 'idle' | 'running' | 'error';
+    providers: string[];
+    active_playbook: string | null;
+    session_stats: { tasks: number; cost: number; tokens: number };
+}
+
+// Task
+export interface TaskResult {
+    task_id: string;
+    status: 'pending' | 'running' | 'completed' | 'failed';
+    output: string;
+    model: string | null;
+    cost: number;
+    duration_ms: number;
+    error?: string;
+}
+
+export interface TaskList {
+    tasks: TaskResult[];
+}
+
+// Playbook
+export interface Playbook {
+    name: string;
+    path: string;
+    tier: number;
+    permissions: string[];
+}
+
+export interface PlaybookList {
+    playbooks: Playbook[];
+}
+
+// Settings
+export interface AgentSettings {
+    log_level: string;
+    max_cost_per_task: number;
+    cli_timeout: number;
+    has_anthropic: boolean;
+    has_openai: boolean;
+    has_google: boolean;
+    has_telegram: boolean;
+}
+
+// Chain / Task Board
+export interface ChainSubtask {
+  id: string;
+  description: string;
+  status: 'queued' | 'running' | 'review' | 'done' | 'failed';
+  agent_level: string;
+  agent_name: string | null;
+  model: string | null;
+  node: string | null;
+  progress: number;
+  message: string;
+  cost: number;
+  duration_ms: number;
+  depends_on: string[];
+}
+
+export interface ChainLogEntry {
+  timestamp: string;
+  agent_name: string;
+  agent_level: string;
+  message: string;
+}
+
+export interface ActiveChain {
+  chain_id: string;
+  original_task: string;
+  status: string;
+  subtasks: ChainSubtask[];
+  log: ChainLogEntry[];
+  total_cost: number;
+  elapsed_ms: number;
+}
+
+export interface ChainHistoryItem {
+  chain_id: string;
+  task: string;
+  status: string;
+  subtask_count: number;
+  completed_count: number;
+  total_cost: number;
+  duration_ms: number;
+  created_at: string;
+}
+
+// Events
+export interface AgentEvent {
+    type: 'task_started' | 'task_completed' | 'task_failed' | 'typing' | 'agent_error';
+    task_id?: string;
+    output?: string;
+    cost?: number;
+    error?: string;
+}

@@ -1,0 +1,11 @@
+name: "System Monitor"
+tier: 1
+timeout: 60
+permissions:
+  - cli
+allowed_commands:
+  - top
+  - free
+  - df
+  - wmic
+  - systeminfo

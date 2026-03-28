@@ -1,0 +1,9 @@
+name: "Hello World"
+description: "A simple greeting and CLI test playbook"
+tier: 1
+timeout: 30
+permissions:
+  - cli
+allowed_commands:
+  - echo
+  - date

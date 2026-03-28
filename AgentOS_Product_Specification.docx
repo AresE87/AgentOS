@@ -1,0 +1,387 @@
+PRODUCT SPECIFICATION
+
+**AgentOS**
+
+*The universal AI agent for your PC*
+
+Version 0.1 — March 2026
+
+**CONFIDENTIAL**
+
+# Table of contents
+
+# 1. Executive summary
+
+## 1.1. Vision
+
+AgentOS is a desktop application that installs like a game, runs like an operating system, and thinks like a team of specialists. It is an AI-powered agent that can fully control a PC (screen, keyboard, mouse, CLI, file system), communicate through messaging platforms (Telegram, WhatsApp, Discord), and intelligently route tasks to the optimal AI model based on complexity, type, and cost.
+
+The core innovation is threefold:
+
+- An intelligent LLM Gateway that automatically selects the best AI brain for each task, optimizing for both quality and cost.
+
+- A hierarchical agent system with Junior, Specialist, Senior, Manager, and Orchestrator levels that assembles the right team for any job.
+
+- The Context Folder Protocol — an open specification that lets anyone create, share, and sell agent behaviors using simple files: markdown instructions and step-by-step screenshots.
+
+## 1.2. Why now
+
+2026 is the year of AI agents. Anthropic (Computer Use), OpenAI (Operator), Google (Project Mariner), and Microsoft (Copilot Actions) are all investing billions. But all share the same limitations: locked to their ecosystem, hard to customize, expensive to run, and impossible for non-engineers to teach new tasks. AgentOS fills this gap by being provider-agnostic, locally-installed, and radically simple to use.
+
+## 1.3. Competitive positioning
+
+| **Capability** | **AgentOS** | **Claude Computer Use** | **OpenAI Operator** | **Microsoft Copilot** |
+| --- | --- | --- | --- | --- |
+| Multi-LLM routing | Yes — any provider | Claude only | GPT only | GPT only |
+| Desktop app (native) | Yes | Cloud/API | Cloud | Cloud + Office |
+| Custom task training | Visual playbooks | Prompt engineering | Prompt only | Power Automate |
+| Messaging interface | TG, WA, Discord | None | None | Teams only |
+| Agent hierarchy | 5-level + orchestrator | Single agent | Single agent | Single agent |
+| Marketplace | Community templates | None | GPT Store | None |
+| Works offline (local LLM) | Planned v2 | No | No | No |
+| Install experience | Double-click wizard | Developer API | Web browser | Pre-installed |
+
+## 1.4. Target acquisition profile
+
+AgentOS is designed to be acquirable by enterprise software companies (Microsoft, Salesforce, ServiceNow, Atlassian), cloud providers (AWS, Google Cloud, Azure), or AI companies (Anthropic, OpenAI) seeking to add autonomous desktop agent capabilities and a community-driven automation marketplace to their portfolio.
+
+# 2. User segments and agent levels
+
+AgentOS serves everyone from individuals to enterprises through a single product with adaptive complexity. The internal agent hierarchy maps naturally to user needs:
+
+| **Agent level** | **Complexity** | **Example use cases** | **Typical LLM tier** |
+| --- | --- | --- | --- |
+| Junior | Simple, repetitive | Auto-reply messages, file organization, data entry, basic monitoring | Tier 1: GPT-4o-mini, Haiku, Gemini Flash |
+| Specialist | Domain-specific | Invoice processing, email triage, spreadsheet formulas, report formatting | Tier 1–2: Haiku/Sonnet, GPT-4o-mini/4o |
+| Senior | Complex, multi-step | Research + summarize, code review, document analysis, complex data extraction | Tier 2: Sonnet, GPT-4o, Gemini Pro |
+| Manager | Orchestrates sub-tasks | Full project workflows, multi-app automation, client onboarding pipelines | Tier 2–3: Opus, GPT-4, specialized models |
+| Orchestrator | Meta-level planning | Analyzes incoming request, assembles optimal team, monitors chain, handles failures | Tier 2: Sonnet (speed + reasoning balance) |
+
+## 2.1. The orchestrator pattern
+
+When a task arrives, the Orchestrator does not execute it directly. Instead, it:
+
+- Analyzes the task complexity, required capabilities, and constraints.
+
+- Decomposes it into sub-tasks if needed.
+
+- Assigns each sub-task to the appropriate agent level.
+
+- Creates a dependency chain (Task B waits for Task A).
+
+- Monitors execution and handles failures/retries.
+
+- Notifies the next agent in the chain when a predecessor completes — like a real coworker passing work to the next person.
+
+| **Key design principle** The user never sees agent levels. They send a message or trigger a playbook. The system handles all orchestration internally. Simple tasks get a Junior. Complex tasks get a full team. The user just sees results. |
+| --- |
+
+# 3. System architecture
+
+## 3.1. High-level layers
+
+| **Layer** | **Responsibility** | **Key technologies** |
+| --- | --- | --- |
+| Communication | Receive/send messages from Telegram, WhatsApp, Discord, webhooks, built-in chat | python-telegram-bot, Baileys/WA Business API, discord.py, FastAPI |
+| Agent Core | Task planning, memory management, execution routing, agent hierarchy | Python asyncio, state machines, persistent task queue |
+| LLM Gateway | Model selection, API abstraction, key management, usage metering, billing | LiteLLM (base), custom classifier, token counter, cost optimizer |
+| Execution Engine | Screen control, CLI execution, API calls, file operations | pyautogui + vision model, subprocess/PTY, httpx, watchdog |
+| Context Engine | Playbook parsing, visual memory (screenshot index), config management, state/logs | Markdown parser, CLIP/embeddings for image search, YAML, SQLite |
+| Host Interface | OS integration, system tray, permissions, sandbox, auto-update | Tauri (Rust + WebView), tauri-plugin-shell, tauri-plugin-fs |
+
+## 3.2. LLM Gateway (the brain router)
+
+The LLM Gateway is the central nervous system. Every AI call passes through it. It consists of three components:
+
+**Task Classifier — **A lightweight model (or rule-based system for v1) that analyzes each task and determines: task type (text, code, vision, generation), complexity score (1–5), and budget tier (cheap/standard/premium). This runs locally and costs nothing.
+
+**Provider Abstraction — **A unified API layer built on LiteLLM that normalizes all provider APIs (Anthropic, OpenAI, Google, local models) into a single interface. The rest of the system never talks to providers directly.
+
+**Cost Optimizer — **Tracks token usage per provider, calculates cost per task, and maintains a routing table that maps (task_type, complexity) to the optimal model. This table improves over time based on success/failure feedback.
+
+| **Task type** | **Low complexity** | **Medium complexity** | **High complexity** |
+| --- | --- | --- | --- |
+| Text / chat | GPT-4o-mini ($0.15/1M) | Claude Haiku ($0.25/1M) | Claude Sonnet ($3/1M) |
+| Code / technical | Claude Haiku ($0.25/1M) | Claude Sonnet ($3/1M) | Claude Opus ($15/1M) |
+| Vision / screen reading | Gemini Flash ($0.10/1M) | GPT-4o ($2.50/1M) | Claude Sonnet ($3/1M) |
+| Document analysis | Gemini Flash ($0.10/1M) | Claude Sonnet ($3/1M) | Claude Opus ($15/1M) |
+| Image generation | Flux.1-schnell | DALL-E 3 | Midjourney API |
+| Data / spreadsheets | GPT-4o-mini ($0.15/1M) | Claude Sonnet ($3/1M) | Claude Opus ($15/1M) |
+
+Note: Prices are approximate as of March 2026. The routing table is configurable and auto-updates as providers change pricing.
+
+## 3.3. Execution engine (three modes)
+
+The agent can interact with the computer through three distinct execution modes, chosen automatically based on the task:
+
+**Mode 1: Screen Control — **For GUI-only applications. Uses pyautogui for mouse/keyboard and a vision model (Gemini Flash or GPT-4o) to understand what is on screen. Takes screenshots, identifies UI elements, clicks, types, scrolls. Used when there is no API or CLI alternative.
+
+**Mode 2: CLI Executor — **For terminal-based operations. Spawns shell sessions with full PTY support for interactive programs. Can run scripts, install packages, use git, ssh into servers, run database queries. Preferred over screen control when available because it is faster and more reliable.
+
+**Mode 3: API Connector — **For services with APIs. Direct HTTP calls, SDK usage, GraphQL queries. The fastest and most reliable mode. Used whenever the target service has a documented API.
+
+| **Smart mode selection** The agent prefers API > CLI > Screen Control (in that order). If an API call fails, it falls back to CLI. If CLI fails, it falls back to screen control. This makes the agent resilient — it always finds a way to complete the task. |
+| --- |
+
+# 4. Context Folder Protocol (open specification)
+
+The Context Folder Protocol (CFP) is an open specification for defining agent behaviors using ordinary files. It is to AI agents what Dockerfiles are to containers: a portable, shareable, human-readable format that anyone can create.
+
+## 4.1. Folder structure
+
+| **Path** | **Required** | **Description** |
+| --- | --- | --- |
+| playbook.md | Yes | Natural language instructions. The main behavior definition. |
+| config.yaml | Yes | Agent configuration: which LLM tier, permissions, limits, timeout. |
+| triggers.yaml | No | When to activate: message patterns, cron schedules, file watchers, webhooks. |
+| steps/ | No | Visual memory: numbered screenshots of the step-by-step process. |
+| steps/01-login.png | No | Screenshot of step 1 with optional .md annotation file. |
+| steps/01-login.md | No | Text annotation for step 1: what to look for, what to click. |
+| templates/ | No | Output templates: email formats, report structures, response patterns. |
+| credentials.vault | No | Encrypted secrets (AES-256). Never shared in marketplace. |
+| state/ | Auto | Runtime state: task history, last execution, error logs. |
+| state/history.jsonl | Auto | Append-only log of every action taken. |
+| README.md | No | Human description for marketplace listing. |
+| metadata.yaml | No | Marketplace info: author, version, tags, price, license. |
+
+## 4.2. Visual task memory
+
+The most innovative feature of CFP. Instead of writing complex prompts, users capture screenshots of a process and the agent learns from them:
+
+- User performs the task manually while AgentOS records screenshots at each step.
+
+- Each screenshot is indexed using CLIP embeddings for semantic search.
+
+- Optional: user adds markdown annotations describing what to look for in each screenshot.
+
+- At runtime, when the agent encounters an unfamiliar screen, it searches the visual memory for the most similar screenshot and follows the associated instructions.
+
+This is how robots are trained with video demonstrations — but adapted for software using screenshots and text. It is radically more intuitive than prompt engineering.
+
+## 4.3. Marketplace
+
+The open protocol enables a community marketplace where users can:
+
+- Share free playbooks (like GitHub repositories).
+
+- Sell premium playbooks with pricing set by the creator.
+
+- Rate and review playbooks.
+
+- Fork and customize existing playbooks.
+
+- Subscribe to playbook updates (the author improves the automation over time).
+
+The marketplace is a critical growth engine. Every playbook published makes AgentOS more valuable. Revenue model: 70/30 split (creator gets 70%, platform gets 30%).
+
+# 5. Desktop application
+
+## 5.1. Technology: Tauri
+
+| **Aspect** | **Tauri (our choice)** | **Electron (alternative)** |
+| --- | --- | --- |
+| Bundle size | 5–15 MB | 150–200 MB |
+| Memory usage | ~30 MB base | ~150 MB base |
+| Startup time | < 1 second | 3–5 seconds |
+| Backend language | Rust (fast, safe) | Node.js |
+| System access | Native via Rust | Via Node.js bindings |
+| Security | Allowlist permissions model | Full Node.js access |
+| Cross-platform | Windows, macOS, Linux | Windows, macOS, Linux |
+
+## 5.2. Installation experience
+
+The install must feel like installing a video game. The user should never see a terminal, never configure a PATH variable, never install Python manually. Everything is bundled.
+
+- User downloads AgentOS-Setup.msi (Windows) — under 50 MB.
+
+- Double-click to install. Standard Windows installer with progress bar.
+
+- App launches automatically. Icon appears in desktop and system tray.
+
+- Setup wizard starts (5 steps, under 2 minutes):
+
+- Welcome screen with product overview.
+
+- AI provider setup (Managed plan default, BYOK optional).
+
+- Messaging connection (Telegram bot token, optional WhatsApp).
+
+- Permissions (screen control, CLI, file system, network).
+
+- Final setup with progress indicators.
+
+- Agent starts running in background. User gets a welcome message on Telegram.
+
+## 5.3. System tray behavior
+
+- Icon shows agent state: idle (gray), working (purple pulse), waiting for input (amber), error (red).
+
+- Left click: opens main dashboard window.
+
+- Right click: quick menu with Start/Pause Agent, Open Dashboard, Recent Tasks, Settings, Quit.
+
+- Notifications: system toasts for completed tasks, errors, and messages requiring input.
+
+## 5.4. Dashboard
+
+The main window is a React-based dashboard rendered in Tauri WebView with four main sections:
+
+- Home: active tasks, recent completions, quick stats (tasks today, tokens used, cost).
+
+- Playbooks: browse installed playbooks, marketplace access, create new from template or recording.
+
+- Chat: built-in conversation with the agent (alternative to Telegram/WhatsApp).
+
+- Settings: API keys, messaging, permissions, agent behavior, appearance.
+
+# 6. Monetization strategy
+
+## 6.1. Revenue streams
+
+| **Stream** | **Model** | **Target margin** |
+| --- | --- | --- |
+| Managed AI plan | User pays per token with markup. We buy API tokens wholesale, resell with 30–50% margin. | 30–50% |
+| BYOK subscription | User connects own API keys. Pays $19–49/month for the agent platform. | ~90% (SaaS) |
+| Marketplace cut | 30% of all paid playbook sales and subscriptions. | 30% |
+| Enterprise license | Self-hosted deployment, custom integrations, SLA, support. | 70–80% |
+
+## 6.2. Pricing tiers
+
+| **Plan** | **Price** | **Includes** |
+| --- | --- | --- |
+| Free | $0/month | 1 active playbook, Junior agent only, 100 tasks/month, community support |
+| Pro | $29/month | Unlimited playbooks, all agent levels, 2,000 tasks/month, priority support |
+| Team | $79/month | Everything in Pro + 5 seats, shared playbooks, team orchestration, analytics |
+| Enterprise | Custom | Self-hosted, SSO, audit logs, dedicated support, custom integrations, SLA |
+
+The Free tier is critical for adoption. Users experience the product with a Junior agent, see the value, and upgrade when they need more power. The managed AI plan charges are on top of the subscription for users who do not bring their own keys.
+
+# 7. MVP roadmap
+
+Given that development is a two-person team (founder + AI pair programmer), we follow a phased approach where each phase delivers a functional product.
+
+## 7.1. Phase 1: The brain (weeks 1–3)
+
+| **Goal: A working agent that receives messages and executes tasks via CLI** LLM Gateway with task classifier (rule-based v1) and provider abstraction Telegram bot integration (receive commands, send results) CLI executor with PTY support Basic Context Folder: playbook.md + config.yaml parsing SQLite-based task history and logging Deliverable: Send a Telegram message, agent runs a command, returns result |
+| --- |
+
+## 7.2. Phase 2: The eyes (weeks 4–6)
+
+| **Goal: Agent can see and control the screen** Screen capture and vision model integration Mouse/keyboard control via pyautogui Visual memory: screenshot indexing with CLIP embeddings Step-by-step recording mode (user does task, agent watches) Smart mode selection: API > CLI > Screen Control fallback Deliverable: Agent navigates a web app based on visual playbook |
+| --- |
+
+## 7.3. Phase 3: The body (weeks 7–10)
+
+| **Goal: Native desktop app with setup wizard** Tauri application shell (Windows first) Setup wizard (AI providers, messaging, permissions) System tray with status and quick actions Dashboard: home, playbooks, chat, settings Auto-update mechanism Deliverable: Downloadable .msi that non-technical users can install |
+| --- |
+
+## 7.4. Phase 4: The hierarchy (weeks 11–14)
+
+| **Goal: Multi-agent orchestration and chain workflows** Agent level system (Junior through Manager) Orchestrator agent that decomposes and assigns tasks Task chain: agent completes work, passes to next in pipeline Inter-agent communication and state sharing Failure handling and retry logic Deliverable: Complex multi-step workflow running autonomously |
+| --- |
+
+## 7.5. Phase 5: The market (weeks 15–18)
+
+| **Goal: Marketplace and monetization** Playbook packaging and sharing format Community marketplace (browse, install, rate) Creator tools: publish, set pricing, track installs/revenue Managed billing (Stripe integration) BYOK key management with encrypted vault Deliverable: Users can buy/sell playbooks and the platform generates revenue |
+| --- |
+
+# 8. Key technical decisions
+
+## 8.1. Language choices
+
+| **Component** | **Language** | **Rationale** |
+| --- | --- | --- |
+| Desktop shell | Rust (Tauri) | Small binary, fast startup, native OS access, memory safety |
+| Agent core | Python | Best LLM library ecosystem (LiteLLM, langchain, pyautogui), fast iteration |
+| Frontend (dashboard) | React + TypeScript | Rich UI, component ecosystem, Tauri WebView compatible |
+| Task classifier v1 | Python (rule-based) | No training needed, fast to iterate, upgradable to ML later |
+| Visual memory index | Python + CLIP | Semantic image search, well-supported, runs locally |
+
+## 8.2. Code strategy
+
+**Core: Closed source — **The agent engine, LLM gateway, task classifier, orchestrator, and desktop application are proprietary. This is the competitive moat.
+
+**Protocol: Open specification — **The Context Folder Protocol is published as an open spec (similar to how Anthropic published MCP). Anyone can create playbooks, build tools around the format, or implement their own CFP-compatible runtime.
+
+**SDK: Open source — **A Python SDK for creating and validating playbooks, plus CLI tools for testing. This drives developer adoption without exposing the core product.
+
+This hybrid model maximizes adoption (open protocol and SDK draw contributors and users) while protecting commercial value (the runtime and gateway remain proprietary). It is the same model used successfully by Docker (open format, commercial runtime), Stripe (open API, closed infrastructure), and Anthropic (open MCP, closed Claude).
+
+## 8.3. Security model
+
+- All API keys stored in encrypted vault (AES-256-GCM) with OS keychain integration.
+
+- Playbook permissions are granular: each playbook declares what it needs (screen, CLI, files, network).
+
+- User approves permissions on install, similar to mobile app permissions.
+
+- Agent actions are logged to immutable audit trail (state/history.jsonl).
+
+- Screen control requires explicit user opt-in per playbook.
+
+- Network access is allowlisted per playbook (only specified domains/IPs).
+
+- Marketplace playbooks are signed by their creator and verified on install.
+
+# 9. Success metrics
+
+## 9.1. MVP success criteria (Phase 1–3)
+
+| **Metric** | **Target** |
+| --- | --- |
+| Install-to-first-task time | Under 5 minutes |
+| Task success rate (CLI mode) | Above 85% |
+| Task success rate (screen control) | Above 70% |
+| App crash rate | Under 2% |
+| Installer size (Windows) | Under 50 MB |
+| Cold start time | Under 3 seconds |
+| Concurrent active playbooks | At least 5 without performance degradation |
+
+## 9.2. Growth targets (first 6 months post-launch)
+
+| **Metric** | **Target** |
+| --- | --- |
+| Downloads | 10,000+ |
+| Active users (weekly) | 2,000+ |
+| Marketplace playbooks published | 200+ |
+| Paid conversions (Free to Pro) | 5–10% |
+| Monthly recurring revenue | $5,000+ |
+| Community Discord members | 1,000+ |
+
+## 9.3. Acquisition readiness indicators
+
+- Protocol adoption: third-party tools building on CFP.
+
+- Enterprise pilots: at least 2 companies testing AgentOS in production.
+
+- Revenue trajectory: consistent month-over-month growth.
+
+- Technical moat: LLM routing intelligence that improves with usage data.
+
+- Community size: active marketplace with organic content creation.
+
+# 10. Risks and mitigations
+
+| **Risk** | **Severity** | **Mitigation** |
+| --- | --- | --- |
+| Big tech ships similar product | High | Speed to market + open protocol creates switching cost. Community playbooks are a moat they cannot replicate. |
+| LLM API costs spike | Medium | Multi-provider routing means we can shift to cheaper models instantly. BYOK plan insulates us. |
+| Screen control unreliable | Medium | Three-mode fallback (API > CLI > Screen). Invest in visual memory to improve over time. |
+| Security breach / API key leak | High | AES-256 vault, OS keychain, granular permissions, signed playbooks, audit trail. |
+| Low marketplace adoption | Medium | Seed with 50+ free high-quality playbooks. Partner with automation influencers. |
+| Single developer bottleneck | High | AI pair programming accelerates output 5–10x. Modular architecture allows parallel work streams. |
+
+# 11. Immediate next steps
+
+Phase 1 begins now. The first three deliverables are:
+
+- Set up the project repository with Python backend structure, Tauri shell, and React frontend scaffold.
+
+- Implement the LLM Gateway with LiteLLM integration, basic task classifier, and cost tracking.
+
+- Build Telegram bot integration that receives commands and executes them via CLI executor.
+
+Target for first working demo: a Telegram message triggers the agent to run a shell command on the PC and return the result. This proves the core loop: message in, brain decides, action executes, result out.
+
+| **The bottom line** AgentOS combines three billion-dollar ideas into one product: an autonomous PC agent, an intelligent LLM router, and a community marketplace for automation. Each component has standalone value. Together, they create a platform that no single company has built. The open protocol drives adoption. The closed core protects value. The marketplace creates a flywheel. And the whole thing installs with a double-click. |
+| --- |

@@ -1,0 +1,48 @@
+# CLI Safety Configuration — AgentOS
+# Defines blocked commands and execution limits
+
+blocked_commands:
+  # Destructive system commands
+  - "rm -rf /"
+  - "rm -rf /*"
+  - "rm -rf ~"
+  - "rm -rf ~/*"
+  - "mkfs"
+  - "dd if="
+  - "format"
+  - ":(){:|:&};:"  # fork bomb
+
+blocked_patterns:
+  # Patterns that should never be executed
+  - "rm\\s+(-[a-zA-Z]*f[a-zA-Z]*\\s+)?/"  # rm with -f targeting root
+  - "chmod\\s+(-R\\s+)?777\\s+/"  # chmod 777 on root
+  - "shutdown"
+  - "reboot"
+  - "halt"
+  - "poweroff"
+  - "init\\s+[06]"
+  - "mkfs\\."
+  - "wipefs"
+  - "fdisk"
+  - "parted"
+  - ">\\s*/dev/sd"  # write to raw devices
+  - "dd\\s+.*of=/dev/"  # dd to devices
+  - "curl.*\\|.*sh"  # pipe curl to shell
+  - "wget.*\\|.*sh"
+  - "eval\\s+.*\\$\\("  # eval with command substitution
+  - ":(\\)\\{|\\(\\)\\s*\\{)"  # fork bomb patterns
+
+# Execution limits
+limits:
+  max_timeout: 300  # seconds
+  max_output_bytes: 1048576  # 1 MB
+  max_concurrent: 5
+
+# Environment variables to strip from child processes
+strip_env_vars:
+  - "ANTHROPIC_API_KEY"
+  - "OPENAI_API_KEY"
+  - "GOOGLE_API_KEY"
+  - "TELEGRAM_BOT_TOKEN"
+  - "AWS_SECRET_ACCESS_KEY"
+  - "GITHUB_TOKEN"

@@ -1,0 +1,40 @@
+# Agent Level Configuration
+junior:
+  level: junior
+  tier: 1
+  max_tokens: 2048
+  temperature: 0.5
+  tools: [cli]
+  system_prompt: "You are a helpful assistant. Answer questions directly and concisely."
+
+specialist:
+  level: specialist
+  tier: 2
+  max_tokens: 4096
+  temperature: 0.7
+  tools: [cli, files]
+  system_prompt: "You are a domain specialist. Apply your expertise thoroughly."
+
+senior:
+  level: senior
+  tier: 2
+  max_tokens: 8192
+  temperature: 0.7
+  tools: [cli, screen, files]
+  system_prompt: "You are an experienced AI agent. Break complex tasks into clear steps."
+
+manager:
+  level: manager
+  tier: 2
+  max_tokens: 8192
+  temperature: 0.5
+  tools: [cli, screen, files, network]
+  system_prompt: "You are a task manager coordinating a team of AI agents."
+
+orchestrator:
+  level: orchestrator
+  tier: 2
+  max_tokens: 4096
+  temperature: 0.3
+  tools: [cli, screen, files, network]
+  system_prompt: "You are the meta-planner. Analyze tasks and delegate appropriately."
