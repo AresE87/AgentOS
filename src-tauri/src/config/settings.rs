@@ -17,6 +17,14 @@ pub struct Settings {
     pub max_cost_per_task: f64,
     #[serde(default = "default_timeout")]
     pub cli_timeout: u64,
+    #[serde(default = "default_max_steps")]
+    pub max_steps_per_task: u32,
+    #[serde(default = "default_input_delay")]
+    pub input_delay_ms: u64,
+    #[serde(default = "default_screenshot_quality")]
+    pub screenshot_quality: u8,
+    #[serde(default)]
+    pub pc_control_enabled: bool,
 
     #[serde(skip)]
     config_path: PathBuf,
@@ -30,6 +38,15 @@ fn default_max_cost() -> f64 {
 }
 fn default_timeout() -> u64 {
     300
+}
+fn default_max_steps() -> u32 {
+    20
+}
+fn default_input_delay() -> u64 {
+    50
+}
+fn default_screenshot_quality() -> u8 {
+    80
 }
 
 impl Settings {
@@ -68,6 +85,24 @@ impl Settings {
                     self.cli_timeout = v;
                 }
             }
+            "max_steps_per_task" => {
+                if let Ok(v) = value.parse() {
+                    self.max_steps_per_task = v;
+                }
+            }
+            "input_delay_ms" => {
+                if let Ok(v) = value.parse() {
+                    self.input_delay_ms = v;
+                }
+            }
+            "screenshot_quality" => {
+                if let Ok(v) = value.parse() {
+                    self.screenshot_quality = v;
+                }
+            }
+            "pc_control_enabled" => {
+                self.pc_control_enabled = value == "true" || value == "1";
+            }
             _ => {}
         }
     }
@@ -91,6 +126,10 @@ impl Settings {
             "log_level": self.log_level,
             "max_cost_per_task": self.max_cost_per_task,
             "cli_timeout": self.cli_timeout,
+            "max_steps_per_task": self.max_steps_per_task,
+            "input_delay_ms": self.input_delay_ms,
+            "screenshot_quality": self.screenshot_quality,
+            "pc_control_enabled": self.pc_control_enabled,
             "has_anthropic": !self.anthropic_api_key.is_empty(),
             "has_openai": !self.openai_api_key.is_empty(),
             "has_google": !self.google_api_key.is_empty(),
@@ -109,6 +148,10 @@ impl Default for Settings {
             log_level: default_log_level(),
             max_cost_per_task: default_max_cost(),
             cli_timeout: default_timeout(),
+            max_steps_per_task: default_max_steps(),
+            input_delay_ms: default_input_delay(),
+            screenshot_quality: default_screenshot_quality(),
+            pc_control_enabled: false,
             config_path: PathBuf::new(),
         }
     }

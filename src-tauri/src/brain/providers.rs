@@ -156,4 +156,167 @@ impl Providers {
 
         Ok((content, tokens_in, tokens_out))
     }
+
+    // ── Vision (multimodal) variants ──────────────────────────────
+
+    pub async fn call_anthropic_vision(
+        &self,
+        model: &str,
+        text: &str,
+        image_b64: &str,
+        max_tokens: u32,
+        api_key: &str,
+    ) -> Result<(String, u32, u32), Box<dyn std::error::Error + Send + Sync>> {
+        let body = json!({
+            "model": model,
+            "max_tokens": max_tokens,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/jpeg",
+                            "data": image_b64,
+                        }
+                    },
+                    {
+                        "type": "text",
+                        "text": text,
+                    }
+                ]
+            }],
+        });
+
+        let resp = self
+            .client
+            .post("https://api.anthropic.com/v1/messages")
+            .header("x-api-key", api_key)
+            .header("anthropic-version", "2023-06-01")
+            .header("content-type", "application/json")
+            .json(&body)
+            .send()
+            .await?;
+
+        let status = resp.status();
+        let data: serde_json::Value = resp.json().await?;
+
+        if !status.is_success() {
+            let err_msg = data["error"]["message"]
+                .as_str()
+                .unwrap_or("Anthropic vision API error");
+            return Err(err_msg.to_string().into());
+        }
+
+        let content = data["content"][0]["text"].as_str().unwrap_or("").to_string();
+        let tokens_in = data["usage"]["input_tokens"].as_u64().unwrap_or(0) as u32;
+        let tokens_out = data["usage"]["output_tokens"].as_u64().unwrap_or(0) as u32;
+
+        Ok((content, tokens_in, tokens_out))
+    }
+
+    pub async fn call_openai_vision(
+        &self,
+        model: &str,
+        text: &str,
+        image_b64: &str,
+        max_tokens: u32,
+        api_key: &str,
+    ) -> Result<(String, u32, u32), Box<dyn std::error::Error + Send + Sync>> {
+        let body = json!({
+            "model": model,
+            "max_tokens": max_tokens,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": format!("data:image/jpeg;base64,{}", image_b64),
+                        }
+                    },
+                    {
+                        "type": "text",
+                        "text": text,
+                    }
+                ]
+            }],
+        });
+
+        let resp = self
+            .client
+            .post("https://api.openai.com/v1/chat/completions")
+            .header("Authorization", format!("Bearer {}", api_key))
+            .json(&body)
+            .send()
+            .await?;
+
+        let status = resp.status();
+        let data: serde_json::Value = resp.json().await?;
+
+        if !status.is_success() {
+            let err_msg = data["error"]["message"]
+                .as_str()
+                .unwrap_or("OpenAI vision API error");
+            return Err(err_msg.to_string().into());
+        }
+
+        let content = data["choices"][0]["message"]["content"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
+        let tokens_in = data["usage"]["prompt_tokens"].as_u64().unwrap_or(0) as u32;
+        let tokens_out = data["usage"]["completion_tokens"].as_u64().unwrap_or(0) as u32;
+
+        Ok((content, tokens_in, tokens_out))
+    }
+
+    pub async fn call_google_vision(
+        &self,
+        model: &str,
+        text: &str,
+        image_b64: &str,
+        api_key: &str,
+    ) -> Result<(String, u32, u32), Box<dyn std::error::Error + Send + Sync>> {
+        let url = format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+            model, api_key
+        );
+
+        let body = json!({
+            "contents": [{
+                "role": "user",
+                "parts": [
+                    {
+                        "inline_data": {
+                            "mime_type": "image/jpeg",
+                            "data": image_b64,
+                        }
+                    },
+                    { "text": text }
+                ]
+            }]
+        });
+
+        let resp = self.client.post(&url).json(&body).send().await?;
+        let status = resp.status();
+        let data: serde_json::Value = resp.json().await?;
+
+        if !status.is_success() {
+            let err_msg = data["error"]["message"]
+                .as_str()
+                .unwrap_or("Google vision API error");
+            return Err(err_msg.to_string().into());
+        }
+
+        let content = data["candidates"][0]["content"]["parts"][0]["text"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
+        let tokens_in = data["usageMetadata"]["promptTokenCount"].as_u64().unwrap_or(0) as u32;
+        let tokens_out = data["usageMetadata"]["candidatesTokenCount"].as_u64().unwrap_or(0) as u32;
+
+        Ok((content, tokens_in, tokens_out))
+    }
 }
