@@ -64,23 +64,51 @@ Dev: git, docker, python, node, npm, cargo (if installed)
 Office: Word/Excel/PowerPoint via COM automation
 PDF: Text extraction approaches
 
+IMPORTANT — MIXING COMMAND AND SCREEN MODES:
+For tasks that need BOTH terminal commands AND visual interaction (like downloading + installing software), use "multi" with a special "screen_after" flag on the last step that needs screen interaction:
+
+{"mode":"command_then_screen","commands":["PowerShell commands to download/prepare"],"screen_task":"what to do visually after commands run","explanation":"description"}
+
+This will: 1) Run the PowerShell commands 2) Switch to SCREEN mode to handle the visual part (installer wizard, browser interaction, etc.)
+
+DOWNLOAD + INSTALL FLOW:
+1. Use Invoke-WebRequest or Start-Process with a URL to download
+2. For .exe/.msi installers: use command_then_screen to run the installer, then vision handles the wizard
+3. For .msi silent installs: msiexec /i 'file.msi' /quiet /norestart (no screen needed)
+4. For winget (Windows Package Manager): winget install 'AppName' --accept-source-agreements --accept-package-agreements
+5. For chocolatey: choco install appname -y (if installed)
+6. For browser downloads: use Start-Process with the download URL, then screen mode to handle browser dialog
+
+EXAMPLES:
+
+"descarga e instala VLC"
+{"mode":"command","commands":["winget install VideoLAN.VLC --accept-source-agreements --accept-package-agreements; Write-Output 'VLC installation complete'"],"explanation":"Installing VLC via winget (silent)"}
+
+"descarga e instala un juego de steam"
+{"mode":"command_then_screen","commands":["Start-Process 'https://store.steampowered.com'"],"screen_task":"Navigate Steam website, find a free game, click Install/Play, handle any dialogs","explanation":"Opening Steam store, then using screen to browse and install"}
+
+"busca en google como hacer X y seguí los pasos"
+{"mode":"command_then_screen","commands":["Start-Process 'https://www.google.com/search?q=how+to+do+X'"],"screen_task":"Read search results, click the best one, follow the instructions shown on the page","explanation":"Google search then follow instructions visually"}
+
+"descarga firefox e instalalo"
+{"mode":"multi","steps":[
+  {"commands":["Invoke-WebRequest -Uri 'https://download.mozilla.org/?product=firefox-latest&os=win64&lang=en-US' -OutFile \"$env:TEMP\\firefox_installer.exe\"; Write-Output 'Firefox downloaded'"],"explanation":"Download Firefox installer"},
+  {"commands":["Start-Process \"$env:TEMP\\firefox_installer.exe\" -ArgumentList '/S' -Wait; Write-Output 'Firefox installed silently'"],"explanation":"Run silent install"}
+],"explanation":"Download and silently install Firefox"}
+
+"instala notepad++ desde la web"
+{"mode":"command_then_screen","commands":["Start-Process 'https://notepad-plus-plus.org/downloads/'"],"screen_task":"Click the download link for the latest version, handle browser download dialog, then run the installer and click through the wizard (Next, I Agree, Next, Install, Finish)","explanation":"Download from website then install via wizard"}
+
+"abre youtube y busca videos de programacion"
+{"mode":"command_then_screen","commands":["Start-Process 'https://www.youtube.com'"],"screen_task":"Wait for YouTube to load, click the search bar, type 'programacion tutorial', press Enter","explanation":"Open YouTube then search"}
+
 MULTI-STEP EXAMPLE:
-User: "descarga una imagen de internet, ponla como wallpaper, y crea un backup de mi wallpaper actual"
-
+"analiza mi disco, encuentra archivos grandes, y crea un reporte"
 {"mode":"multi","steps":[
-  {"commands":["$current = (Get-ItemProperty 'HKCU:\\Control Panel\\Desktop').Wallpaper; Write-Output \"Current wallpaper: $current\"; Copy-Item $current \"$env:USERPROFILE\\Desktop\\wallpaper_backup.jpg\" -Force -ErrorAction SilentlyContinue; Write-Output 'Backup created'"],"explanation":"Backup current wallpaper"},
-  {"commands":["Invoke-WebRequest -Uri 'https://picsum.photos/1920/1080' -OutFile \"$env:USERPROFILE\\Pictures\\new_wallpaper.jpg\"; Write-Output 'Downloaded new wallpaper'"],"explanation":"Download new image"},
-  {"commands":["Add-Type -TypeDefinition 'using System.Runtime.InteropServices; public class W { [DllImport(\"user32.dll\", CharSet=CharSet.Auto)] public static extern int SystemParametersInfo(int a, int b, string c, int d); }'; [W]::SystemParametersInfo(0x0014, 0, \"$env:USERPROFILE\\Pictures\\new_wallpaper.jpg\", 0x01|0x02); Write-Output 'Wallpaper changed!'"],"explanation":"Set as wallpaper"}
-],"explanation":"Backing up wallpaper, downloading new one, setting it"}
-
-CHAIN EXAMPLE:
-User: "analiza mi disco, encuentra los 5 archivos mas grandes, y crea un reporte en el escritorio"
-
-{"mode":"multi","steps":[
-  {"commands":["Get-PSDrive -PSProvider FileSystem | Where-Object {$_.Used -gt 0} | Select-Object Name, @{N='Used(GB)';E={[math]::Round($_.Used/1GB,2)}}, @{N='Free(GB)';E={[math]::Round($_.Free/1GB,2)}} | Format-Table -AutoSize"],"explanation":"Get disk usage"},
-  {"commands":["$big = Get-ChildItem 'C:\\Users' -Recurse -File -ErrorAction SilentlyContinue | Sort-Object Length -Descending | Select-Object -First 5 FullName, @{N='Size(MB)';E={[math]::Round($_.Length/1MB,2)}}; $big | Format-Table -AutoSize; $big"],"explanation":"Find 5 largest files"},
-  {"commands":["$report = \"Disk Report - $(Get-Date)`n`nDisk Usage:`n\"; Get-PSDrive -PSProvider FileSystem | Where-Object {$_.Used -gt 0} | ForEach-Object { $report += \"$($_.Name): $([math]::Round($_.Used/1GB,2))GB used, $([math]::Round($_.Free/1GB,2))GB free`n\" }; $report += \"`nTop 5 Largest Files:`n\"; Get-ChildItem 'C:\\Users' -Recurse -File -ErrorAction SilentlyContinue | Sort-Object Length -Descending | Select-Object -First 5 | ForEach-Object { $report += \"$([math]::Round($_.Length/1MB,2))MB - $($_.FullName)`n\" }; Set-Content \"$env:USERPROFILE\\Desktop\\disk_report.txt\" $report -Encoding UTF8; Write-Output $report"],"explanation":"Create report on desktop"}
-],"explanation":"Full disk analysis with report"}
+  {"commands":["Get-PSDrive -PSProvider FileSystem | Where-Object {$_.Used -gt 0} | Select-Object Name, @{N='Used(GB)';E={[math]::Round($_.Used/1GB,2)}}, @{N='Free(GB)';E={[math]::Round($_.Free/1GB,2)}} | Format-Table -AutoSize"],"explanation":"Check disk usage"},
+  {"commands":["Get-ChildItem 'C:\\Users' -Recurse -File -ErrorAction SilentlyContinue | Sort-Object Length -Descending | Select-Object -First 10 FullName, @{N='MB';E={[math]::Round($_.Length/1MB,2)}} | Format-Table -AutoSize"],"explanation":"Find largest files"},
+  {"commands":["$r = \"Disk Report - $(Get-Date)`n\"; Get-PSDrive -PSProvider FileSystem | Where-Object {$_.Used -gt 0} | ForEach-Object { $r += \"$($_.Name): $([math]::Round($_.Free/1GB,2))GB free`n\" }; $r += \"`nLargest files:`n\"; Get-ChildItem 'C:\\Users' -Recurse -File -ErrorAction SilentlyContinue | Sort-Object Length -Descending | Select-Object -First 10 | ForEach-Object { $r += \"$([math]::Round($_.Length/1MB,2))MB - $($_.Name)`n\" }; Set-Content \"$env:USERPROFILE\\Desktop\\disk_report.txt\" $r; Write-Output $r"],"explanation":"Generate report"}
+],"explanation":"Full disk analysis"}
 "#;
 
 const RETRY_PROMPT: &str = r#"The command FAILED with this error:
@@ -307,6 +335,115 @@ pub async fn run_task(
                 accumulated_output = output;
                 update_task_status(db_path, task_id, if success { "completed" } else { "failed" });
                 break;
+            }
+
+            "command_then_screen" => {
+                // Hybrid mode: run commands first, then switch to screen/vision
+                let cmds = plan_json["commands"].as_array()
+                    .map(|a| a.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
+                    .unwrap_or_default();
+                let screen_task = plan_json["screen_task"].as_str().unwrap_or(description);
+                let expl = plan_json["explanation"].as_str().unwrap_or("");
+
+                // Phase 1: Execute commands
+                if !cmds.is_empty() {
+                    let script = cmds.join("; ");
+                    emit(app_handle, "agent:step_started", task_id, 1, expl);
+                    info!(task_id, script = %script, "command_then_screen: command phase");
+
+                    let is_gui = script.to_lowercase().contains("start-process");
+                    let timeout = if is_gui { 30 } else { settings.cli_timeout };
+                    let (success, output) = execute_with_retry(&script, timeout, description, &gateway, settings, task_id).await;
+
+                    if is_gui { tokio::time::sleep(std::time::Duration::from_secs(3)).await; }
+
+                    let sp = take_screenshot(screenshots_dir).await;
+                    let sp_str = sp.as_ref().map(|p| p.to_string_lossy().to_string());
+                    let action = AgentAction::RunCommand { command: script.clone(), shell: ShellType::PowerShell };
+                    let result = ExecutionResult {
+                        method: ExecutionMethod::Terminal, success,
+                        output: Some(output.clone()), screenshot_path: sp_str.clone(),
+                        duration_ms: start.elapsed().as_millis() as u64,
+                    };
+                    save_step(db_path, task_id, 1, &action, &sp.unwrap_or_default(), &result);
+                    step_history.push(StepRecord {
+                        step_number: 1, action, result, screenshot_path: sp_str,
+                    });
+
+                    if !success {
+                        accumulated_output = format!("Command phase failed: {}", output);
+                        update_task_status(db_path, task_id, "failed");
+                        break;
+                    }
+                }
+
+                // Phase 2: Vision-guided screen interaction
+                info!(task_id, screen_task, "command_then_screen: screen phase");
+                let combined_task = format!("{}\n\nThe commands have already run. Now handle the visual part: {}", description, screen_task);
+
+                for vs in 1..=15u32 {
+                    if kill_switch.load(Ordering::Relaxed) { break; }
+
+                    let screenshot = tokio::task::spawn_blocking({
+                        let sd = screenshots_dir.to_path_buf();
+                        move || {
+                            let data = capture::capture_full_screen().map_err(|e| e.to_string())?;
+                            let path = capture::save_screenshot(&data, &sd).map_err(|e| e.to_string())?;
+                            let b64 = capture::to_base64_jpeg(&data, 80).map_err(|e| e.to_string())?;
+                            Ok::<_, String>((path, b64))
+                        }
+                    }).await.map_err(|e| e.to_string())??;
+
+                    let (sp, b64) = screenshot;
+                    let step_num = 10 + vs;
+                    emit(app_handle, "agent:step_started", task_id, step_num, "Screen interaction");
+
+                    let action = match vision::plan_next_action(&b64, &combined_task, &step_history, settings, &gateway).await {
+                        Ok(a) => a,
+                        Err(e) => {
+                            warn!(task_id, error = %e, "Vision failed in command_then_screen");
+                            accumulated_output = format!("Commands ran successfully but screen interaction failed: {}", e);
+                            break;
+                        }
+                    };
+
+                    if let AgentAction::TaskComplete { ref summary } = action {
+                        accumulated_output = summary.clone();
+                        update_task_status(db_path, task_id, "completed");
+                        step_history.push(StepRecord {
+                            step_number: step_num, action,
+                            result: ExecutionResult {
+                                method: ExecutionMethod::Screen, success: true,
+                                output: Some(accumulated_output.clone()),
+                                screenshot_path: Some(sp.to_string_lossy().to_string()),
+                                duration_ms: 0,
+                            },
+                            screenshot_path: Some(sp.to_string_lossy().to_string()),
+                        });
+                        break;
+                    }
+
+                    let result = match executor::execute(&action, settings.cli_timeout, kill_switch).await {
+                        Ok(r) => r,
+                        Err(e) => ExecutionResult {
+                            method: ExecutionMethod::Screen, success: false,
+                            output: Some(e), screenshot_path: None, duration_ms: 0,
+                        },
+                    };
+
+                    save_step(db_path, task_id, step_num, &action, &sp, &result);
+                    step_history.push(StepRecord {
+                        step_number: step_num, action, result,
+                        screenshot_path: Some(sp.to_string_lossy().to_string()),
+                    });
+
+                    tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+                }
+
+                if accumulated_output.is_empty() {
+                    accumulated_output = "Task completed (command + screen interaction)".to_string();
+                    update_task_status(db_path, task_id, "completed");
+                }
             }
 
             "screen" => {
