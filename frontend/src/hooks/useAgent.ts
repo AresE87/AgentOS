@@ -6,6 +6,12 @@ import type {
     AgentSettings,
     ActiveChain,
     ChainHistoryItem,
+    ScreenshotResult,
+    UIElement,
+    WindowInfo,
+    PCTaskResult,
+    TaskStep,
+    MeshNode,
 } from '../types/ipc';
 
 // Detect Tauri v2 environment
@@ -54,19 +60,29 @@ export function useAgent() {
 
     const getAnalytics = () => callInvoke<any>('get_analytics');
 
+    // Phase 2: PC Control
+    const captureScreenshot = () => callInvoke<ScreenshotResult>('capture_screenshot');
+    const getUIElements = () => callInvoke<{ elements: UIElement[] }>('get_ui_elements');
+    const listWindows = () => callInvoke<{ windows: WindowInfo[] }>('list_windows');
+    const runPCTask = (description: string) => callInvoke<PCTaskResult>('run_pc_task', { description });
+    const getTaskSteps = (taskId: string) => callInvoke<{ steps: TaskStep[] }>('get_task_steps', { taskId });
+    const killSwitch = () => callInvoke<{ ok: boolean }>('kill_switch');
+    const resetKillSwitch = () => callInvoke<{ ok: boolean }>('reset_kill_switch');
+
+    // Phase 5: Mesh
+    const getMeshNodes = () => callInvoke<{ nodes: MeshNode[] }>('get_mesh_nodes');
+    const sendMeshTask = (nodeId: string, description: string) =>
+        callInvoke<{ task_id: string }>('send_mesh_task', { nodeId, description });
+
     return {
-        getStatus,
-        processMessage,
-        getTasks,
-        getPlaybooks,
-        setActivePlaybook,
-        getSettings,
-        updateSettings,
-        healthCheck,
-        getActiveChain,
-        getChainHistory,
-        sendChainMessage,
-        getAnalytics,
+        getStatus, processMessage, getTasks, getPlaybooks, setActivePlaybook,
+        getSettings, updateSettings, healthCheck, getActiveChain, getChainHistory,
+        sendChainMessage, getAnalytics,
+        // PC Control
+        captureScreenshot, getUIElements, listWindows, runPCTask, getTaskSteps,
+        killSwitch, resetKillSwitch,
+        // Mesh
+        getMeshNodes, sendMeshTask,
     };
 }
 

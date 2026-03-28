@@ -96,3 +96,67 @@ export interface AgentEvent {
     cost?: number;
     error?: string;
 }
+
+// Phase 2: PC Control types
+export interface ScreenshotResult {
+    path: string;
+    base64: string;
+}
+
+export interface UIElement {
+    name: string;
+    control_type: string;
+    automation_id: string;
+    bounding_rect: [number, number, number, number];
+    is_enabled: boolean;
+    value: string | null;
+    children: UIElement[];
+}
+
+export interface WindowInfo {
+    hwnd: number;
+    title: string;
+    class_name: string;
+    rect: [number, number, number, number];
+    is_visible: boolean;
+}
+
+export interface TaskStep {
+    step_number: number;
+    action_type: string;
+    description: string | null;
+    screenshot_path: string | null;
+    execution_method: string | null;
+    success: boolean;
+    duration_ms: number;
+    created_at: string;
+}
+
+export interface PCTaskResult {
+    task_id: string;
+    status: string;
+}
+
+export interface AgentStepEvent {
+    task_id: string;
+    step_number: number;
+    success?: boolean;
+    screenshot_path?: string;
+    error?: string;
+}
+
+// Phase 5: Mesh types
+export interface MeshNode {
+    node_id: string;
+    display_name: string;
+    status: 'online' | 'offline';
+    last_seen: string;
+    capabilities: string[];
+}
+
+export interface MeshTask {
+    task_id: string;
+    description: string;
+    target_node: string;
+    status: string;
+}

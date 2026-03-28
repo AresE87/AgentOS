@@ -1,9 +1,13 @@
+mod agents;
 mod brain;
+mod channels;
 mod config;
 mod eyes;
 mod hands;
 mod memory;
+mod mesh;
 mod pipeline;
+mod playbooks;
 pub mod types;
 
 use std::path::PathBuf;
@@ -298,6 +302,49 @@ async fn cmd_get_task_steps(
     Ok(serde_json::json!({ "steps": steps }))
 }
 
+// ── Phase 3: Agents ──────────────────────────────────────────
+#[tauri::command]
+async fn cmd_get_agents() -> Result<serde_json::Value, String> {
+    let registry = agents::AgentRegistry::new();
+    Ok(serde_json::json!({ "agents": registry.list() }))
+}
+
+#[tauri::command]
+async fn cmd_find_agent(task: String) -> Result<serde_json::Value, String> {
+    let registry = agents::AgentRegistry::new();
+    let agent = registry.find_best(&task);
+    Ok(serde_json::json!({
+        "name": agent.name,
+        "category": agent.category,
+        "level": format!("{:?}", agent.level),
+        "system_prompt": agent.system_prompt,
+    }))
+}
+
+// ── Phase 5: Mesh ────────────────────────────────────────────
+#[tauri::command]
+async fn cmd_get_mesh_nodes() -> Result<serde_json::Value, String> {
+    let nodes = mesh::discovery::get_discovered_nodes();
+    Ok(serde_json::json!({ "nodes": nodes }))
+}
+
+#[tauri::command]
+async fn cmd_send_mesh_task(node_id: String, description: String) -> Result<serde_json::Value, String> {
+    let task_id = uuid::Uuid::new_v4().to_string();
+    // In production, this would send via gRPC/WebSocket to the target node
+    tracing::info!(node_id, description, task_id, "Mesh task queued (stub)");
+    Ok(serde_json::json!({ "task_id": task_id, "status": "queued" }))
+}
+
+// ── Phase 6: Channels ────────────────────────────────────────
+#[tauri::command]
+async fn cmd_get_channel_status() -> Result<serde_json::Value, String> {
+    Ok(serde_json::json!({
+        "telegram": channels::telegram::is_configured(),
+        "discord": channels::discord::is_configured(),
+    }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -354,6 +401,11 @@ pub fn run() {
             cmd_list_windows,
             cmd_run_pc_task,
             cmd_get_task_steps,
+            cmd_get_agents,
+            cmd_find_agent,
+            cmd_get_mesh_nodes,
+            cmd_send_mesh_task,
+            cmd_get_channel_status,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");
