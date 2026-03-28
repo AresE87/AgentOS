@@ -162,11 +162,28 @@ pub async fn run_task(
     info!(task_id, plan = %plan_text, "LLM plan received");
 
     // Parse the JSON response
-    let plan_json: serde_json::Value = extract_json(&plan_text)
-        .ok_or_else(|| {
-            update_task_status(db_path, task_id, "failed");
-            format!("LLM returned invalid JSON: {}", &plan_text[..plan_text.len().min(200)])
-        })?;
+    let plan_json = match extract_json(&plan_text) {
+        Some(json) => json,
+        None => {
+            // LLM didn't return JSON — treat the raw response as a chat answer
+            warn!(task_id, "LLM didn't return JSON, treating as chat response");
+            let output = plan_text.clone();
+            save_task_output(db_path, task_id, &output);
+            update_task_status(db_path, task_id, "completed");
+
+            let _ = app_handle.emit("agent:task_completed", serde_json::json!({
+                "task_id": task_id, "success": true, "output": output,
+            }));
+
+            return Ok(TaskExecutionResult {
+                task_id: task_id.to_string(),
+                success: true,
+                steps: vec![],
+                total_cost: 0.0,
+                duration_ms: start.elapsed().as_millis() as u64,
+            });
+        }
+    };
 
     let mode = plan_json["mode"].as_str().unwrap_or("command");
 
@@ -180,9 +197,17 @@ pub async fn run_task(
             let explanation = plan_json["explanation"].as_str().unwrap_or("");
 
             if commands.is_empty() {
-                update_task_status(db_path, task_id, "failed");
-                return Err("LLM returned no commands".to_string());
-            }
+                // If no commands but explanation exists, show it
+                if !explanation.is_empty() {
+                    save_task_output(db_path, task_id, explanation);
+                    update_task_status(db_path, task_id, "completed");
+                    accumulated_output = explanation.to_string();
+                } else {
+                    save_task_output(db_path, task_id, "No commands generated");
+                    update_task_status(db_path, task_id, "failed");
+                }
+                // Skip to end
+            } else {
 
             info!(task_id, count = commands.len(), "Executing {} commands", commands.len());
 
@@ -259,6 +284,7 @@ pub async fn run_task(
 
             accumulated_output = output;
             update_task_status(db_path, task_id, if success { "completed" } else { "failed" });
+            } // end else (commands not empty)
         }
 
         "screen" => {
