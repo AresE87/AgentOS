@@ -8,14 +8,14 @@ import type {
     ChainHistoryItem,
 } from '../types/ipc';
 
-// Detect Tauri environment
+// Detect Tauri v2 environment
 const isTauri = typeof window !== 'undefined' && '__TAURI__' in window;
 
-// Dynamic invoke: real Tauri in desktop, mock in browser
 async function callInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
     if (isTauri) {
-        const { invoke } = await import('@tauri-apps/api/tauri');
-        return invoke<T>(cmd, args);
+        // Tauri v2: import from @tauri-apps/api/core, commands prefixed with cmd_
+        const { invoke } = await import('@tauri-apps/api/core');
+        return invoke<T>(`cmd_${cmd}`, args);
     }
     // Mock mode for browser dev
     const { invoke } = await import('../mocks/tauri');
