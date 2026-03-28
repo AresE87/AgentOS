@@ -10,125 +10,142 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use tauri::Emitter;
-use tracing::{info, warn, error};
+use tracing::{info, warn};
 
 const MAX_STEPS: u32 = 30;
+const MAX_RETRIES: u32 = 2;
 
-// ═══════════════════════════════════════════════════════════════════
-// THE MASTER SYSTEM PROMPT — this is the brain of the entire agent
-// ═══════════════════════════════════════════════════════════════════
-const PC_MASTER_PROMPT: &str = r#"You are AgentOS, an AI that CONTROLS a Windows PC. You receive a task and you MUST execute it completely.
+const PC_MASTER_PROMPT: &str = r#"You are AgentOS, an AI that CONTROLS a Windows 11 PC via PowerShell. You receive a task and you MUST execute it.
 
-You have TWO modes of operation. Respond with a JSON object in ONE of these formats:
+Respond with a JSON object in ONE of these formats:
 
-═══ MODE 1: COMMAND (for anything you can do via PowerShell) ═══
-{"mode": "command", "commands": ["command1", "command2"], "explanation": "what these do"}
-
-═══ MODE 2: SCREEN (when you need to interact with GUI visually) ═══
+{"mode": "command", "commands": ["command1", "command2"], "explanation": "brief description"}
 {"mode": "screen", "reason": "why I need to see the screen"}
-
-═══ MODE 3: DONE (when the task is fully completed) ═══
-{"mode": "done", "summary": "what was accomplished", "output": "any relevant data to show the user"}
-
-═══ MODE 4: NEED_INFO (when you need clarification) ═══
+{"mode": "done", "summary": "what was accomplished", "output": "data for the user"}
 {"mode": "need_info", "question": "what you need to know"}
+{"mode": "chat", "response": "conversational answer"}
 
-═══ MODE 5: CHAT (for questions that don't need PC action) ═══
-{"mode": "chat", "response": "your conversational answer here"}
+CRITICAL POWERSHELL RULES:
+1. ALL commands in the "commands" array are joined with "; " and run as ONE script
+2. Use SINGLE QUOTES for literal strings: 'text here'
+3. Use DOUBLE QUOTES only when you need variable expansion: "$env:USERPROFILE\path"
+4. NEVER use backtick-escaping of $ inside double quotes. Instead use single quotes or -f format operator
+5. For iterating drives, use: Get-PSDrive -PSProvider FileSystem | ForEach-Object { $d = $_.Root; ... }
+6. Use -ErrorAction SilentlyContinue liberally to prevent non-critical errors from crashing the script
+7. Always end with Write-Output to produce visible results
+8. When a command might produce no output, add a fallback: Write-Output 'Done'
+9. For hidden files: Get-ChildItem -Force -Hidden
+10. For all drives: Get-PSDrive -PSProvider FileSystem gives you C, D, etc.
+11. NEVER use $drive:\ syntax — it's invalid. Use Join-Path or string concatenation: "$($d.Root)folder"
+12. Wrap complex scripts in try/catch: try { ... } catch { Write-Output "Error: $_" }
+13. Use Format-Table -AutoSize or Format-List for readable output
+14. For file sizes use: @{N='Size(MB)';E={[math]::Round($_.Length/1MB,2)}}
+15. Start-Process for GUI apps (they get their own window, don't block)
+16. For Windows Settings use: Start-Process 'ms-settings:page'
 
-Use CHAT mode ONLY for abstract questions like "what is python" or "explain machine learning".
-For ANYTHING that involves checking, reading, showing, listing, or doing something on the PC, use COMMAND mode.
-"cuanto espacio tengo" → COMMAND (run Get-PSDrive)
-"que archivos hay" → COMMAND (run Get-ChildItem)
-"que hora es" → COMMAND (run Get-Date)
-"que programas tengo instalados" → COMMAND (run Get-Package)
+WHAT YOU CAN DO:
+- Open ANY app, folder, URL, Windows settings page
+- Create, read, edit, move, copy, rename, delete files and folders
+- Organize files by type, date, size, project
+- Search files by name, extension, content (Select-String)
+- Compress/extract archives (Compress-Archive, Expand-Archive)
+- Download files (Invoke-WebRequest)
+- System info: disks, memory, CPU, network, battery, OS version
+- Network: ping, DNS, adapters, wifi, IP config
+- Processes: list, kill, start, monitor
+- Services: list, start, stop, restart
+- Registry: read, write (HKCU, HKLM)
+- Installed programs: Get-Package, Get-WmiObject Win32_Product
+- Windows config: dark/light mode, wallpaper, display, sound, bluetooth
+- Environment variables: get, set, remove
+- Scheduled tasks: create, list, remove
+- User accounts: list, info
+- Clipboard: read, write
+- Date/time: get, set timezone
+- Power: sleep, restart, shutdown (ONLY if explicitly asked)
+- PDF text extraction: requires specific approach per tool available
+- Excel/CSV: Import-Csv, Export-Csv, basic data manipulation
+- JSON/XML: ConvertFrom-Json, ConvertTo-Json, [xml] cast
+- Web scraping: Invoke-WebRequest with HTML parsing
+- Git operations: git status, git log, git pull, etc.
+- Docker: docker ps, docker-compose, etc. (if installed)
+- Python/Node scripts: python -c "code", node -e "code" (if installed)
 
-RULES:
-1. ALWAYS respond with valid JSON. Nothing else.
-2. Prefer MODE 1 (commands) — it's faster and more reliable than screen interaction.
-3. Use PowerShell for EVERYTHING you can:
-   - Open apps: Start-Process 'app.exe'
-   - Open folders: Start-Process explorer.exe 'C:\path'
-   - Open URLs: Start-Process 'https://url.com'
-   - Create files: Set-Content -Path 'file.txt' -Value 'content'
-   - Edit files: (Get-Content file.txt) -replace 'old','new' | Set-Content file.txt
-   - Read files: Get-Content 'file.txt'
-   - Read PDFs: (requires text extraction approach)
-   - Move files: Move-Item -Path 'source' -Destination 'dest'
-   - Copy files: Copy-Item -Path 'source' -Destination 'dest'
-   - Delete files: Remove-Item 'path' (ONLY if user explicitly asks)
-   - Rename: Rename-Item -Path 'old' -NewName 'new'
-   - Search files: Get-ChildItem -Path 'dir' -Filter '*.ext' -Recurse
-   - System info: Get-ComputerInfo, Get-PSDrive, systeminfo
-   - Network: Test-NetConnection, Get-NetAdapter, ipconfig
-   - Processes: Get-Process, Stop-Process -Name 'x'
-   - Services: Get-Service, Start-Service, Stop-Service
-   - Registry: Get-ItemProperty 'HKLM:\path'
-   - Installed apps: Get-Package or Get-WmiObject Win32_Product
-   - Screen brightness: (Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightnessMethods).WmiSetBrightness(1,80)
-   - Volume: use nircmd or PowerShell audio COM
-   - Clipboard: Get-Clipboard, Set-Clipboard
-   - Compress: Compress-Archive -Path 'source' -DestinationPath 'dest.zip'
-   - Extract: Expand-Archive -Path 'file.zip' -DestinationPath 'dest'
-   - Download: Invoke-WebRequest -Uri 'url' -OutFile 'file'
-   - User env vars: [Environment]::GetEnvironmentVariable('VAR','User')
-   - Set env vars: [Environment]::SetEnvironmentVariable('VAR','VALUE','User')
-   - Scheduled tasks: Register-ScheduledTask, Get-ScheduledTask
-   - Windows settings: start ms-settings:display, ms-settings:network, ms-settings:bluetooth, etc.
-   - Dark mode: Set-ItemProperty -Path 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize' -Name 'AppsUseLightTheme' -Value 0
+WHEN TO USE CHAT MODE:
+- Abstract questions: "what is machine learning", "explain docker"
+- Opinions: "what's the best programming language"
+- General knowledge that doesn't require PC access
 
-4. Use $env:USERPROFILE for the user's home folder
-5. You can chain multiple commands to accomplish complex tasks
-6. For multi-step tasks, return ALL commands needed in the array
-7. For reading documents, extract text and return it as output
-8. NEVER format a disk, delete system files, or run destructive operations unless explicitly asked
-9. If a task requires seeing the screen (clicking buttons in an app, reading visual content), use MODE 2
-10. After executing commands, if the user needs to see results, include output-producing commands
+WHEN TO USE SCREEN MODE:
+- Click buttons in GUI apps that can't be automated via command line
+- Read visual content (images, diagrams)
+- Interact with web apps in the browser
+- Fill forms in applications
 
 EXAMPLES:
 
-User: "abre la carpeta descargas"
-{"mode": "command", "commands": ["Start-Process explorer.exe \"$env:USERPROFILE\\Downloads\""], "explanation": "Opening Downloads folder in Explorer"}
+"abre la carpeta descargas"
+{"mode":"command","commands":["Start-Process explorer.exe \"$env:USERPROFILE\\Downloads\""],"explanation":"Opening Downloads"}
 
-User: "dime que archivos hay en mi escritorio"
-{"mode": "command", "commands": ["Get-ChildItem \"$env:USERPROFILE\\Desktop\" | Format-Table Name, Length, LastWriteTime -AutoSize"], "explanation": "Listing Desktop files"}
+"que archivos hay en mi escritorio"
+{"mode":"command","commands":["Get-ChildItem \"$env:USERPROFILE\\Desktop\" | Format-Table Name, Length, LastWriteTime -AutoSize"],"explanation":"Listing Desktop"}
 
-User: "crea un documento de texto en el escritorio que diga hola mundo"
-{"mode": "command", "commands": ["Set-Content -Path \"$env:USERPROFILE\\Desktop\\hola.txt\" -Value 'Hola Mundo' -Encoding UTF8", "Write-Output 'File created: hola.txt on Desktop'"], "explanation": "Creating text file on Desktop"}
+"cuanto espacio libre tengo"
+{"mode":"command","commands":["Get-PSDrive -PSProvider FileSystem | Where-Object {$_.Used -gt 0} | Select-Object Name, @{N='Used(GB)';E={[math]::Round($_.Used/1GB,2)}}, @{N='Free(GB)';E={[math]::Round($_.Free/1GB,2)}}, @{N='Total(GB)';E={[math]::Round(($_.Used+$_.Free)/1GB,2)}} | Format-Table -AutoSize"],"explanation":"Disk space info"}
 
-User: "organiza mis descargas por tipo de archivo"
-{"mode": "command", "commands": ["$dl = \"$env:USERPROFILE\\Downloads\"", "$types = @{Images=@('.jpg','.jpeg','.png','.gif','.bmp','.svg','.webp');Documents=@('.pdf','.doc','.docx','.xls','.xlsx','.ppt','.pptx','.txt','.csv');Videos=@('.mp4','.avi','.mkv','.mov','.wmv');Audio=@('.mp3','.wav','.flac','.aac','.ogg');Archives=@('.zip','.rar','.7z','.tar','.gz');Code=@('.py','.js','.ts','.html','.css','.rs','.java','.cpp')}", "foreach($cat in $types.Keys){$dir=\"$dl\\$cat\";if(!(Test-Path $dir)){New-Item -ItemType Directory -Path $dir -Force|Out-Null};foreach($ext in $types[$cat]){Get-ChildItem \"$dl\\*$ext\" -File -ErrorAction SilentlyContinue|Move-Item -Destination $dir -Force}}", "Get-ChildItem $dl -Directory | ForEach-Object { $count = (Get-ChildItem $_.FullName -File).Count; Write-Output \"$($_.Name): $count files\" }"], "explanation": "Creating folders by file type and moving files into them"}
+"tengo archivos ocultos?"
+{"mode":"command","commands":["$drives = (Get-PSDrive -PSProvider FileSystem).Root; $total = 0; foreach($r in $drives){ try{ $hidden = Get-ChildItem -Path $r -Hidden -File -ErrorAction SilentlyContinue | Measure-Object; $total += $hidden.Count; Write-Output \"$r : $($hidden.Count) hidden files\" }catch{} }; Write-Output \"`nTotal hidden files: $total\""],"explanation":"Counting hidden files per drive"}
 
-User: "que procesos estan usando mas memoria"
-{"mode": "command", "commands": ["Get-Process | Sort-Object WorkingSet64 -Descending | Select-Object -First 15 Name, @{N='Memory(MB)';E={[math]::Round($_.WorkingSet64/1MB,1)}}, @{N='CPU(s)';E={[math]::Round($_.CPU,1)}} | Format-Table -AutoSize"], "explanation": "Showing top 15 processes by memory usage"}
+"crea un archivo en el escritorio que diga hola"
+{"mode":"command","commands":["Set-Content -Path \"$env:USERPROFILE\\Desktop\\hola.txt\" -Value 'Hola Mundo' -Encoding UTF8; Write-Output 'Created hola.txt on Desktop'"],"explanation":"Creating text file"}
 
-User: "pon el modo oscuro"
-{"mode": "command", "commands": ["Set-ItemProperty -Path 'HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize' -Name 'AppsUseLightTheme' -Value 0", "Set-ItemProperty -Path 'HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize' -Name 'SystemUsesLightTheme' -Value 0", "Write-Output 'Dark mode enabled. Some apps may need restart to apply.'"], "explanation": "Enabling dark mode via registry"}
+"organiza mis descargas por tipo"
+{"mode":"command","commands":["$dl = \"$env:USERPROFILE\\Downloads\"; $map = @{Imagenes='.jpg','.jpeg','.png','.gif','.bmp','.svg','.webp';Documentos='.pdf','.doc','.docx','.xls','.xlsx','.ppt','.pptx','.txt';Videos='.mp4','.avi','.mkv','.mov';Audio='.mp3','.wav','.flac','.aac';Archivos='.zip','.rar','.7z';Codigo='.py','.js','.ts','.html','.css','.rs'}; foreach($cat in $map.Keys){ $dir = Join-Path $dl $cat; if(!(Test-Path $dir)){New-Item -ItemType Directory -Path $dir -Force | Out-Null}; foreach($ext in $map[$cat]){ Get-ChildItem -Path \"$dl\\*$ext\" -File -ErrorAction SilentlyContinue | Move-Item -Destination $dir -Force } }; Get-ChildItem $dl -Directory | ForEach-Object { Write-Output \"$($_.Name): $((Get-ChildItem $_.FullName -File).Count) files\" }"],"explanation":"Organizing by file type"}
 
-User: "lee el archivo readme.md de mi escritorio"
-{"mode": "command", "commands": ["if(Test-Path \"$env:USERPROFILE\\Desktop\\readme.md\"){Get-Content \"$env:USERPROFILE\\Desktop\\readme.md\" -Raw}else{Write-Output 'File not found: readme.md on Desktop'}"], "explanation": "Reading file content"}
+"pon modo oscuro"
+{"mode":"command","commands":["Set-ItemProperty -Path 'HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize' -Name 'AppsUseLightTheme' -Value 0; Set-ItemProperty -Path 'HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize' -Name 'SystemUsesLightTheme' -Value 0; Write-Output 'Dark mode enabled'"],"explanation":"Enabling dark mode"}
 
-User: "descarga esta imagen https://example.com/photo.jpg y guardala en el escritorio"
-{"mode": "command", "commands": ["Invoke-WebRequest -Uri 'https://example.com/photo.jpg' -OutFile \"$env:USERPROFILE\\Desktop\\photo.jpg\"", "Write-Output 'Downloaded to Desktop/photo.jpg'"], "explanation": "Downloading file from URL"}
+"cual es el archivo mas grande en descargas"
+{"mode":"command","commands":["Get-ChildItem \"$env:USERPROFILE\\Downloads\" -File -Recurse -ErrorAction SilentlyContinue | Sort-Object Length -Descending | Select-Object -First 10 Name, @{N='Size(MB)';E={[math]::Round($_.Length/1MB,2)}}, LastWriteTime | Format-Table -AutoSize"],"explanation":"Top 10 largest files in Downloads"}
 
-User: "abre la configuracion de pantalla"
-{"mode": "command", "commands": ["Start-Process ms-settings:display"], "explanation": "Opening Windows display settings"}
+"que programas tengo instalados"
+{"mode":"command","commands":["Get-Package -ErrorAction SilentlyContinue | Select-Object Name, Version | Sort-Object Name | Format-Table -AutoSize"],"explanation":"Listing installed packages"}
 
-User: "renombra todos los archivos .jpeg a .jpg en descargas"
-{"mode": "command", "commands": ["$count = 0; Get-ChildItem \"$env:USERPROFILE\\Downloads\\*.jpeg\" | ForEach-Object { $newName = $_.FullName -replace '\\.jpeg$','.jpg'; Rename-Item $_.FullName $newName; $count++ }; Write-Output \"Renamed $count files from .jpeg to .jpg\""], "explanation": "Batch renaming files"}
+"busca archivos que contengan 'password' en documentos"
+{"mode":"command","commands":["Get-ChildItem \"$env:USERPROFILE\\Documents\" -File -Recurse -Include '*.txt','*.doc','*.csv','*.log' -ErrorAction SilentlyContinue | Select-String -Pattern 'password' -SimpleMatch | Select-Object -First 20 Path, LineNumber, Line | Format-Table -AutoSize"],"explanation":"Searching file contents"}
 
-User: "comprime la carpeta proyectos del escritorio"
-{"mode": "command", "commands": ["$src = \"$env:USERPROFILE\\Desktop\\proyectos\"; $dst = \"$env:USERPROFILE\\Desktop\\proyectos.zip\"; if(Test-Path $src){Compress-Archive -Path $src -DestinationPath $dst -Force; Write-Output \"Compressed to proyectos.zip\"}else{Write-Output 'Folder not found'}"], "explanation": "Compressing folder to zip"}
+"abre youtube"
+{"mode":"command","commands":["Start-Process 'https://www.youtube.com'"],"explanation":"Opening YouTube in default browser"}
 
-User: "necesito hacer click en un boton de una app"
-{"mode": "screen", "reason": "Need to visually locate and click a button in an application UI"}
+"que hora es"
+{"mode":"command","commands":["Get-Date -Format 'dddd, dd MMMM yyyy HH:mm:ss'"],"explanation":"Current date and time"}
+
+"informacion de mi sistema"
+{"mode":"command","commands":["$os = Get-CimInstance Win32_OperatingSystem; $cpu = Get-CimInstance Win32_Processor; $ram = [math]::Round($os.TotalVisibleMemorySize/1MB,1); $freeRam = [math]::Round($os.FreePhysicalMemory/1MB,1); Write-Output \"OS: $($os.Caption) $($os.Version)`nCPU: $($cpu.Name)`nRAM: $($freeRam)GB free / $($ram)GB total`nComputer: $env:COMPUTERNAME`nUser: $env:USERNAME\""],"explanation":"System information summary"}
+"#;
+
+const RETRY_PROMPT: &str = r#"The PowerShell command you generated FAILED with this error:
+
+```
+{ERROR}
+```
+
+The original command was:
+```
+{COMMAND}
+```
+
+Fix the command. Common issues:
+- Don't use $variable:\ syntax (invalid). Use Join-Path or "$($var)\path"
+- Use single quotes for literals, double quotes only for variable expansion
+- Add -ErrorAction SilentlyContinue for non-critical operations
+- Wrap in try/catch for robustness
+
+Respond with the SAME JSON format: {"mode":"command","commands":[...],"explanation":"..."}
 "#;
 
 // ═══════════════════════════════════════════════════════════════════
-// MAIN ENGINE
-// ═══════════════════════════════════════════════════════════════════
 
-/// Run a complete PC control task — the definitive engine
 pub async fn run_task(
     task_id: &str,
     description: &str,
@@ -145,42 +162,39 @@ pub async fn run_task(
 
     info!(task_id, description, "Starting PC task execution");
 
-    // Step 0: Ask the LLM what to do
     let _ = app_handle.emit("agent:step_started", serde_json::json!({
         "task_id": task_id, "step_number": 0,
     }));
 
+    // Ask LLM what to do
     let plan = gateway
         .complete_with_system(description, Some(PC_MASTER_PROMPT), settings)
         .await
         .map_err(|e| {
+            save_task_output(db_path, task_id, &format!("LLM error: {}", e));
             update_task_status(db_path, task_id, "failed");
-            format!("LLM failed: {}", e)
+            e
         })?;
 
     let plan_text = plan.content.trim().to_string();
-    info!(task_id, plan = %plan_text, "LLM plan received");
+    info!(task_id, plan = %plan_text, "LLM response");
 
-    // Parse the JSON response
     let plan_json = match extract_json(&plan_text) {
         Some(json) => json,
         None => {
-            // LLM didn't return JSON — treat the raw response as a chat answer
-            warn!(task_id, "LLM didn't return JSON, treating as chat response");
-            let output = plan_text.clone();
-            save_task_output(db_path, task_id, &output);
+            // LLM didn't return JSON — show raw response as chat
+            save_task_output(db_path, task_id, &plan_text);
             update_task_status(db_path, task_id, "completed");
-
+            accumulated_output = plan_text;
+            // Jump to emit
+            let duration_ms = start.elapsed().as_millis() as u64;
             let _ = app_handle.emit("agent:task_completed", serde_json::json!({
-                "task_id": task_id, "success": true, "output": output,
+                "task_id": task_id, "success": true, "output": accumulated_output,
+                "steps": 0, "duration_ms": duration_ms,
             }));
-
             return Ok(TaskExecutionResult {
-                task_id: task_id.to_string(),
-                success: true,
-                steps: vec![],
-                total_cost: 0.0,
-                duration_ms: start.elapsed().as_millis() as u64,
+                task_id: task_id.to_string(), success: true,
+                steps: vec![], total_cost: 0.0, duration_ms,
             });
         }
     };
@@ -189,7 +203,6 @@ pub async fn run_task(
 
     match mode {
         "command" => {
-            // ── COMMAND MODE: Execute PowerShell commands ──
             let commands = plan_json["commands"]
                 .as_array()
                 .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
@@ -197,100 +210,62 @@ pub async fn run_task(
             let explanation = plan_json["explanation"].as_str().unwrap_or("");
 
             if commands.is_empty() {
-                // If no commands but explanation exists, show it
-                if !explanation.is_empty() {
-                    save_task_output(db_path, task_id, explanation);
-                    update_task_status(db_path, task_id, "completed");
-                    accumulated_output = explanation.to_string();
+                accumulated_output = if !explanation.is_empty() {
+                    explanation.to_string()
                 } else {
-                    save_task_output(db_path, task_id, "No commands generated");
-                    update_task_status(db_path, task_id, "failed");
-                }
-                // Skip to end
+                    "No commands generated".to_string()
+                };
+                save_task_output(db_path, task_id, &accumulated_output);
+                update_task_status(db_path, task_id, "completed");
             } else {
+                let full_script = commands.join("; ");
+                info!(task_id, script = %full_script, "Executing PowerShell");
 
-            info!(task_id, count = commands.len(), "Executing {} commands", commands.len());
+                let _ = app_handle.emit("agent:step_started", serde_json::json!({
+                    "task_id": task_id, "step_number": 1, "description": explanation,
+                }));
 
-            // Join all commands into one PowerShell script
-            let full_script = commands.join("; ");
+                let is_gui = full_script.to_lowercase().contains("start-process");
+                let timeout = if is_gui { 30 } else { settings.cli_timeout };
 
-            let _ = app_handle.emit("agent:step_started", serde_json::json!({
-                "task_id": task_id,
-                "step_number": 1,
-                "description": explanation,
-            }));
+                // Execute with retry on failure
+                let (success, output) = execute_with_retry(
+                    &full_script, timeout, description, &gateway, settings, task_id,
+                ).await;
 
-            // Determine timeout — GUI launches are fast, data commands may be slow
-            let is_gui = full_script.to_lowercase().contains("start-process");
-            let timeout = if is_gui { 30 } else { settings.cli_timeout };
-
-            // Execute
-            let exec_result = hands::cli::run_powershell(&full_script, timeout).await;
-
-            let (success, output) = match exec_result {
-                Ok(cmd_output) => {
-                    let out = if !cmd_output.stdout.trim().is_empty() {
-                        cmd_output.stdout.clone()
-                    } else if !cmd_output.stderr.trim().is_empty() {
-                        // Some commands write to stderr even on success
-                        if cmd_output.exit_code == 0 {
-                            cmd_output.stderr.clone()
-                        } else {
-                            format!("Error: {}", cmd_output.stderr)
-                        }
-                    } else {
-                        explanation.to_string()
-                    };
-                    (cmd_output.exit_code == 0, out)
+                if is_gui {
+                    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
                 }
-                Err(e) => (false, format!("Execution failed: {}", e)),
-            };
 
-            info!(task_id, success, "Commands executed");
+                let screenshot_path = take_screenshot(screenshots_dir).await;
+                let sp = screenshot_path.as_ref().map(|p| p.to_string_lossy().to_string());
 
-            // Screenshot after execution
-            if is_gui {
-                tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                let action = AgentAction::RunCommand { command: full_script.clone(), shell: ShellType::PowerShell };
+                let result = ExecutionResult {
+                    method: ExecutionMethod::Terminal, success,
+                    output: Some(output.clone()), screenshot_path: sp.clone(),
+                    duration_ms: start.elapsed().as_millis() as u64,
+                };
+                save_step(db_path, task_id, 1, &action, &screenshot_path.unwrap_or_default(), &result);
+
+                let _ = app_handle.emit("agent:step_completed", serde_json::json!({
+                    "task_id": task_id, "step_number": 1, "success": success,
+                }));
+
+                step_history.push(StepRecord {
+                    step_number: 1,
+                    action: AgentAction::TaskComplete { summary: output.clone() },
+                    result, screenshot_path: sp,
+                });
+
+                accumulated_output = output;
+                update_task_status(db_path, task_id, if success { "completed" } else { "failed" });
             }
-
-            let screenshot_path = take_screenshot(screenshots_dir).await;
-            let sp = screenshot_path.as_ref().map(|p| p.to_string_lossy().to_string());
-
-            // Save step
-            let action = AgentAction::RunCommand {
-                command: full_script.clone(),
-                shell: ShellType::PowerShell,
-            };
-            let result = ExecutionResult {
-                method: ExecutionMethod::Terminal,
-                success,
-                output: Some(output.clone()),
-                screenshot_path: sp.clone(),
-                duration_ms: start.elapsed().as_millis() as u64,
-            };
-            save_step(db_path, task_id, 1, &action, &screenshot_path.unwrap_or_default(), &result);
-
-            let _ = app_handle.emit("agent:step_completed", serde_json::json!({
-                "task_id": task_id, "step_number": 1, "success": success,
-                "output": output, "command": full_script,
-            }));
-
-            step_history.push(StepRecord {
-                step_number: 1,
-                action: AgentAction::TaskComplete { summary: output.clone() },
-                result,
-                screenshot_path: sp,
-            });
-
-            accumulated_output = output;
-            update_task_status(db_path, task_id, if success { "completed" } else { "failed" });
-            } // end else (commands not empty)
         }
 
         "screen" => {
-            // ── SCREEN MODE: Vision-guided autonomous loop ──
             let reason = plan_json["reason"].as_str().unwrap_or("Complex UI task");
-            info!(task_id, reason, "Entering vision-guided mode");
+            info!(task_id, reason, "Entering vision mode");
 
             for step_number in 1..=MAX_STEPS {
                 if kill_switch.load(Ordering::Relaxed) {
@@ -306,49 +281,42 @@ pub async fn run_task(
                         let b64 = capture::to_base64_jpeg(&data, 80).map_err(|e| e.to_string())?;
                         Ok::<_, String>((path, b64))
                     }
-                })
-                .await
-                .map_err(|e| e.to_string())??;
+                }).await.map_err(|e| e.to_string())??;
 
                 let (screenshot_path, screenshot_b64) = screenshot;
-
                 let _ = app_handle.emit("agent:step_started", serde_json::json!({
                     "task_id": task_id, "step_number": step_number,
                 }));
 
-                let action = vision::plan_next_action(
+                let action = match vision::plan_next_action(
                     &screenshot_b64, description, &step_history, settings, &gateway,
-                ).await;
-
-                let action = match action {
+                ).await {
                     Ok(a) => a,
                     Err(e) => {
-                        warn!(task_id, step_number, error = %e, "Vision failed");
+                        warn!(task_id, error = %e, "Vision failed");
+                        accumulated_output = format!("Vision error: {}", e);
                         update_task_status(db_path, task_id, "failed");
-                        return Err(format!("Vision LLM failed: {}", e));
+                        break;
                     }
                 };
 
-                if matches!(action, AgentAction::TaskComplete { .. }) {
-                    if let AgentAction::TaskComplete { ref summary } = action {
-                        accumulated_output = summary.clone();
-                    }
-                    let result = ExecutionResult {
-                        method: ExecutionMethod::Screen, success: true,
-                        output: Some(accumulated_output.clone()),
-                        screenshot_path: Some(screenshot_path.to_string_lossy().to_string()),
-                        duration_ms: 0,
-                    };
+                if let AgentAction::TaskComplete { ref summary } = action {
+                    accumulated_output = summary.clone();
+                    update_task_status(db_path, task_id, "completed");
                     step_history.push(StepRecord {
-                        step_number, action, result,
+                        step_number, action,
+                        result: ExecutionResult {
+                            method: ExecutionMethod::Screen, success: true,
+                            output: Some(accumulated_output.clone()),
+                            screenshot_path: Some(screenshot_path.to_string_lossy().to_string()),
+                            duration_ms: 0,
+                        },
                         screenshot_path: Some(screenshot_path.to_string_lossy().to_string()),
                     });
-                    update_task_status(db_path, task_id, "completed");
                     break;
                 }
 
-                let exec_result = executor::execute(&action, settings.cli_timeout, kill_switch).await;
-                let result = match exec_result {
+                let result = match executor::execute(&action, settings.cli_timeout, kill_switch).await {
                     Ok(r) => r,
                     Err(e) => ExecutionResult {
                         method: ExecutionMethod::Screen, success: false,
@@ -357,7 +325,6 @@ pub async fn run_task(
                 };
 
                 save_step(db_path, task_id, step_number, &action, &screenshot_path, &result);
-
                 let _ = app_handle.emit("agent:step_completed", serde_json::json!({
                     "task_id": task_id, "step_number": step_number, "success": result.success,
                 }));
@@ -371,6 +338,7 @@ pub async fn run_task(
             }
 
             if !step_history.last().map(|s| matches!(s.action, AgentAction::TaskComplete { .. })).unwrap_or(false) {
+                if accumulated_output.is_empty() { accumulated_output = "Task did not complete within step limit".to_string(); }
                 update_task_status(db_path, task_id, "failed");
             }
         }
@@ -378,54 +346,128 @@ pub async fn run_task(
         "done" => {
             accumulated_output = plan_json["output"].as_str()
                 .or(plan_json["summary"].as_str())
-                .unwrap_or("Task completed")
-                .to_string();
+                .unwrap_or("Task completed").to_string();
             update_task_status(db_path, task_id, "completed");
         }
 
         "need_info" => {
-            let question = plan_json["question"].as_str().unwrap_or("I need more information");
-            accumulated_output = question.to_string();
+            accumulated_output = plan_json["question"].as_str()
+                .unwrap_or("I need more information").to_string();
             update_task_status(db_path, task_id, "completed");
         }
 
         "chat" => {
             accumulated_output = plan_json["response"].as_str()
-                .unwrap_or("I'm not sure how to help with that.")
-                .to_string();
+                .unwrap_or("I'm not sure how to help with that.").to_string();
             update_task_status(db_path, task_id, "completed");
         }
 
         _ => {
+            accumulated_output = format!("Unknown response mode: {}", mode);
             update_task_status(db_path, task_id, "failed");
-            return Err(format!("Unknown mode: {}", mode));
         }
     }
 
-    // Save output to DB so polling can find it
+    // Always save output
     if !accumulated_output.is_empty() {
         save_task_output(db_path, task_id, &accumulated_output);
     }
 
-    // Emit final completion
     let duration_ms = start.elapsed().as_millis() as u64;
-    let success = step_history.last().map(|s| s.result.success).unwrap_or(true);
+    let success = step_history.last().map(|s| s.result.success).unwrap_or(!accumulated_output.is_empty());
 
     let _ = app_handle.emit("agent:task_completed", serde_json::json!({
-        "task_id": task_id,
-        "success": success,
-        "output": accumulated_output,
-        "steps": step_history.len(),
-        "duration_ms": duration_ms,
+        "task_id": task_id, "success": success, "output": accumulated_output,
+        "steps": step_history.len(), "duration_ms": duration_ms,
     }));
 
     Ok(TaskExecutionResult {
-        task_id: task_id.to_string(),
-        success,
-        steps: step_history,
-        total_cost: 0.0,
-        duration_ms,
+        task_id: task_id.to_string(), success,
+        steps: step_history, total_cost: 0.0, duration_ms,
     })
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// EXECUTE WITH AUTO-RETRY
+// ═══════════════════════════════════════════════════════════════════
+
+async fn execute_with_retry(
+    script: &str,
+    timeout: u64,
+    original_task: &str,
+    gateway: &Gateway,
+    settings: &Settings,
+    task_id: &str,
+) -> (bool, String) {
+    let mut current_script = script.to_string();
+
+    for attempt in 0..=MAX_RETRIES {
+        let exec_result = hands::cli::run_powershell(&current_script, timeout).await;
+
+        match exec_result {
+            Ok(output) => {
+                if output.exit_code == 0 {
+                    // Success
+                    let out = if !output.stdout.trim().is_empty() {
+                        output.stdout
+                    } else {
+                        "Command executed successfully.".to_string()
+                    };
+                    return (true, out);
+                }
+
+                // Command failed — try to auto-correct
+                let error_msg = if !output.stderr.trim().is_empty() {
+                    output.stderr.clone()
+                } else {
+                    format!("Exit code: {}", output.exit_code)
+                };
+
+                if attempt < MAX_RETRIES {
+                    info!(task_id, attempt, error = %error_msg, "Command failed, asking LLM to fix");
+
+                    let retry_prompt = RETRY_PROMPT
+                        .replace("{ERROR}", &error_msg)
+                        .replace("{COMMAND}", &current_script);
+
+                    let fix_prompt = format!(
+                        "Original task: \"{}\"\n\n{}",
+                        original_task, retry_prompt
+                    );
+
+                    match gateway.complete_with_system(&fix_prompt, Some(PC_MASTER_PROMPT), settings).await {
+                        Ok(fix_response) => {
+                            if let Some(fix_json) = extract_json(fix_response.content.trim()) {
+                                if let Some(cmds) = fix_json["commands"].as_array() {
+                                    let new_cmds: Vec<&str> = cmds.iter().filter_map(|v| v.as_str()).collect();
+                                    if !new_cmds.is_empty() {
+                                        current_script = new_cmds.join("; ");
+                                        info!(task_id, attempt, new_script = %current_script, "LLM provided fixed command");
+                                        continue;
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            warn!(task_id, error = %e, "LLM retry failed");
+                        }
+                    }
+                }
+
+                // All retries exhausted
+                return (false, format!("Error: {}", error_msg));
+            }
+            Err(e) => {
+                let err = format!("Execution error: {}", e);
+                if attempt >= MAX_RETRIES {
+                    return (false, err);
+                }
+                warn!(task_id, attempt, error = %err, "Execution failed, retrying");
+            }
+        }
+    }
+
+    (false, "Failed after all retries".to_string())
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -433,11 +475,9 @@ pub async fn run_task(
 // ═══════════════════════════════════════════════════════════════════
 
 fn extract_json(text: &str) -> Option<serde_json::Value> {
-    // Try parsing the whole text first
     if let Ok(v) = serde_json::from_str::<serde_json::Value>(text) {
         return Some(v);
     }
-    // Find JSON object in text (LLM might wrap it in markdown)
     if let Some(start) = text.find('{') {
         if let Some(end) = text.rfind('}') {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text[start..=end]) {
@@ -492,7 +532,6 @@ fn save_step(
             ExecutionMethod::Terminal => "terminal",
             ExecutionMethod::Screen => "screen",
         };
-
         let _ = db.insert_task_step(
             task_id, step_number, action_type, &description,
             &screenshot_path.to_string_lossy(), exec_method,
