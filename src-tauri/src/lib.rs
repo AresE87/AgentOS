@@ -391,7 +391,7 @@ pub fn run() {
             if !settings.telegram_bot_token.is_empty() {
                 let token = settings.telegram_bot_token.clone();
                 let settings_clone = settings.clone();
-                tokio::spawn(async move {
+                tauri::async_runtime::spawn(async move {
                     tracing::info!("Starting Telegram bot...");
                     channels::telegram::run_bot_loop(&token, &settings_clone).await;
                 });
@@ -399,7 +399,7 @@ pub fn run() {
 
             // Start mesh discovery
             let hostname = whoami::fallible::hostname().unwrap_or_else(|_| "AgentOS".to_string());
-            tokio::spawn(async move {
+            tauri::async_runtime::spawn(async move {
                 let _ = mesh::discovery::start_discovery(&hostname).await;
             });
 
