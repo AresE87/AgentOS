@@ -77,7 +77,7 @@ export function useAgent() {
     // Phase 5: Mesh
     const getMeshNodes = () => callInvoke<{ nodes: MeshNode[] }>('get_mesh_nodes');
     const sendMeshTask = (nodeId: string, description: string) =>
-        callInvoke<{ task_id: string }>('send_mesh_task', { nodeId, description });
+        callInvoke<{ task_id: string }>('send_mesh_task', { node_id: nodeId, description });
 
     return {
         getStatus, processMessage, getTasks, getPlaybooks, setActivePlaybook,

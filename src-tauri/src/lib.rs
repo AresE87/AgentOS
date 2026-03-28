@@ -21,6 +21,7 @@ pub struct AppState {
     pub settings: std::sync::Mutex<config::Settings>,
     pub kill_switch: Arc<AtomicBool>,
     pub screenshots_dir: PathBuf,
+    pub db_path: PathBuf,
 }
 
 #[tauri::command]
@@ -262,11 +263,11 @@ async fn cmd_run_pc_task(
     };
     let kill_switch = state.kill_switch.clone();
     let screenshots_dir = state.screenshots_dir.clone();
-    let db_path = state.screenshots_dir.parent().unwrap_or(&state.screenshots_dir).join("agentos.db");
+    let db_path = state.db_path.clone();
     let tid = task_id.clone();
 
-    // Spawn background task
-    tokio::spawn(async move {
+    // Spawn background task (must use tauri runtime, not raw tokio)
+    tauri::async_runtime::spawn(async move {
         let result = pipeline::engine::run_task(
             &tid,
             &description,
@@ -370,7 +371,8 @@ pub fn run() {
 
             tracing::info!("AgentOS starting, data dir: {:?}", app_dir);
 
-            let db = memory::Database::new(&app_dir.join("agentos.db"))
+            let db_path = app_dir.join("agentos.db");
+            let db = memory::Database::new(&db_path)
                 .expect("failed to open database");
 
             let screenshots_dir = app_dir.join("screenshots");
@@ -385,6 +387,7 @@ pub fn run() {
                 settings: std::sync::Mutex::new(settings.clone()),
                 kill_switch: Arc::new(AtomicBool::new(false)),
                 screenshots_dir,
+                db_path,
             });
 
             // Start Telegram bot if configured
