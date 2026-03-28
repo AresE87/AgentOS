@@ -25,13 +25,29 @@ impl Gateway {
         user_text: &str,
         settings: &Settings,
     ) -> Result<LLMResponse, String> {
+        self.complete_with_system(user_text, None, settings).await
+    }
+
+    pub async fn complete_with_system(
+        &self,
+        user_text: &str,
+        system_prompt: Option<&str>,
+        settings: &Settings,
+    ) -> Result<LLMResponse, String> {
         let classification = super::classify(user_text);
         let chain = self.router.get_fallback_chain(&classification);
 
-        let messages = vec![Message {
+        let mut messages = Vec::new();
+        if let Some(sp) = system_prompt {
+            messages.push(Message {
+                role: "system".to_string(),
+                content: sp.to_string(),
+            });
+        }
+        messages.push(Message {
             role: "user".to_string(),
             content: user_text.to_string(),
-        }];
+        });
 
         for model_entry in &chain {
             let api_key = match model_entry.provider.as_str() {

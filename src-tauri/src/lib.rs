@@ -48,16 +48,23 @@ async fn cmd_process_message(
     state: tauri::State<'_, AppState>,
     text: String,
 ) -> Result<serde_json::Value, String> {
-    // Get settings snapshot
     let settings = {
         let s = state.settings.lock().map_err(|e| e.to_string())?;
         s.clone()
     };
 
-    // Call LLM
+    // Find the best agent for this task
+    let registry = agents::AgentRegistry::new();
+    let agent = registry.find_best(&text);
+    let agent_name = agent.name.clone();
+    let system_prompt = agent.system_prompt.clone();
+
+    tracing::info!(agent = %agent_name, "Selected agent for task");
+
+    // Call LLM with agent's system prompt
     let gateway = state.gateway.lock().await;
     let response = gateway
-        .complete(&text, &settings)
+        .complete_with_system(&text, Some(&system_prompt), &settings)
         .await
         .map_err(|e| e.to_string())?;
     drop(gateway);
@@ -76,6 +83,7 @@ async fn cmd_process_message(
         "model": response.model,
         "cost": response.cost,
         "duration_ms": response.duration_ms,
+        "agent": agent_name,
     }))
 }
 
@@ -374,9 +382,25 @@ pub fn run() {
             app.manage(AppState {
                 db: std::sync::Mutex::new(db),
                 gateway: tokio::sync::Mutex::new(gateway),
-                settings: std::sync::Mutex::new(settings),
+                settings: std::sync::Mutex::new(settings.clone()),
                 kill_switch: Arc::new(AtomicBool::new(false)),
                 screenshots_dir,
+            });
+
+            // Start Telegram bot if configured
+            if !settings.telegram_bot_token.is_empty() {
+                let token = settings.telegram_bot_token.clone();
+                let settings_clone = settings.clone();
+                tokio::spawn(async move {
+                    tracing::info!("Starting Telegram bot...");
+                    channels::telegram::run_bot_loop(&token, &settings_clone).await;
+                });
+            }
+
+            // Start mesh discovery
+            let hostname = whoami::fallible::hostname().unwrap_or_else(|_| "AgentOS".to_string());
+            tokio::spawn(async move {
+                let _ = mesh::discovery::start_discovery(&hostname).await;
             });
 
             Ok(())

@@ -377,7 +377,7 @@ export default function Wizard({ onComplete }: { onComplete: () => void }) {
         }
       }
       if (config.telegram_token) {
-        await updateSettings('telegram_token', config.telegram_token);
+        await updateSettings('telegram_bot_token', config.telegram_token);
       }
       // Save permissions as comma-separated enabled list
       const enabledPerms = Object.entries(config.permissions)

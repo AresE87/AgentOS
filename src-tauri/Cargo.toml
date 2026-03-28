@@ -24,6 +24,7 @@ dirs = "6"
 image = "0.25"
 base64 = "0.22"
 regex = "1"
+whoami = "1"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = [

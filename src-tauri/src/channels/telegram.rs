@@ -101,6 +101,62 @@ pub struct TelegramMessage {
     pub from: String,
 }
 
+/// Run the Telegram bot polling loop — processes messages via LLM
+pub async fn run_bot_loop(token: &str, settings: &crate::config::Settings) {
+    let mut bot = TelegramBot::new(token);
+    let gateway = crate::brain::Gateway::new(settings);
+    let registry = crate::agents::AgentRegistry::new();
+
+    loop {
+        match bot.get_updates().await {
+            Ok(messages) => {
+                for msg in messages {
+                    tracing::info!(
+                        chat_id = msg.chat_id,
+                        from = %msg.from,
+                        text = %msg.text,
+                        "Telegram message received"
+                    );
+
+                    // Handle commands
+                    if msg.text.starts_with("/start") || msg.text.starts_with("/help") {
+                        let help = "AgentOS - Tu equipo de IA\n\nEnvía cualquier mensaje y te respondo con el especialista adecuado.\n\nComandos:\n/status - Estado del agente\n/help - Esta ayuda";
+                        let _ = bot.send_message(msg.chat_id, help).await;
+                        continue;
+                    }
+
+                    if msg.text.starts_with("/status") {
+                        let _ = bot.send_message(msg.chat_id, "AgentOS: Online").await;
+                        continue;
+                    }
+
+                    // Find best agent and respond
+                    let agent = registry.find_best(&msg.text);
+                    let response = gateway
+                        .complete_with_system(&msg.text, Some(&agent.system_prompt), settings)
+                        .await;
+
+                    match response {
+                        Ok(resp) => {
+                            let reply = format!("[{}] {}", agent.name, resp.content);
+                            let _ = bot.send_message(msg.chat_id, &reply).await;
+                        }
+                        Err(e) => {
+                            let _ = bot
+                                .send_message(msg.chat_id, &format!("Error: {}", e))
+                                .await;
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Telegram polling error: {}", e);
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            }
+        }
+    }
+}
+
 fn split_message(text: &str, max_len: usize) -> Vec<&str> {
     if text.len() <= max_len {
         return vec![text];

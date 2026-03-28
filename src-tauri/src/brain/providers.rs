@@ -21,14 +21,25 @@ impl Providers {
         max_tokens: u32,
         api_key: &str,
     ) -> Result<(String, u32, u32), Box<dyn std::error::Error + Send + Sync>> {
-        let body = json!({
+        // Anthropic: system prompt goes in top-level "system" field, not in messages
+        let system_prompt: Option<String> = messages
+            .iter()
+            .find(|m| m.role == "system")
+            .map(|m| m.content.clone());
+        let user_messages: Vec<_> = messages
+            .iter()
+            .filter(|m| m.role != "system")
+            .map(|m| json!({ "role": m.role, "content": m.content }))
+            .collect();
+
+        let mut body = json!({
             "model": model,
             "max_tokens": max_tokens,
-            "messages": messages.iter().map(|m| json!({
-                "role": m.role,
-                "content": m.content,
-            })).collect::<Vec<_>>(),
+            "messages": user_messages,
         });
+        if let Some(sp) = system_prompt {
+            body["system"] = json!(sp);
+        }
 
         let resp = self
             .client
