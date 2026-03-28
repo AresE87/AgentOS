@@ -82,29 +82,47 @@ export default function Chat() {
         };
         setMessages((m) => [...m, agentMsg]);
 
-        // Poll for completion (check steps every 3s)
+        // Poll for completion (check steps every 2s)
         const pollInterval = setInterval(async () => {
           try {
             const steps = await getTaskSteps(pcResult.task_id);
             if (steps.steps.length > 0) {
               const lastStep = steps.steps[steps.steps.length - 1];
-              if (lastStep.action_type === 'task_complete' || steps.steps.length >= 20) {
-                clearInterval(pollInterval);
-                const doneMsg: Message = {
-                  id: `done-${Date.now()}`,
-                  role: 'agent',
-                  content: `✅ **Task completed** in ${steps.steps.length} steps.\n\n${lastStep.description || 'Done.'}`,
-                  timestamp: new Date().toISOString(),
-                  subtasks: steps.steps.map((s: any, i: number) => ({
-                    label: `Step ${i + 1}: ${s.action_type}`,
-                    status: s.success ? 'done' as const : 'pending' as const,
-                  })),
-                };
-                setMessages((m) => [...m, doneMsg]);
+              clearInterval(pollInterval);
+
+              // Parse command from description if available
+              let cmdInfo = '';
+              try {
+                const desc = JSON.parse(lastStep.description || '{}');
+                if (desc.command) cmdInfo = `\n\n\`\`\`powershell\n${desc.command}\n\`\`\``;
+              } catch {}
+
+              // Show output if there's execution_method = terminal
+              let outputInfo = '';
+              if (lastStep.execution_method === 'terminal' && lastStep.description) {
+                try {
+                  const desc = JSON.parse(lastStep.description);
+                  if (desc.summary) outputInfo = `\n\n${desc.summary}`;
+                } catch {}
               }
+
+              const statusIcon = lastStep.success ? '✅' : '❌';
+              const doneMsg: Message = {
+                id: `done-${Date.now()}`,
+                role: 'agent',
+                content: `${statusIcon} **Task ${lastStep.success ? 'completed' : 'failed'}**${cmdInfo}${outputInfo}`,
+                timestamp: new Date().toISOString(),
+                model: lastStep.execution_method || 'terminal',
+                latency: lastStep.duration_ms,
+                subtasks: steps.steps.map((s: any, i: number) => ({
+                  label: `Step ${i + 1}: ${s.action_type}`,
+                  status: s.success ? 'done' as const : 'pending' as const,
+                })),
+              };
+              setMessages((m) => [...m, doneMsg]);
             }
           } catch { /* ignore polling errors */ }
-        }, 3000);
+        }, 2000);
 
         // Auto-stop polling after 2 minutes
         setTimeout(() => clearInterval(pollInterval), 120000);

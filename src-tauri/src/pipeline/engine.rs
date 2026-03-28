@@ -14,6 +14,40 @@ use tracing::{info, warn};
 
 const MAX_STEPS: u32 = 20;
 
+const COMMAND_TRANSLATOR_PROMPT: &str = r#"You are a Windows PC command translator. The user gives you a task in natural language. You must respond with ONLY a PowerShell command that accomplishes the task. No explanation, no markdown, just the raw command.
+
+Rules:
+- Use Start-Process to open GUI applications (so they get their own window)
+- Use explorer.exe to open folders
+- Use $env:USERPROFILE for the user's home directory
+- For web URLs, use Start-Process with the URL
+- For complex multi-step tasks, chain commands with semicolons
+- NEVER use destructive commands (rm -rf, format, del /s)
+- If the task is impossible via command line, respond with: IMPOSSIBLE: <reason>
+
+Examples:
+User: "abre la carpeta descargas"
+Command: Start-Process explorer.exe "$env:USERPROFILE\Downloads"
+
+User: "abre notepad y escribe hola mundo"
+Command: Start-Process notepad.exe; Start-Sleep -Seconds 1
+
+User: "busca archivos pdf en mi escritorio"
+Command: Get-ChildItem "$env:USERPROFILE\Desktop" -Filter "*.pdf" -Recurse | Select-Object FullName, Length, LastWriteTime
+
+User: "dime cuanto espacio libre tiene mi disco"
+Command: Get-PSDrive C | Select-Object @{N='Free(GB)';E={[math]::Round($_.Free/1GB,2)}}, @{N='Used(GB)';E={[math]::Round($_.Used/1GB,2)}}
+
+User: "abre youtube en chrome"
+Command: Start-Process chrome.exe "https://www.youtube.com"
+
+User: "crea una carpeta llamada proyectos en el escritorio"
+Command: New-Item -Path "$env:USERPROFILE\Desktop\proyectos" -ItemType Directory -Force
+
+User: "muestra los procesos que mas memoria usan"
+Command: Get-Process | Sort-Object WorkingSet64 -Descending | Select-Object -First 10 Name, @{N='Memory(MB)';E={[math]::Round($_.WorkingSet64/1MB,1)}}
+"#;
+
 /// Run a complete PC control task
 pub async fn run_task(
     task_id: &str,
@@ -25,25 +59,56 @@ pub async fn run_task(
     app_handle: &tauri::AppHandle,
 ) -> Result<TaskExecutionResult, String> {
     let start = Instant::now();
+    let gateway = Gateway::new(settings);
     let mut step_history: Vec<StepRecord> = Vec::new();
 
     info!(task_id, description, "Starting PC task execution");
 
-    // STRATEGY 1: Try direct command execution first (fast path)
-    if let Some(result) = try_direct_execution(task_id, description, settings, kill_switch, screenshots_dir, db_path, app_handle).await {
-        return result;
+    // STRATEGY 1: Ask LLM to translate to a PowerShell command
+    let _ = app_handle.emit("agent:step_started", serde_json::json!({
+        "task_id": task_id, "step_number": 0,
+    }));
+
+    let llm_result = gateway
+        .complete_with_system(description, Some(COMMAND_TRANSLATOR_PROMPT), settings)
+        .await;
+
+    match llm_result {
+        Ok(response) => {
+            let command = response.content.trim().to_string();
+            info!(task_id, command = %command, "LLM translated to command");
+
+            // Check if LLM says it's impossible
+            if command.starts_with("IMPOSSIBLE:") {
+                // Fall through to vision pipeline
+                info!(task_id, "LLM says task needs vision, falling through");
+            } else {
+                // Execute the PowerShell command
+                let exec_result = execute_smart_command(
+                    task_id, &command, description, settings, kill_switch,
+                    screenshots_dir, db_path, app_handle, &mut step_history,
+                ).await;
+
+                if let Some(result) = exec_result {
+                    return result;
+                }
+            }
+        }
+        Err(e) => {
+            warn!(task_id, error = %e, "LLM command translation failed");
+        }
     }
 
-    // STRATEGY 2: Vision-guided autonomous loop (slow path)
-    let gateway = Gateway::new(settings);
+    // STRATEGY 2: Vision-guided autonomous loop (for complex UI tasks)
+    info!(task_id, "Falling back to vision-guided execution");
 
-    for step_number in 0..MAX_STEPS {
+    for step_number in (step_history.len() as u32)..MAX_STEPS {
         if kill_switch.load(Ordering::Relaxed) {
             update_task_status(db_path, task_id, "killed");
             return Err("Kill switch activated".to_string());
         }
 
-        // 1. Capture screen
+        // Capture screen
         let screenshot = tokio::task::spawn_blocking({
             let sd = screenshots_dir.to_path_buf();
             move || {
@@ -62,7 +127,7 @@ pub async fn run_task(
             "task_id": task_id, "step_number": step_number,
         }));
 
-        // 2. Ask vision LLM
+        // Ask vision LLM what to do
         let action = vision::plan_next_action(
             &screenshot_b64, description, &step_history, settings, &gateway,
         ).await;
@@ -71,12 +136,8 @@ pub async fn run_task(
             Ok(a) => a,
             Err(e) => {
                 warn!(task_id, step_number, error = %e, "Vision LLM failed");
-                if step_number < 2 {
-                    AgentAction::Wait { ms: 1000 }
-                } else {
-                    update_task_status(db_path, task_id, "failed");
-                    return Err(format!("Vision LLM failed: {}", e));
-                }
+                update_task_status(db_path, task_id, "failed");
+                return Err(format!("Vision LLM failed: {}", e));
             }
         };
 
@@ -108,7 +169,6 @@ pub async fn run_task(
         let _ = app_handle.emit("agent:step_completed", serde_json::json!({
             "task_id": task_id, "step_number": step_number,
             "success": result.success,
-            "screenshot_path": screenshot_path.to_string_lossy(),
         }));
 
         step_history.push(StepRecord {
@@ -132,94 +192,65 @@ pub async fn run_task(
     })
 }
 
-/// Try to execute the task directly without vision (for simple commands)
-async fn try_direct_execution(
+/// Execute a command that the LLM generated, with smart handling
+async fn execute_smart_command(
     task_id: &str,
+    command: &str,
     description: &str,
-    _settings: &Settings,
-    _kill_switch: &Arc<AtomicBool>,
+    settings: &Settings,
+    kill_switch: &Arc<AtomicBool>,
     screenshots_dir: &Path,
     db_path: &Path,
     app_handle: &tauri::AppHandle,
+    step_history: &mut Vec<StepRecord>,
 ) -> Option<Result<TaskExecutionResult, String>> {
     let start = Instant::now();
-    let lower = description.to_lowercase();
-    // Strip quotes from user input
-    let lower = lower.trim_matches('"').trim_matches('"').trim_matches('"').trim();
 
-    // Map natural language to executable programs
-    let program = if lower.contains("abre cmd") || lower.contains("open cmd") || lower.contains("abrir cmd") {
-        Some("cmd.exe")
-    } else if lower.contains("abre notepad") || lower.contains("open notepad") || lower.contains("bloc de notas") {
-        Some("notepad.exe")
-    } else if lower.contains("abre calculadora") || lower.contains("open calculator") || lower.contains("calc") {
-        Some("calc.exe")
-    } else if lower.contains("abre explorador") || lower.contains("open explorer") || lower.contains("file explorer") {
-        Some("explorer.exe")
-    } else if lower.contains("abre paint") || lower.contains("open paint") {
-        Some("mspaint.exe")
-    } else if lower.contains("abre chrome") || lower.contains("open chrome") {
-        Some("chrome.exe")
-    } else if lower.contains("abre edge") || lower.contains("open edge") {
-        Some("msedge.exe")
-    } else if lower.contains("abre firefox") || lower.contains("open firefox") {
-        Some("firefox.exe")
-    } else if lower.contains("abre powershell") || lower.contains("open powershell") {
-        Some("powershell.exe")
-    } else if lower.contains("abre terminal") || lower.contains("open terminal") {
-        Some("wt.exe") // Windows Terminal
-    } else if lower.starts_with("run ") {
-        // Use lower (already trimmed) instead of description to avoid byte-offset mismatch
-        Some(&lower[4..])
-    } else if lower.starts_with("ejecuta ") {
-        Some(&lower[8..])
-    } else if lower.starts_with("abre ") {
-        Some(&lower[5..])
-    } else if lower.starts_with("open ") {
-        Some(&lower[5..])
+    // Determine if this is a GUI launch (Start-Process) or a data command
+    let is_gui_launch = command.to_lowercase().contains("start-process");
+    let needs_output = !is_gui_launch;
+
+    let exec_result = if is_gui_launch {
+        // For GUI launches, use launch_app logic (non-blocking)
+        hands::cli::run_powershell(command, 30).await
     } else {
-        None
+        // For data commands, capture output
+        hands::cli::run_powershell(command, settings.cli_timeout).await
     };
-
-    let program = program?.trim();
-    if program.is_empty() {
-        return None;
-    }
-
-    info!(task_id, program = %program, "Direct execution: launching app");
-
-    let _ = app_handle.emit("agent:step_started", serde_json::json!({
-        "task_id": task_id, "step_number": 0,
-    }));
-
-    // Use launch_app which does Start-Process (non-blocking, visible window)
-    let exec_result = hands::cli::launch_app(program).await;
 
     let result = match exec_result {
         Ok(output) => {
-            info!(task_id, exit_code = output.exit_code, "App launched successfully");
+            info!(task_id, exit = output.exit_code, "Command executed");
             ExecutionResult {
                 method: ExecutionMethod::Terminal,
                 success: output.exit_code == 0,
-                output: Some(format!("Launched: {}", program)),
+                output: Some(if !output.stdout.trim().is_empty() {
+                    output.stdout.clone()
+                } else if !output.stderr.trim().is_empty() {
+                    format!("Error: {}", output.stderr)
+                } else {
+                    format!("Command executed: {}", command)
+                }),
                 screenshot_path: None,
                 duration_ms: output.duration_ms,
             }
         }
         Err(e) => {
-            warn!(task_id, error = %e, "launch_app failed");
+            warn!(task_id, error = %e, "Command failed");
             ExecutionResult {
                 method: ExecutionMethod::Terminal,
                 success: false,
-                output: Some(format!("Failed to launch {}: {}", program, e)),
+                output: Some(format!("Failed: {}", e)),
                 screenshot_path: None,
                 duration_ms: 0,
             }
         }
     };
 
-    // Wait a moment for the app to appear, then take a screenshot
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    // Wait for GUI to appear, then screenshot
+    if is_gui_launch {
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+    }
 
     let screenshot_path = tokio::task::spawn_blocking({
         let sd = screenshots_dir.to_path_buf();
@@ -232,7 +263,7 @@ async fn try_direct_execution(
 
     let sp = screenshot_path.as_ref().map(|p| p.to_string_lossy().to_string());
     let action = AgentAction::RunCommand {
-        command: program.to_string(),
+        command: command.to_string(),
         shell: ShellType::PowerShell,
     };
 
@@ -240,24 +271,37 @@ async fn try_direct_execution(
 
     let _ = app_handle.emit("agent:step_completed", serde_json::json!({
         "task_id": task_id, "step_number": 0, "success": result.success,
+        "output": result.output,
     }));
 
-    update_task_status(db_path, task_id, if result.success { "completed" } else { "failed" });
+    let was_success = result.success;
+    let output_text = result.output.clone();
 
-    let step = StepRecord {
+    step_history.push(StepRecord {
         step_number: 0,
         action: AgentAction::TaskComplete {
-            summary: format!("Launched: {}", program),
+            summary: output_text.clone().unwrap_or_default(),
         },
         result,
         screenshot_path: sp,
-    };
+    });
 
-    let was_success = step.result.success;
+    update_task_status(db_path, task_id, if was_success { "completed" } else { "failed" });
+
+    // Emit completion with the actual command output so Chat can show it
+    let _ = app_handle.emit("agent:task_completed", serde_json::json!({
+        "task_id": task_id,
+        "success": was_success,
+        "output": output_text,
+        "command": command,
+        "steps": 1,
+        "duration_ms": start.elapsed().as_millis() as u64,
+    }));
+
     Some(Ok(TaskExecutionResult {
         task_id: task_id.to_string(),
         success: was_success,
-        steps: vec![step],
+        steps: step_history.clone(),
         total_cost: 0.0,
         duration_ms: start.elapsed().as_millis() as u64,
     }))
