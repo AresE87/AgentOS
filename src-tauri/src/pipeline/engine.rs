@@ -376,6 +376,11 @@ pub async fn run_task(
         }
     }
 
+    // Save output to DB so polling can find it
+    if !accumulated_output.is_empty() {
+        save_task_output(db_path, task_id, &accumulated_output);
+    }
+
     // Emit final completion
     let duration_ms = start.elapsed().as_millis() as u64;
     let success = step_history.last().map(|s| s.result.success).unwrap_or(true);
@@ -429,6 +434,12 @@ async fn take_screenshot(dir: &Path) -> Option<std::path::PathBuf> {
 fn update_task_status(db_path: &Path, task_id: &str, status: &str) {
     if let Ok(db) = Database::new(db_path) {
         let _ = db.update_task_status(task_id, status);
+    }
+}
+
+fn save_task_output(db_path: &Path, task_id: &str, output: &str) {
+    if let Ok(db) = Database::new(db_path) {
+        let _ = db.update_task_output(task_id, output);
     }
 }
 

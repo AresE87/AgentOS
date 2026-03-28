@@ -183,6 +183,14 @@ impl Database {
         Ok(())
     }
 
+    pub fn update_task_output(&self, task_id: &str, output: &str) -> Result<(), rusqlite::Error> {
+        self.conn.execute(
+            "UPDATE tasks SET output_text = ?2 WHERE id = ?1",
+            params![task_id, output],
+        )?;
+        Ok(())
+    }
+
     pub fn insert_task_step(
         &self,
         task_id: &str,

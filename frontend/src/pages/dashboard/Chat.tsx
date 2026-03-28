@@ -22,7 +22,7 @@ const SUGGESTIONS = [
 ];
 
 export default function Chat() {
-  const { processMessage, runPCTask, getTaskSteps } = useAgent();
+  const { processMessage, runPCTask, getTasks } = useAgent();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [typing, setTyping] = useState(false);
@@ -83,35 +83,27 @@ export default function Chat() {
         };
         setMessages((m) => [...m, agentMsg]);
 
-        // Listen for task completion via polling
+        // Poll for task completion by checking task status in the tasks list
         let resolved = false;
         const pollInterval = setInterval(async () => {
           if (resolved) return;
           try {
-            const steps = await getTaskSteps(pcResult.task_id);
-            if (steps.steps.length > 0) {
+            const tasksResult = await getTasks(5);
+            const task = (tasksResult as any).tasks?.find?.((t: any) => t.task_id === pcResult.task_id);
+            if (task && (task.status === 'completed' || task.status === 'failed')) {
               resolved = true;
               clearInterval(pollInterval);
 
-              const lastStep = steps.steps[steps.steps.length - 1];
-              let output = '';
-
-              // Extract the actual output/summary
-              try {
-                const desc = JSON.parse(lastStep.description || '{}');
-                output = desc.summary || desc.command || '';
-              } catch {
-                output = lastStep.description || '';
-              }
-
-              const statusIcon = lastStep.success ? '✅' : '❌';
+              const output = task.output || task.input || '';
+              const success = task.status === 'completed';
               const doneMsg: Message = {
                 id: `done-${Date.now()}`,
                 role: 'agent',
-                content: output || `${statusIcon} Task ${lastStep.success ? 'completed' : 'failed'}`,
+                content: output || (success ? 'Task completed.' : 'Task failed.'),
                 timestamp: new Date().toISOString(),
-                model: lastStep.execution_method || 'terminal',
-                latency: lastStep.duration_ms,
+                model: task.model || 'terminal',
+                cost: task.cost,
+                latency: task.duration_ms,
               };
               setMessages((m) => [...m, doneMsg]);
             }
