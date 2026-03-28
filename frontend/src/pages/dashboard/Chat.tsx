@@ -22,12 +22,26 @@ const SUGGESTIONS = [
 ];
 
 export default function Chat() {
-  const { processMessage, runPCTask, getTasks } = useAgent();
+  const { processMessage, runPCTask, getTasks, killSwitch } = useAgent();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [typing, setTyping] = useState(false);
+  const [taskRunning, setTaskRunning] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const handleKillSwitch = async () => {
+    await killSwitch();
+    setTaskRunning(false);
+    setTyping(false);
+    const stopMsg: Message = {
+      id: `stop-${Date.now()}`,
+      role: 'agent',
+      content: '🛑 Task stopped by user.',
+      timestamp: new Date().toISOString(),
+    };
+    setMessages((m) => [...m, stopMsg]);
+  };
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -68,6 +82,7 @@ export default function Chat() {
     try {
       if (!isPureQuestion(msg)) {
         // PC Control mode — agent takes action on the computer
+        setTaskRunning(true);
         const pcResult = await runPCTask(msg);
         const agentMsg: Message = {
           id: pcResult.task_id,
@@ -96,6 +111,7 @@ export default function Chat() {
 
               const output = task.output || task.input || '';
               const success = task.status === 'completed';
+              setTaskRunning(false);
               const doneMsg: Message = {
                 id: `done-${Date.now()}`,
                 role: 'agent',
@@ -237,15 +253,25 @@ export default function Chat() {
               placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-cyan/50 focus:border-cyan
               transition-all duration-150 ease-out"
           />
-          <button
-            onClick={() => handleSend()}
-            disabled={!input.trim() || typing}
-            className="flex items-center justify-center h-10 w-10 rounded-lg bg-cyan hover:bg-cyan-dark
-              text-bg-primary disabled:opacity-40 disabled:cursor-not-allowed
-              transition-colors duration-150 ease-out"
-          >
-            <Send size={16} />
-          </button>
+          {taskRunning ? (
+            <button
+              onClick={handleKillSwitch}
+              className="flex items-center justify-center h-10 px-4 rounded-lg bg-[#E74C3C] hover:bg-[#C0392B]
+                text-white font-medium text-sm transition-colors duration-150 ease-out animate-pulse"
+            >
+              STOP
+            </button>
+          ) : (
+            <button
+              onClick={() => handleSend()}
+              disabled={!input.trim() || typing}
+              className="flex items-center justify-center h-10 w-10 rounded-lg bg-cyan hover:bg-cyan-dark
+                text-bg-primary disabled:opacity-40 disabled:cursor-not-allowed
+                transition-colors duration-150 ease-out"
+            >
+              <Send size={16} />
+            </button>
+          )}
         </div>
       </div>
     </div>

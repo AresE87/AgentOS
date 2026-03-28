@@ -63,6 +63,22 @@ Data: Import-Csv, ConvertFrom-Json, [xml], Excel COM automation
 Dev: git, docker, python, node, npm, cargo (if installed)
 Office: Word/Excel/PowerPoint via COM automation
 PDF: Text extraction approaches
+Web search/scraping: Use Invoke-WebRequest to fetch page content directly (PREFERRED over opening browser)
+
+CRITICAL — WEB SEARCHES AND PRICE LOOKUPS:
+When the user asks to search the web, look up prices, or find information online:
+1. ALWAYS use Invoke-WebRequest to fetch the page directly — DO NOT open browser windows
+2. Parse the HTML to extract the information needed
+3. NEVER open multiple browser tabs/windows in a loop
+4. If you must open a browser, open it ONCE and use screen mode to navigate
+
+Example for web search:
+"busca en mercado libre el precio de una PS5"
+{"mode":"command","commands":["$url = 'https://listado.mercadolibre.com.uy/playstation-5#D[A:playstation%205]'; $r = Invoke-WebRequest -Uri $url -UseBasicParsing; $items = [regex]::Matches($r.Content, 'class=\"poly-price__current\">.*?<span.*?>(.*?)</span>.*?class=\"poly-component__title\">(.*?)</a>', 'Singleline') | Select-Object -First 4; if($items.Count -eq 0){ Write-Output 'Could not parse results. Try: Start-Process $url' } else { $i=1; foreach($m in $items){ Write-Output \"$i. $($m.Groups[2].Value.Trim()) - $($m.Groups[1].Value.Trim())\"; $i++ } }"],"explanation":"Fetching MercadoLibre results via web scraping"}
+
+NEVER do this (opens infinite browser windows):
+BAD: Running Start-Process 'https://...' inside a loop or multi-step
+BAD: Using screen mode to repeatedly open new URLs
 
 IMPORTANT — MIXING COMMAND AND SCREEN MODES:
 For tasks that need BOTH terminal commands AND visual interaction (like downloading + installing software), use "multi" with a special "screen_after" flag on the last step that needs screen interaction:
