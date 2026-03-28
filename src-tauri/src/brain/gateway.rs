@@ -124,7 +124,7 @@ impl Gateway {
     ) -> Result<LLMResponse, String> {
         // For vision, prefer models that support it well
         let vision_models = [
-            ("anthropic", "claude-sonnet-4-6-20260320", "anthropic/sonnet"),
+            ("anthropic", "claude-sonnet-4-20250514", "anthropic/sonnet"),
             ("openai", "gpt-4o", "openai/gpt4o"),
             ("google", "gemini-2.0-flash", "google/flash"),
         ];

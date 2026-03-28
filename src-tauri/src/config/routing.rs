@@ -30,14 +30,14 @@ impl RoutingConfig {
                 ModelEntry {
                     id: "anthropic/sonnet".into(),
                     provider: "anthropic".into(),
-                    model: "claude-sonnet-4-6-20260320".into(),
+                    model: "claude-sonnet-4-20250514".into(),
                     cost_per_1k_input: 0.003,
                     cost_per_1k_output: 0.015,
                 },
                 ModelEntry {
                     id: "anthropic/opus".into(),
                     provider: "anthropic".into(),
-                    model: "claude-opus-4-6-20260320".into(),
+                    model: "claude-sonnet-4-20250514".into(),
                     cost_per_1k_input: 0.015,
                     cost_per_1k_output: 0.075,
                 },
