@@ -1,0 +1,103 @@
+{
+  "id": "smart-file-processor",
+  "name": "Smart File Processor",
+  "description": "Process a file based on its type — converts CSV to JSON, compresses text files, or reports file info",
+  "variables": [
+    {
+      "name": "filename",
+      "var_type": "string",
+      "prompt": "Which file do you want to process?",
+      "options": null,
+      "default": null
+    },
+    {
+      "name": "output_dir",
+      "var_type": "string",
+      "prompt": "Where should the output go?",
+      "options": null,
+      "default": "."
+    }
+  ],
+  "steps": [
+    {
+      "id": "check_exists",
+      "step_type": {
+        "type": "command",
+        "command": "Test-Path '{filename}'"
+      },
+      "description": "Check if the file exists"
+    },
+    {
+      "id": "branch_exists",
+      "step_type": {
+        "type": "condition",
+        "check": {
+          "Contains": { "step_id": "check_exists", "text": "True" }
+        },
+        "if_true": "get_extension",
+        "if_false": "not_found"
+      },
+      "description": "Branch based on file existence"
+    },
+    {
+      "id": "not_found",
+      "step_type": {
+        "type": "done",
+        "result": "File {filename} not found"
+      },
+      "description": "File does not exist — abort"
+    },
+    {
+      "id": "get_extension",
+      "step_type": {
+        "type": "command",
+        "command": "[System.IO.Path]::GetExtension('{filename}')"
+      },
+      "description": "Detect file extension"
+    },
+    {
+      "id": "branch_csv",
+      "step_type": {
+        "type": "condition",
+        "check": {
+          "Contains": { "step_id": "get_extension", "text": ".csv" }
+        },
+        "if_true": "convert_csv",
+        "if_false": "get_info"
+      },
+      "description": "Check if file is CSV"
+    },
+    {
+      "id": "convert_csv",
+      "step_type": {
+        "type": "command",
+        "command": "Import-Csv '{filename}' | ConvertTo-Json | Out-File '{output_dir}/output.json'"
+      },
+      "description": "Convert CSV to JSON"
+    },
+    {
+      "id": "done_csv",
+      "step_type": {
+        "type": "done",
+        "result": "Converted {filename} to JSON at {output_dir}/output.json"
+      },
+      "description": "CSV conversion complete"
+    },
+    {
+      "id": "get_info",
+      "step_type": {
+        "type": "command",
+        "command": "Get-Item '{filename}' | Select-Object Name, Length, LastWriteTime | Format-List"
+      },
+      "description": "Get file information for non-CSV files"
+    },
+    {
+      "id": "done_info",
+      "step_type": {
+        "type": "done",
+        "result": "File info retrieved for {filename}"
+      },
+      "description": "File info complete"
+    }
+  ]
+}

@@ -103,6 +103,14 @@ export function useAgent() {
     // Channels
     const getChannelStatus = () => callInvoke<{ channels: Record<string, { connected: boolean; info?: string }> }>('get_channel_status');
 
+    // R33: Smart Playbooks
+    const runSmartPlaybook = (playbookJson: string, variables: Record<string, string>) =>
+        callInvoke<any>('run_smart_playbook', { playbook_json: playbookJson, variables });
+    const validateSmartPlaybook = (playbookJson: string) =>
+        callInvoke<any>('validate_smart_playbook', { playbook_json: playbookJson });
+    const getPlaybookVariables = (playbookJson: string) =>
+        callInvoke<any>('get_playbook_variables', { playbook_json: playbookJson });
+
     // R32: WhatsApp
     const whatsappSetup = (phoneNumberId: string, accessToken: string) =>
         callInvoke<{ ok: boolean; webhook_port: number }>('whatsapp_setup', { phone_number_id: phoneNumberId, access_token: accessToken });
@@ -150,6 +158,8 @@ export function useAgent() {
         getAuditLog, exportAuditLog, getOrg, createOrg, listOrgMembers, addOrgMember,
         // WhatsApp
         whatsappSetup, whatsappTest, whatsappSend, getWhatsappStatus,
+        // Smart Playbooks
+        runSmartPlaybook, validateSmartPlaybook, getPlaybookVariables,
     };
 }
 

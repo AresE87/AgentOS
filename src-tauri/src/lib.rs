@@ -15,6 +15,7 @@ mod mesh;
 pub mod pipeline;
 pub mod platform;
 mod playbooks;
+pub mod plugins;
 pub mod types;
 pub mod vault;
 pub mod web;
@@ -47,6 +48,8 @@ pub struct AppState {
     pub platform: Arc<Box<dyn platform::PlatformProvider>>,
     /// R31: Mesh orchestrator for smart task distribution
     pub mesh_orchestrator: Arc<tokio::sync::RwLock<mesh::orchestrator::MeshOrchestrator>>,
+    /// R34: Plugin manager
+    pub plugin_manager: Arc<tokio::sync::Mutex<plugins::PluginManager>>,
 }
 
 #[tauri::command]
@@ -612,6 +615,64 @@ async fn cmd_delete_playbook(
         std::fs::remove_file(&path).map_err(|e| e.to_string())?;
     }
     Ok(serde_json::json!({ "ok": true }))
+}
+
+// ── R33: Smart Playbooks ─────────────────────────────────────────────
+
+#[tauri::command]
+async fn cmd_run_smart_playbook(
+    playbook_json: String,
+    variables: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let pb: playbooks::SmartPlaybook =
+        serde_json::from_str(&playbook_json).map_err(|e| format!("Invalid playbook JSON: {}", e))?;
+
+    let vars: std::collections::HashMap<String, String> = match variables {
+        serde_json::Value::Object(map) => map
+            .into_iter()
+            .map(|(k, v)| (k, v.as_str().unwrap_or_default().to_string()))
+            .collect(),
+        _ => std::collections::HashMap::new(),
+    };
+
+    let mut runner = playbooks::SmartPlaybookRunner::new(pb, vars);
+    let results = runner.execute().await?;
+
+    let all_ok = results.iter().all(|r| r.success);
+    Ok(serde_json::json!({
+        "ok": all_ok,
+        "steps_executed": results.len(),
+        "results": results,
+    }))
+}
+
+#[tauri::command]
+async fn cmd_validate_smart_playbook(playbook_json: String) -> Result<serde_json::Value, String> {
+    let pb: playbooks::SmartPlaybook =
+        serde_json::from_str(&playbook_json).map_err(|e| format!("Invalid JSON: {}", e))?;
+
+    match playbooks::smart::validate_playbook(&pb) {
+        Ok(warnings) => Ok(serde_json::json!({
+            "valid": true,
+            "warnings": warnings,
+            "step_count": pb.steps.len(),
+            "variable_count": pb.variables.len(),
+        })),
+        Err(errors) => Ok(serde_json::json!({
+            "valid": false,
+            "errors": errors,
+        })),
+    }
+}
+
+#[tauri::command]
+async fn cmd_get_playbook_variables(playbook_json: String) -> Result<serde_json::Value, String> {
+    let pb: playbooks::SmartPlaybook =
+        serde_json::from_str(&playbook_json).map_err(|e| format!("Invalid JSON: {}", e))?;
+
+    Ok(serde_json::json!({
+        "variables": pb.variables,
+    }))
 }
 
 #[tauri::command]
@@ -1954,6 +2015,98 @@ async fn cmd_open_url(
     Ok(serde_json::json!({ "ok": true, "url": url }))
 }
 
+// ── R34: Plugin system commands ──────────────────────────────
+
+#[tauri::command]
+async fn cmd_plugin_list(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.plugin_manager.lock().await;
+    let plugins: Vec<serde_json::Value> = mgr
+        .list()
+        .iter()
+        .map(|p| {
+            serde_json::json!({
+                "name": p.manifest.name,
+                "version": p.manifest.version,
+                "type": p.manifest.plugin_type,
+                "description": p.manifest.description,
+                "author": p.manifest.author,
+                "permissions": p.manifest.permissions,
+                "enabled": p.enabled,
+            })
+        })
+        .collect();
+    Ok(serde_json::json!({ "plugins": plugins }))
+}
+
+#[tauri::command]
+async fn cmd_plugin_install(
+    path: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.plugin_manager.lock().await;
+    let source = std::path::PathBuf::from(&path);
+    let manifest = mgr.install(&source)?;
+    Ok(serde_json::json!({
+        "ok": true,
+        "name": manifest.name,
+        "version": manifest.version,
+    }))
+}
+
+#[tauri::command]
+async fn cmd_plugin_uninstall(
+    name: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.plugin_manager.lock().await;
+    mgr.uninstall(&name)?;
+    Ok(serde_json::json!({ "ok": true, "name": name }))
+}
+
+#[tauri::command]
+async fn cmd_plugin_toggle(
+    name: String,
+    enabled: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.plugin_manager.lock().await;
+    mgr.set_enabled(&name, enabled)?;
+    Ok(serde_json::json!({ "ok": true, "name": name, "enabled": enabled }))
+}
+
+#[tauri::command]
+async fn cmd_plugin_execute(
+    name: String,
+    input: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.plugin_manager.lock().await;
+    let output = mgr.execute(&name, &input).await?;
+    Ok(serde_json::json!({ "ok": true, "output": output }))
+}
+
+#[tauri::command]
+async fn cmd_plugin_discover(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.plugin_manager.lock().await;
+    let manifests = mgr.discover()?;
+    let items: Vec<serde_json::Value> = manifests
+        .iter()
+        .map(|m| {
+            serde_json::json!({
+                "name": m.name,
+                "version": m.version,
+                "type": m.plugin_type,
+                "description": m.description,
+            })
+        })
+        .collect();
+    Ok(serde_json::json!({ "discovered": items }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -2013,6 +2166,16 @@ pub fn run() {
             let local_llm_url = settings.local_llm_url.clone();
             let local_llm = Arc::new(brain::LocalLLMProvider::new(&local_llm_url));
 
+            // ── R34: Plugin manager ────────────────────────────────────
+            let plugins_dir = app_dir.join("plugins");
+            std::fs::create_dir_all(&plugins_dir).ok();
+            let mut plugin_mgr = plugins::PluginManager::new(plugins_dir);
+            match plugin_mgr.discover() {
+                Ok(found) => tracing::info!("Discovered {} plugins", found.len()),
+                Err(e) => tracing::warn!("Plugin discovery failed: {}", e),
+            }
+            let plugin_manager = Arc::new(tokio::sync::Mutex::new(plugin_mgr));
+
             // ── R26: Platform abstraction ─────────────────────────────
             let platform_provider = Arc::new(platform::get_platform());
             tracing::info!("Platform: {} ({})", platform_provider.name(), platform_provider.os_version());
@@ -2037,6 +2200,7 @@ pub fn run() {
                         mesh::capabilities::NodeCapabilities::local(),
                     ),
                 )),
+                plugin_manager,
             });
 
             // ── R25: Connectivity monitor — emits local_llm:status_changed ──
@@ -2298,6 +2462,10 @@ pub fn run() {
             cmd_stop_recording,
             cmd_play_playbook,
             cmd_delete_playbook,
+            // R33: Smart playbook commands
+            cmd_run_smart_playbook,
+            cmd_validate_smart_playbook,
+            cmd_get_playbook_variables,
             // R2: Vision test commands
             cmd_test_vision,
             cmd_test_click,
@@ -2365,6 +2533,13 @@ pub fn run() {
             cmd_whatsapp_test,
             cmd_whatsapp_send,
             cmd_get_whatsapp_status,
+            // R34: Plugin commands
+            cmd_plugin_list,
+            cmd_plugin_install,
+            cmd_plugin_uninstall,
+            cmd_plugin_toggle,
+            cmd_plugin_execute,
+            cmd_plugin_discover,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");

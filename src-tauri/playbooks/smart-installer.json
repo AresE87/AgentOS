@@ -1,0 +1,129 @@
+{
+  "id": "smart-installer",
+  "name": "Smart Software Installer",
+  "description": "Check if a program is installed, install it via winget if missing, and verify the installation",
+  "variables": [
+    {
+      "name": "program",
+      "var_type": "string",
+      "prompt": "Which program to install?",
+      "options": null,
+      "default": null
+    },
+    {
+      "name": "winget_id",
+      "var_type": "string",
+      "prompt": "What is the winget package ID? (e.g. Git.Git)",
+      "options": null,
+      "default": null
+    },
+    {
+      "name": "verify_command",
+      "var_type": "string",
+      "prompt": "Command to verify installation (e.g. git --version)",
+      "options": null,
+      "default": null
+    }
+  ],
+  "steps": [
+    {
+      "id": "check_installed",
+      "step_type": {
+        "type": "command",
+        "command": "{verify_command}"
+      },
+      "description": "Check if the program is already installed"
+    },
+    {
+      "id": "branch_installed",
+      "step_type": {
+        "type": "condition",
+        "check": {
+          "ExitCode": { "step_id": "check_installed", "expected": 0 }
+        },
+        "if_true": "already_done",
+        "if_false": "install_loop"
+      },
+      "description": "Branch: already installed or needs install"
+    },
+    {
+      "id": "already_done",
+      "step_type": {
+        "type": "done",
+        "result": "{program} is already installed"
+      },
+      "description": "Program already present"
+    },
+    {
+      "id": "install_loop",
+      "step_type": {
+        "type": "loop",
+        "max_iterations": 3,
+        "steps": [
+          {
+            "id": "do_install",
+            "step_type": {
+              "type": "command",
+              "command": "winget install --id {winget_id} --accept-source-agreements --accept-package-agreements"
+            },
+            "description": "Run winget install"
+          },
+          {
+            "id": "wait_install",
+            "step_type": {
+              "type": "wait",
+              "seconds": 5
+            },
+            "description": "Wait for installation"
+          },
+          {
+            "id": "verify_install",
+            "step_type": {
+              "type": "command",
+              "command": "{verify_command}"
+            },
+            "description": "Verify the installation succeeded"
+          }
+        ],
+        "until_condition": "The verify command exits with code 0"
+      },
+      "description": "Retry installation up to 3 times"
+    },
+    {
+      "id": "final_check",
+      "step_type": {
+        "type": "command",
+        "command": "{verify_command}"
+      },
+      "description": "Final verification"
+    },
+    {
+      "id": "branch_final",
+      "step_type": {
+        "type": "condition",
+        "check": {
+          "ExitCode": { "step_id": "final_check", "expected": 0 }
+        },
+        "if_true": "success",
+        "if_false": "failure"
+      },
+      "description": "Check final result"
+    },
+    {
+      "id": "success",
+      "step_type": {
+        "type": "done",
+        "result": "{program} installed successfully"
+      },
+      "description": "Installation succeeded"
+    },
+    {
+      "id": "failure",
+      "step_type": {
+        "type": "done",
+        "result": "Failed to install {program} after retries"
+      },
+      "description": "Installation failed"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "name": "clipboard-action",
+  "version": "1.0.0",
+  "type": "action",
+  "description": "Copy text to system clipboard",
+  "author": "AgentOS",
+  "permissions": ["shell"],
+  "entry_point": "clipboard.ps1",
+  "config_schema": null
+}

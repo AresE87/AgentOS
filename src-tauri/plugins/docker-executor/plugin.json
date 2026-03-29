@@ -1,0 +1,15 @@
+{
+  "name": "docker-executor",
+  "version": "1.0.0",
+  "type": "executor",
+  "description": "Execute commands inside Docker containers",
+  "author": "AgentOS Community",
+  "permissions": ["shell", "network"],
+  "entry_point": "docker.ps1",
+  "config_schema": {
+    "docker_host": {
+      "type": "string",
+      "default": "npipe:////./pipe/docker_engine"
+    }
+  }
+}

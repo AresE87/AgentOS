@@ -1,0 +1,10 @@
+{
+  "name": "system-monitor",
+  "version": "1.0.0",
+  "type": "widget",
+  "description": "Monitor CPU, RAM, and disk usage",
+  "author": "AgentOS",
+  "permissions": ["shell"],
+  "entry_point": "monitor.ps1",
+  "config_schema": null
+}
