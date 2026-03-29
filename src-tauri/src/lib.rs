@@ -45,6 +45,8 @@ pub struct AppState {
     pub local_llm: Arc<brain::LocalLLMProvider>,
     /// R26: Platform abstraction
     pub platform: Arc<Box<dyn platform::PlatformProvider>>,
+    /// R31: Mesh orchestrator for smart task distribution
+    pub mesh_orchestrator: Arc<tokio::sync::RwLock<mesh::orchestrator::MeshOrchestrator>>,
 }
 
 #[tauri::command]
@@ -886,6 +888,115 @@ async fn cmd_send_mesh_task(node_id: String, description: String) -> Result<serd
             "error": e,
         })),
     }
+}
+
+// ── R31: Mesh Orchestration Commands ─────────────────────────────
+
+#[tauri::command]
+async fn cmd_get_mesh_capabilities(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let orch = state.mesh_orchestrator.read().await;
+    let nodes = orch.get_all_nodes();
+    Ok(serde_json::json!({
+        "node_count": orch.online_node_count(),
+        "nodes": nodes,
+    }))
+}
+
+#[tauri::command]
+async fn cmd_plan_distributed_execution(
+    subtasks: Vec<serde_json::Value>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    // Parse subtasks from JSON
+    let parsed: Vec<mesh::orchestrator::SubTask> = subtasks
+        .into_iter()
+        .map(|v| serde_json::from_value(v).map_err(|e| e.to_string()))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let orch = state.mesh_orchestrator.read().await;
+    let plan = orch.plan_execution(&parsed);
+    let groups = orch.get_parallel_groups(&parsed);
+
+    let assignments: Vec<serde_json::Value> = plan
+        .iter()
+        .map(|(id, selection)| {
+            let node = match selection {
+                mesh::orchestrator::NodeSelection::Local => "local".to_string(),
+                mesh::orchestrator::NodeSelection::Remote(nid) => nid.clone(),
+            };
+            serde_json::json!({ "subtask_id": id, "assigned_node": node })
+        })
+        .collect();
+
+    Ok(serde_json::json!({
+        "assignments": assignments,
+        "parallel_groups": groups,
+        "total_subtasks": parsed.len(),
+    }))
+}
+
+#[tauri::command]
+async fn cmd_execute_distributed_chain(
+    description: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    // Decompose description into subtasks (simple heuristic: split by semicolons or newlines)
+    let parts: Vec<&str> = description
+        .split(|c| c == ';' || c == '\n')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    let subtasks: Vec<mesh::orchestrator::SubTask> = parts
+        .iter()
+        .enumerate()
+        .map(|(i, desc)| {
+            mesh::orchestrator::SubTask {
+                id: format!("sub_{}", i),
+                description: desc.to_string(),
+                suggested_specialist: None,
+                preferred_provider: None,
+                needs_vision: false,
+                depends_on: if i > 0 {
+                    vec![format!("sub_{}", i - 1)]
+                } else {
+                    vec![]
+                },
+            }
+        })
+        .collect();
+
+    let orch = state.mesh_orchestrator.read().await;
+    let plan = orch.plan_execution(&subtasks);
+    let groups = orch.get_parallel_groups(&subtasks);
+
+    // For now, return the execution plan (actual remote dispatch uses existing transport)
+    let assignments: Vec<serde_json::Value> = plan
+        .iter()
+        .map(|(id, selection)| {
+            let node = match selection {
+                mesh::orchestrator::NodeSelection::Local => "local".to_string(),
+                mesh::orchestrator::NodeSelection::Remote(nid) => nid.clone(),
+            };
+            serde_json::json!({ "subtask_id": id, "assigned_node": node })
+        })
+        .collect();
+
+    let subtask_descs: Vec<serde_json::Value> = subtasks
+        .iter()
+        .map(|st| serde_json::json!({ "id": st.id, "description": st.description }))
+        .collect();
+
+    Ok(serde_json::json!({
+        "status": "planned",
+        "description": description,
+        "subtasks": subtask_descs,
+        "assignments": assignments,
+        "parallel_groups": groups,
+        "node_count": orch.online_node_count(),
+    }))
 }
 
 // ── R2: Vision E2E Test Commands ─────────────────────────────
@@ -1795,6 +1906,11 @@ pub fn run() {
                 api_port,
                 local_llm: local_llm.clone(),
                 platform: platform_provider,
+                mesh_orchestrator: Arc::new(tokio::sync::RwLock::new(
+                    mesh::orchestrator::MeshOrchestrator::new(
+                        mesh::capabilities::NodeCapabilities::local(),
+                    ),
+                )),
             });
 
             // ── R25: Connectivity monitor — emits local_llm:status_changed ──
@@ -2114,6 +2230,10 @@ pub fn run() {
             cmd_list_org_members,
             cmd_add_org_member,
             cmd_get_sso_auth_url,
+            // R31: Mesh orchestration commands
+            cmd_get_mesh_capabilities,
+            cmd_plan_distributed_execution,
+            cmd_execute_distributed_chain,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");
