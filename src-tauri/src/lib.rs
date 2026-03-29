@@ -10,6 +10,7 @@ mod mesh;
 pub mod pipeline;
 mod playbooks;
 pub mod types;
+pub mod vault;
 pub mod web;
 
 use std::path::PathBuf;
@@ -28,6 +29,7 @@ pub struct AppState {
     pub db_path: PathBuf,
     pub playbooks_dir: PathBuf,
     pub recorder: std::sync::Mutex<Option<playbooks::PlaybookRecorder>>,
+    pub vault: std::sync::Mutex<vault::SecureVault>,
 }
 
 #[tauri::command]
@@ -1008,6 +1010,67 @@ async fn cmd_toggle_trigger(
     Ok(serde_json::json!({ "ok": true }))
 }
 
+// ── R21: Secure Vault commands ──────────────────────────────
+
+#[tauri::command]
+async fn cmd_vault_status(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let vault = state.vault.lock().map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({
+        "exists": vault.exists(),
+        "unlocked": vault.is_unlocked(),
+        "keys": if vault.is_unlocked() { vault.list_keys().unwrap_or_default() } else { vec![] },
+    }))
+}
+
+#[tauri::command]
+async fn cmd_vault_store(
+    state: tauri::State<'_, AppState>,
+    key: String,
+    value: String,
+) -> Result<serde_json::Value, String> {
+    let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
+    vault.store(&key, &value)?;
+    tracing::info!(key = %key, "Stored key in vault");
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+#[tauri::command]
+async fn cmd_vault_retrieve(
+    state: tauri::State<'_, AppState>,
+    key: String,
+) -> Result<serde_json::Value, String> {
+    let vault = state.vault.lock().map_err(|e| e.to_string())?;
+    let value = vault.retrieve(&key)?;
+    Ok(serde_json::json!({ "key": key, "value": value }))
+}
+
+#[tauri::command]
+async fn cmd_vault_delete(
+    state: tauri::State<'_, AppState>,
+    key: String,
+) -> Result<serde_json::Value, String> {
+    let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
+    vault.delete(&key)?;
+    tracing::info!(key = %key, "Deleted key from vault");
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+#[tauri::command]
+async fn cmd_vault_migrate(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let settings = {
+        let s = state.settings.lock().map_err(|e| e.to_string())?;
+        s.clone()
+    };
+    let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
+    let count = vault.migrate_from_settings(&settings)?;
+    tracing::info!(count = count, "Migrated keys from settings to vault");
+    Ok(serde_json::json!({ "ok": true, "migrated": count }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -1038,6 +1101,29 @@ pub fn run() {
             let settings = config::Settings::load(&app_dir);
             let gateway = brain::Gateway::new(&settings);
 
+            // ── R21: Initialize secure vault ─────────────────────────
+            let mut secure_vault = vault::SecureVault::new(&app_dir);
+            let vault_pw = vault::SecureVault::auto_password();
+            if secure_vault.exists() {
+                match secure_vault.unlock(&vault_pw) {
+                    Ok(()) => tracing::info!("Vault unlocked successfully"),
+                    Err(e) => tracing::warn!("Failed to unlock vault: {}", e),
+                }
+            } else {
+                match secure_vault.create(&vault_pw) {
+                    Ok(()) => {
+                        tracing::info!("Created new vault");
+                        // Migrate existing plaintext keys
+                        match secure_vault.migrate_from_settings(&settings) {
+                            Ok(n) if n > 0 => tracing::info!("Migrated {} keys to vault", n),
+                            Ok(_) => {}
+                            Err(e) => tracing::warn!("Key migration failed: {}", e),
+                        }
+                    }
+                    Err(e) => tracing::warn!("Failed to create vault: {}", e),
+                }
+            }
+
             app.manage(AppState {
                 db: std::sync::Mutex::new(db),
                 gateway: tokio::sync::Mutex::new(gateway),
@@ -1047,6 +1133,7 @@ pub fn run() {
                 db_path,
                 playbooks_dir,
                 recorder: std::sync::Mutex::new(None),
+                vault: std::sync::Mutex::new(secure_vault),
             });
 
             // Start Telegram bot if configured
@@ -1231,6 +1318,12 @@ pub fn run() {
             cmd_update_trigger,
             cmd_delete_trigger,
             cmd_toggle_trigger,
+            // R21: Vault commands
+            cmd_vault_status,
+            cmd_vault_store,
+            cmd_vault_retrieve,
+            cmd_vault_delete,
+            cmd_vault_migrate,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");
