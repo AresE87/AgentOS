@@ -14,6 +14,8 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::{Emitter, Manager};
+use tauri::tray::{TrayIconBuilder, MouseButton, MouseButtonState};
+use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem};
 
 pub struct AppState {
     pub db: std::sync::Mutex<memory::Database>,
@@ -941,7 +943,77 @@ pub fn run() {
                 let _ = mesh::discovery::start_discovery(&hostname).await;
             });
 
+            // ── R15: System Tray ────────────────────────────────────────
+            let open = MenuItemBuilder::with_id("open", "Open Dashboard").build(app)?;
+            let pause = MenuItemBuilder::with_id("pause", "Pause Agent").build(app)?;
+            let settings_item = MenuItemBuilder::with_id("settings", "Settings").build(app)?;
+            let sep = PredefinedMenuItem::separator(app)?;
+            let quit = MenuItemBuilder::with_id("quit", "Quit AgentOS").build(app)?;
+
+            let menu = MenuBuilder::new(app)
+                .items(&[&open, &sep, &pause, &settings_item, &sep, &quit])
+                .build()?;
+
+            let _tray = TrayIconBuilder::new()
+                .icon(app.default_window_icon().unwrap().clone())
+                .menu(&menu)
+                .tooltip("AgentOS — AI Agent")
+                .on_menu_event(move |app, event| {
+                    match event.id().as_ref() {
+                        "open" => {
+                            if let Some(win) = app.get_webview_window("main") {
+                                let _ = win.show();
+                                let _ = win.unminimize();
+                                let _ = win.set_focus();
+                            }
+                        }
+                        "pause" => {
+                            // Toggle kill switch
+                            if let Some(state) = app.try_state::<AppState>() {
+                                let current = state.kill_switch.load(Ordering::SeqCst);
+                                state.kill_switch.store(!current, Ordering::SeqCst);
+                                tracing::info!("Kill switch toggled via tray: {}", !current);
+                            }
+                        }
+                        "settings" => {
+                            if let Some(win) = app.get_webview_window("main") {
+                                let _ = win.show();
+                                let _ = win.unminimize();
+                                let _ = win.set_focus();
+                                let _ = win.emit("navigate", "/settings");
+                            }
+                        }
+                        "quit" => {
+                            app.exit(0);
+                        }
+                        _ => {}
+                    }
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let tauri::tray::TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        let app = tray.app_handle();
+                        if let Some(win) = app.get_webview_window("main") {
+                            let _ = win.show();
+                            let _ = win.unminimize();
+                            let _ = win.set_focus();
+                        }
+                    }
+                })
+                .build(app)?;
+
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // Minimize to tray instead of quitting
+                api.prevent_close();
+                let _ = window.hide();
+            }
         })
         .invoke_handler(tauri::generate_handler![
             cmd_get_status,
