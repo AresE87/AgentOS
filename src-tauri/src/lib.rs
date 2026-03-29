@@ -10,6 +10,7 @@ mod mesh;
 pub mod pipeline;
 mod playbooks;
 pub mod types;
+pub mod web;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -919,6 +920,33 @@ async fn cmd_get_channel_status(
     }))
 }
 
+// ── R19: Web browsing commands ─────────────────────────────
+
+#[tauri::command]
+async fn cmd_browse_url(url: String) -> Result<serde_json::Value, String> {
+    let page = web::browser::fetch_page(&url).await?;
+    let text_preview = &page.text[..page.text.len().min(4000)];
+    Ok(serde_json::json!({
+        "url": page.url,
+        "title": page.title,
+        "text": text_preview,
+        "status": page.status,
+    }))
+}
+
+#[tauri::command]
+async fn cmd_web_search(query: String) -> Result<serde_json::Value, String> {
+    let results = web::browser::web_search(&query).await?;
+    Ok(serde_json::json!({
+        "query": query,
+        "results": results.iter().map(|r| serde_json::json!({
+            "title": r.title,
+            "snippet": r.snippet,
+            "url": r.url,
+        })).collect::<Vec<_>>(),
+    }))
+}
+
 // ── R18: Trigger / automation commands ──────────────────────
 
 #[tauri::command]
@@ -1194,6 +1222,9 @@ pub fn run() {
             cmd_test_click,
             cmd_test_type,
             cmd_test_key_combo,
+            // R19: Web browsing commands
+            cmd_browse_url,
+            cmd_web_search,
             // R18: Trigger/automation commands
             cmd_get_triggers,
             cmd_create_trigger,

@@ -5,6 +5,7 @@ use crate::hands;
 use crate::memory::Database;
 use crate::pipeline::executor;
 use crate::types::*;
+use crate::web;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -64,6 +65,8 @@ Respond with ONE JSON object per turn:
 {"mode":"command","commands":["ps command"],"explanation":"what this does"}
 {"mode":"multi","steps":[{"commands":["cmd1"],"explanation":"step 1"},{"commands":["cmd2"],"explanation":"step 2"}]}
 {"mode":"screen","reason":"why I need to see the screen"}
+{"mode":"browse","url":"https://example.com","task":"what to extract or answer from the page","explanation":"why browsing this URL"}
+{"mode":"search_web","query":"search terms","task":"what to find out","explanation":"why searching"}
 {"mode":"done","summary":"what was accomplished","output":"final data for user"}
 {"mode":"chat","response":"conversational answer"}
 {"mode":"need_info","question":"what I need to know"}
@@ -100,7 +103,9 @@ Data: Import-Csv, ConvertFrom-Json, [xml], Excel COM automation
 Dev: git, docker, python, node, npm, cargo (if installed)
 Office: Word/Excel/PowerPoint via COM automation
 PDF: Text extraction approaches
-Web search/scraping: Use Invoke-WebRequest to fetch page content directly (PREFERRED over opening browser)
+Web browsing: Use "browse" mode to fetch and read any web page — extracts text automatically (PREFERRED for reading articles, docs, pages)
+Web search: Use "search_web" mode to search the web and get results — better than manual scraping
+Web scraping: Use Invoke-WebRequest to fetch page content directly (fallback if browse mode fails)
 
 CRITICAL — WEB SEARCHES AND PRICE LOOKUPS:
 When the user asks to search the web, look up prices, or find information online:
@@ -675,6 +680,115 @@ pub async fn run_task(
                     accumulated_output = "Screen task completed".to_string();
                 }
                 update_task_status(db_path, task_id, "completed");
+                break;
+            }
+
+            "browse" => {
+                let url = plan_json["url"].as_str().unwrap_or("");
+                let browse_task = plan_json["task"].as_str().unwrap_or(description);
+                let expl = plan_json["explanation"].as_str().unwrap_or("Browsing web page");
+
+                if url.is_empty() {
+                    accumulated_output = "No URL provided for browse mode".to_string();
+                    update_task_status(db_path, task_id, "failed");
+                    break;
+                }
+
+                let step_num = (turn + 1) as u32;
+                emit(app_handle, "agent:step_started", task_id, step_num, expl);
+                info!(task_id, url, "Browse mode: fetching page");
+
+                match web::browser::fetch_page(url).await {
+                    Ok(page) => {
+                        let page_text = &page.text[..page.text.len().min(4000)];
+                        let prompt = format!(
+                            "I visited {} and got this content:\n\nTitle: {}\nHTTP Status: {}\n\n{}\n\nBased on this page content, answer the user's task: {}",
+                            url, page.title, page.status, page_text, browse_task
+                        );
+
+                        if let Ok(analysis) = gateway.complete_as_agent(&prompt, SYSTEM_PROMPT, settings).await {
+                            accumulated_output = analysis.content;
+                        } else {
+                            accumulated_output = format!("Page content from {} (title: {}):\n{}", url, page.title, page_text);
+                        }
+
+                        let action = AgentAction::RunCommand {
+                            command: format!("browse:{}", url),
+                            shell: ShellType::PowerShell,
+                        };
+                        let result = ExecutionResult {
+                            method: ExecutionMethod::Terminal, success: true,
+                            output: Some(accumulated_output.clone()),
+                            screenshot_path: None,
+                            duration_ms: start.elapsed().as_millis() as u64,
+                        };
+                        save_step(db_path, task_id, step_num, &action, &std::path::PathBuf::new(), &result);
+                        emit(app_handle, "agent:step_completed", task_id, step_num, "success=true");
+
+                        update_task_status(db_path, task_id, "completed");
+                    }
+                    Err(e) => {
+                        warn!(task_id, url, error = %e, "Browse failed");
+                        accumulated_output = format!("Failed to browse {}: {}", url, e);
+                        update_task_status(db_path, task_id, "failed");
+                    }
+                }
+                break;
+            }
+
+            "search_web" => {
+                let query = plan_json["query"].as_str().unwrap_or("");
+                let search_task = plan_json["task"].as_str().unwrap_or(description);
+                let expl = plan_json["explanation"].as_str().unwrap_or("Searching the web");
+
+                if query.is_empty() {
+                    accumulated_output = "No query provided for search_web mode".to_string();
+                    update_task_status(db_path, task_id, "failed");
+                    break;
+                }
+
+                let step_num = (turn + 1) as u32;
+                emit(app_handle, "agent:step_started", task_id, step_num, expl);
+                info!(task_id, query, "Search_web mode: searching");
+
+                match web::browser::web_search(query).await {
+                    Ok(results) => {
+                        let results_text: String = results.iter().enumerate().map(|(i, r)| {
+                            format!("{}. {} ({})\n   {}", i + 1, r.title, r.url, r.snippet)
+                        }).collect::<Vec<_>>().join("\n\n");
+
+                        let prompt = format!(
+                            "I searched the web for \"{}\" and got these results:\n\n{}\n\nBased on these search results, answer the user's task: {}",
+                            query, results_text, search_task
+                        );
+
+                        if let Ok(analysis) = gateway.complete_as_agent(&prompt, SYSTEM_PROMPT, settings).await {
+                            accumulated_output = analysis.content;
+                        } else {
+                            accumulated_output = format!("Search results for \"{}\":\n{}", query, results_text);
+                        }
+
+                        let action = AgentAction::RunCommand {
+                            command: format!("search_web:{}", query),
+                            shell: ShellType::PowerShell,
+                        };
+                        let result = ExecutionResult {
+                            method: ExecutionMethod::Terminal, success: true,
+                            output: Some(accumulated_output.clone()),
+                            screenshot_path: None,
+                            duration_ms: start.elapsed().as_millis() as u64,
+                        };
+                        save_step(db_path, task_id, step_num, &action, &std::path::PathBuf::new(), &result);
+                        emit(app_handle, "agent:step_completed", task_id, step_num, "success=true");
+
+                        update_task_status(db_path, task_id, "completed");
+                    }
+                    Err(e) => {
+                        warn!(task_id, query, error = %e, "Web search failed");
+                        accumulated_output = format!("Failed to search for \"{}\": {}", query, e);
+                        update_task_status(db_path, task_id, "failed");
+                    }
+                }
                 break;
             }
 
