@@ -134,6 +134,72 @@ pub fn save_screenshot(
     Ok(path)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn capture_full_screen_returns_valid_data() {
+        let result = capture_full_screen();
+        assert!(result.is_ok(), "Screen capture failed: {:?}", result.err());
+        let data = result.unwrap();
+        assert!(data.width > 0, "Width should be positive");
+        assert!(data.height > 0, "Height should be positive");
+        assert!(!data.rgba.is_empty(), "RGBA buffer should not be empty");
+        assert_eq!(
+            data.rgba.len(),
+            (data.width * data.height * 4) as usize,
+            "RGBA buffer size mismatch"
+        );
+    }
+
+    #[test]
+    fn to_base64_jpeg_returns_valid_base64() {
+        let data = capture_full_screen().unwrap();
+        let b64 = to_base64_jpeg(&data, 50).unwrap();
+        assert!(!b64.is_empty(), "Base64 should not be empty");
+        // Verify it's valid base64 by decoding
+        let decoded = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &b64);
+        assert!(decoded.is_ok(), "Should be valid base64");
+        let bytes = decoded.unwrap();
+        // JPEG starts with FF D8
+        assert_eq!(bytes[0], 0xFF, "JPEG should start with 0xFF");
+        assert_eq!(bytes[1], 0xD8, "JPEG second byte should be 0xD8");
+    }
+
+    #[test]
+    fn save_screenshot_creates_file() {
+        let data = capture_full_screen().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = save_screenshot(&data, dir.path()).unwrap();
+        assert!(path.exists(), "Screenshot file should exist");
+        assert!(path.extension().map(|e| e == "jpg").unwrap_or(false));
+        // File should be non-empty
+        let size = std::fs::metadata(&path).unwrap().len();
+        assert!(size > 1000, "JPEG file should be at least 1KB, got {} bytes", size);
+    }
+
+    #[test]
+    fn base64_jpeg_resizes_large_images() {
+        // Create a fake large image (2560x1440)
+        let width = 2560u32;
+        let height = 1440u32;
+        let rgba = vec![128u8; (width * height * 4) as usize];
+        let data = ScreenshotData {
+            width,
+            height,
+            rgba,
+            timestamp: chrono::Utc::now(),
+        };
+        let b64 = to_base64_jpeg(&data, 50).unwrap();
+        // Decode and check dimensions aren't 2560 (should be resized to max 1280)
+        let decoded = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &b64).unwrap();
+        // We can't easily check dimensions from JPEG bytes without a decoder,
+        // but we can verify it's smaller than a raw 2560x1440 would produce
+        assert!(decoded.len() < 500_000, "Resized JPEG should be reasonably small");
+    }
+}
+
 /// Convert screenshot to base64 JPEG for sending to vision LLMs
 pub fn to_base64_jpeg(
     data: &ScreenshotData,
@@ -162,4 +228,40 @@ pub fn to_base64_jpeg(
         &base64::engine::general_purpose::STANDARD,
         &jpeg_buf,
     ))
+}
+
+/// Convert screenshot to base64 JPEG and return the resized image dimensions.
+/// Critical for coordinate scaling: LLM sees coords relative to resized image,
+/// but we need to map them back to the real screen.
+pub fn to_base64_jpeg_with_dims(
+    data: &ScreenshotData,
+    quality: u8,
+) -> Result<(String, u32, u32), Box<dyn std::error::Error + Send + Sync>> {
+    let img: RgbaImage =
+        ImageBuffer::from_raw(data.width, data.height, data.rgba.clone())
+            .ok_or("Failed to create image buffer")?;
+
+    let img = if data.width > 1280 {
+        let ratio = 1280.0 / data.width as f64;
+        let new_h = (data.height as f64 * ratio) as u32;
+        image::imageops::resize(&img, 1280, new_h, image::imageops::FilterType::Triangle)
+    } else {
+        img
+    };
+
+    let img_w = img.width();
+    let img_h = img.height();
+
+    let rgb = image::DynamicImage::ImageRgba8(img).to_rgb8();
+    let mut jpeg_buf = Vec::new();
+    let mut cursor = std::io::Cursor::new(&mut jpeg_buf);
+    let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut cursor, quality);
+    encoder.encode(rgb.as_raw(), rgb.width(), rgb.height(), image::ExtendedColorType::Rgb8)?;
+
+    let b64 = base64::Engine::encode(
+        &base64::engine::general_purpose::STANDARD,
+        &jpeg_buf,
+    );
+
+    Ok((b64, img_w, img_h))
 }

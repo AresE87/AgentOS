@@ -9,11 +9,48 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 use tracing::{info, warn};
+
+/// Scale coordinates from LLM image space to real screen space.
+/// Uses capture_w/capture_h (physical pixel dimensions from GDI BitBlt)
+/// instead of GetSystemMetrics which returns logical pixels on HiDPI displays.
+fn scale_action_coords(action: AgentAction, img_w: u32, img_h: u32, capture_w: u32, capture_h: u32) -> AgentAction {
+    if capture_w == 0 || capture_h == 0 || img_w == 0 || img_h == 0 {
+        return action;
+    }
+
+    let scale = |x: i32, y: i32| -> (i32, i32) {
+        let real_x = (x as f64 * capture_w as f64 / img_w as f64) as i32;
+        let real_y = (y as f64 * capture_h as f64 / img_h as f64) as i32;
+        (real_x, real_y)
+    };
+
+    match action {
+        AgentAction::Click { x, y } => {
+            let (rx, ry) = scale(x, y);
+            AgentAction::Click { x: rx, y: ry }
+        }
+        AgentAction::DoubleClick { x, y } => {
+            let (rx, ry) = scale(x, y);
+            AgentAction::DoubleClick { x: rx, y: ry }
+        }
+        AgentAction::RightClick { x, y } => {
+            let (rx, ry) = scale(x, y);
+            AgentAction::RightClick { x: rx, y: ry }
+        }
+        AgentAction::Scroll { x, y, delta } => {
+            let (rx, ry) = scale(x, y);
+            AgentAction::Scroll { x: rx, y: ry, delta }
+        }
+        other => other,
+    }
+}
 
 const MAX_TURNS: u32 = 10;
 const MAX_RETRIES: u32 = 2;
+const MAX_BROWSER_OPENS: u32 = 3;
+const BROWSER_OPEN_DELAY_MS: u64 = 2000;
 
 const SYSTEM_PROMPT: &str = r#"You are AgentOS, an AI agent that CONTROLS a Windows 11 PC. You execute tasks step by step until they are FULLY completed.
 
@@ -169,6 +206,7 @@ pub async fn run_task(
     let mut step_history: Vec<StepRecord> = Vec::new();
     let mut accumulated_output = String::new();
     let mut conversation: Vec<(String, String)> = Vec::new(); // (role, content) history
+    let mut browser_opens: u32 = 0;
 
     info!(task_id, description, "Starting PC task");
 
@@ -221,6 +259,19 @@ pub async fn run_task(
 
                     let script = cmds.join("; ");
                     let step_num = (turn * 10 + i as u32) + 1;
+
+                    // Browser spam guard
+                    let opens = count_browser_opens(&script);
+                    if opens > 0 {
+                        browser_opens += opens;
+                        if browser_opens > MAX_BROWSER_OPENS {
+                            warn!(task_id, browser_opens, "Browser open limit reached, aborting to prevent spam loop");
+                            accumulated_output = format!("Stopped: opened {} browser windows (limit is {}). Use Invoke-WebRequest instead of opening browser windows.", browser_opens, MAX_BROWSER_OPENS);
+                            update_task_status(db_path, task_id, "failed");
+                            break;
+                        }
+                        info!(task_id, browser_opens, "Browser window opened ({}/{})", browser_opens, MAX_BROWSER_OPENS);
+                    }
 
                     emit(app_handle, "agent:step_started", task_id, step_num, expl);
                     info!(task_id, step = step_num, script = %script, "Multi-step executing");
@@ -294,6 +345,23 @@ pub async fn run_task(
                 let script = cmds.join("; ");
                 let step_num = (turn + 1) as u32;
 
+                // Browser spam guard
+                let opens = count_browser_opens(&script);
+                if opens > 0 {
+                    browser_opens += opens;
+                    if browser_opens > MAX_BROWSER_OPENS {
+                        warn!(task_id, browser_opens, "Browser open limit reached in command mode");
+                        accumulated_output = format!("Stopped: opened {} browser windows (limit is {}). Use Invoke-WebRequest instead.", browser_opens, MAX_BROWSER_OPENS);
+                        update_task_status(db_path, task_id, "failed");
+                        break;
+                    }
+                    info!(task_id, browser_opens, "Browser window opened ({}/{})", browser_opens, MAX_BROWSER_OPENS);
+                    // Add delay between browser opens to let pages load
+                    if browser_opens > 1 {
+                        tokio::time::sleep(std::time::Duration::from_millis(BROWSER_OPEN_DELAY_MS)).await;
+                    }
+                }
+
                 emit(app_handle, "agent:step_started", task_id, step_num, expl);
 
                 let is_gui = script.to_lowercase().contains("start-process");
@@ -364,6 +432,20 @@ pub async fn run_task(
                 // Phase 1: Execute commands
                 if !cmds.is_empty() {
                     let script = cmds.join("; ");
+
+                    // Browser spam guard
+                    let opens = count_browser_opens(&script);
+                    if opens > 0 {
+                        browser_opens += opens;
+                        if browser_opens > MAX_BROWSER_OPENS {
+                            warn!(task_id, browser_opens, "Browser open limit reached in command_then_screen");
+                            accumulated_output = format!("Stopped: opened {} browser windows (limit is {}). Use Invoke-WebRequest instead.", browser_opens, MAX_BROWSER_OPENS);
+                            update_task_status(db_path, task_id, "failed");
+                            break;
+                        }
+                        info!(task_id, browser_opens, "Browser window opened ({}/{})", browser_opens, MAX_BROWSER_OPENS);
+                    }
+
                     emit(app_handle, "agent:step_started", task_id, 1, expl);
                     info!(task_id, script = %script, "command_then_screen: command phase");
 
@@ -397,6 +479,14 @@ pub async fn run_task(
                 info!(task_id, screen_task, "command_then_screen: screen phase");
                 let combined_task = format!("{}\n\nThe commands have already run. Now handle the visual part: {}", description, screen_task);
 
+                // Minimize self so we don't capture our own window
+                if let Some(win) = app_handle.get_webview_window("main") {
+                    let _ = win.minimize();
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                }
+
+                let mut recent_actions: Vec<String> = Vec::new();
+
                 for vs in 1..=15u32 {
                     if kill_switch.load(Ordering::Relaxed) { break; }
 
@@ -404,17 +494,26 @@ pub async fn run_task(
                         let sd = screenshots_dir.to_path_buf();
                         move || {
                             let data = capture::capture_full_screen().map_err(|e| e.to_string())?;
+                            let cap_w = data.width;
+                            let cap_h = data.height;
                             let path = capture::save_screenshot(&data, &sd).map_err(|e| e.to_string())?;
-                            let b64 = capture::to_base64_jpeg(&data, 80).map_err(|e| e.to_string())?;
-                            Ok::<_, String>((path, b64))
+                            let (b64, img_w, img_h) = capture::to_base64_jpeg_with_dims(&data, 80).map_err(|e| e.to_string())?;
+                            Ok::<_, String>((path, b64, img_w, img_h, cap_w, cap_h))
                         }
                     }).await.map_err(|e| e.to_string())??;
 
-                    let (sp, b64) = screenshot;
+                    let (sp, b64, img_w, img_h, cap_w, cap_h) = screenshot;
                     let step_num = 10 + vs;
                     emit(app_handle, "agent:step_started", task_id, step_num, "Screen interaction");
 
-                    let action = match vision::plan_next_action(&b64, &combined_task, &step_history, settings, &gateway).await {
+                    // Check for action repetition (before LLM call so warning fires on 2nd repeat)
+                    let dedup_warning = recent_actions.len() >= 2
+                        && recent_actions[recent_actions.len() - 1] == recent_actions[recent_actions.len() - 2];
+
+                    let action = match vision::plan_next_action(
+                        &b64, &combined_task, &step_history, settings, &gateway,
+                        Some((img_w, img_h)), dedup_warning,
+                    ).await {
                         Ok(a) => a,
                         Err(e) => {
                             warn!(task_id, error = %e, "Vision failed in command_then_screen");
@@ -422,6 +521,9 @@ pub async fn run_task(
                             break;
                         }
                     };
+
+                    // Track action for dedup BEFORE execution so warning fires earlier
+                    recent_actions.push(format!("{:?}", action));
 
                     if let AgentAction::TaskComplete { ref summary } = action {
                         accumulated_output = summary.clone();
@@ -439,7 +541,11 @@ pub async fn run_task(
                         break;
                     }
 
-                    let result = match executor::execute(&action, settings.cli_timeout, kill_switch).await {
+                    // Scale coords using physical capture dimensions (DPI-safe)
+                    let scaled_action = scale_action_coords(action, img_w, img_h, cap_w, cap_h);
+                    info!(task_id, step = step_num, action = ?scaled_action, "Vision action (scaled)");
+
+                    let result = match executor::execute(&scaled_action, settings.cli_timeout, kill_switch).await {
                         Ok(r) => r,
                         Err(e) => ExecutionResult {
                             method: ExecutionMethod::Screen, success: false,
@@ -447,13 +553,20 @@ pub async fn run_task(
                         },
                     };
 
-                    save_step(db_path, task_id, step_num, &action, &sp, &result);
+                    save_step(db_path, task_id, step_num, &scaled_action, &sp, &result);
                     step_history.push(StepRecord {
-                        step_number: step_num, action, result,
+                        step_number: step_num, action: scaled_action, result,
                         screenshot_path: Some(sp.to_string_lossy().to_string()),
                     });
 
                     tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+                }
+
+                // Restore window
+                if let Some(win) = app_handle.get_webview_window("main") {
+                    if let Err(e) = win.unminimize() {
+                        warn!("Failed to restore window: {}", e);
+                    }
                 }
 
                 if accumulated_output.is_empty() {
@@ -466,26 +579,45 @@ pub async fn run_task(
                 let reason = plan_json["reason"].as_str().unwrap_or("UI task");
                 info!(task_id, reason, "Vision mode");
 
-                // Run vision loop for up to 10 steps within this turn
-                for vs in 1..=10u32 {
+                // Minimize self so we don't capture our own window
+                if let Some(win) = app_handle.get_webview_window("main") {
+                    let _ = win.minimize();
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                }
+
+                let mut recent_actions: Vec<String> = Vec::new();
+
+                for vs in 1..=15u32 {
                     if kill_switch.load(Ordering::Relaxed) { break; }
 
                     let screenshot = tokio::task::spawn_blocking({
                         let sd = screenshots_dir.to_path_buf();
                         move || {
                             let data = capture::capture_full_screen().map_err(|e| e.to_string())?;
+                            let cap_w = data.width;
+                            let cap_h = data.height;
                             let path = capture::save_screenshot(&data, &sd).map_err(|e| e.to_string())?;
-                            let b64 = capture::to_base64_jpeg(&data, 80).map_err(|e| e.to_string())?;
-                            Ok::<_, String>((path, b64))
+                            let (b64, img_w, img_h) = capture::to_base64_jpeg_with_dims(&data, 80).map_err(|e| e.to_string())?;
+                            Ok::<_, String>((path, b64, img_w, img_h, cap_w, cap_h))
                         }
                     }).await.map_err(|e| e.to_string())??;
 
-                    let (sp, b64) = screenshot;
+                    let (sp, b64, img_w, img_h, cap_w, cap_h) = screenshot;
 
-                    let action = match vision::plan_next_action(&b64, description, &step_history, settings, &gateway).await {
+                    // Check for action repetition (before LLM call so warning fires on 2nd repeat)
+                    let dedup_warning = recent_actions.len() >= 2
+                        && recent_actions[recent_actions.len() - 1] == recent_actions[recent_actions.len() - 2];
+
+                    let action = match vision::plan_next_action(
+                        &b64, description, &step_history, settings, &gateway,
+                        Some((img_w, img_h)), dedup_warning,
+                    ).await {
                         Ok(a) => a,
                         Err(e) => { accumulated_output = format!("Vision error: {}", e); break; }
                     };
+
+                    // Track action for dedup BEFORE execution so warning fires earlier
+                    recent_actions.push(format!("{:?}", action));
 
                     if let AgentAction::TaskComplete { ref summary } = action {
                         accumulated_output = summary.clone();
@@ -493,7 +625,11 @@ pub async fn run_task(
                         break;
                     }
 
-                    let result = match executor::execute(&action, settings.cli_timeout, kill_switch).await {
+                    // Scale coords using physical capture dimensions (DPI-safe)
+                    let scaled_action = scale_action_coords(action, img_w, img_h, cap_w, cap_h);
+                    info!(task_id, step = vs, action = ?scaled_action, "Vision action (scaled)");
+
+                    let result = match executor::execute(&scaled_action, settings.cli_timeout, kill_switch).await {
                         Ok(r) => r,
                         Err(e) => ExecutionResult {
                             method: ExecutionMethod::Screen, success: false,
@@ -501,13 +637,20 @@ pub async fn run_task(
                         },
                     };
 
-                    save_step(db_path, task_id, turn * 10 + vs, &action, &sp, &result);
+                    save_step(db_path, task_id, turn * 10 + vs, &scaled_action, &sp, &result);
                     step_history.push(StepRecord {
-                        step_number: turn * 10 + vs, action, result,
+                        step_number: turn * 10 + vs, action: scaled_action, result,
                         screenshot_path: Some(sp.to_string_lossy().to_string()),
                     });
 
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                }
+
+                // Restore window
+                if let Some(win) = app_handle.get_webview_window("main") {
+                    if let Err(e) = win.unminimize() {
+                        warn!("Failed to restore window: {}", e);
+                    }
                 }
 
                 if accumulated_output.is_empty() {
@@ -616,7 +759,53 @@ async fn execute_with_retry(
 // HELPERS
 // ═══════════════════════════════════════════════════════════════════
 
-fn extract_json(text: &str) -> Option<serde_json::Value> {
+/// Counts how many browser/URL opens a script triggers
+fn count_browser_opens(script: &str) -> u32 {
+    let lower = script.to_lowercase();
+    let mut count = 0;
+    // Start-Process with URLs
+    for pattern in ["start-process 'http", "start-process \"http", "start-process http",
+                     "start 'http", "start \"http", "start http",
+                     "invoke-item 'http", "invoke-item \"http"] {
+        count += lower.matches(pattern).count() as u32;
+    }
+    count
+}
+
+/// Decompose a complex task into subtasks using LLM
+pub async fn decompose_task(
+    description: &str,
+    settings: &Settings,
+) -> Result<Vec<String>, String> {
+    let gateway = Gateway::new(settings);
+    let prompt = format!(
+        "Break this task into 2-5 concrete subtasks. Return ONLY a JSON array of strings, each being one subtask.\n\nTask: \"{}\"\n\nExample: [\"Research topic X\", \"Create comparison table\", \"Write summary\"]\n\nReturn ONLY the JSON array, nothing else.",
+        description
+    );
+
+    let response = gateway.complete(&prompt, settings).await?;
+    let content = response.content.trim();
+
+    // Parse JSON array
+    if let Some(arr) = extract_json(content).and_then(|v| v.as_array().cloned()) {
+        let subtasks: Vec<String> = arr.iter().filter_map(|v| v.as_str().map(String::from)).collect();
+        if !subtasks.is_empty() {
+            return Ok(subtasks);
+        }
+    }
+
+    // Fallback: try to parse as array directly
+    if let Ok(arr) = serde_json::from_str::<Vec<String>>(content) {
+        if !arr.is_empty() {
+            return Ok(arr);
+        }
+    }
+
+    // Can't decompose — return single task
+    Ok(vec![description.to_string()])
+}
+
+pub fn extract_json(text: &str) -> Option<serde_json::Value> {
     serde_json::from_str(text).ok().or_else(|| {
         let s = text.find('{')?;
         let e = text.rfind('}')?;
