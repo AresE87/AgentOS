@@ -139,6 +139,14 @@ export function useAgent() {
     const listOrgMembers = () => callInvoke<any>('list_org_members');
     const addOrgMember = (email: string, role: string) => callInvoke<any>('add_org_member', { email, role });
 
+    // R38: Advanced Analytics
+    const getROIReport = (period?: string, hourlyRate?: number) =>
+        callInvoke<any>('get_roi_report', { period, hourly_rate: hourlyRate });
+    const getHeatmap = () => callInvoke<any>('get_heatmap');
+    const exportAnalytics = (format: string) =>
+        callInvoke<{ content: string; format: string }>('export_analytics', { format });
+    const getPeriodComparison = () => callInvoke<any>('get_period_comparison');
+
     return {
         getStatus, processMessage, getTasks, getPlaybooks, setActivePlaybook,
         getSettings, updateSettings, healthCheck, getActiveChain, getChainHistory,
@@ -166,6 +174,8 @@ export function useAgent() {
         runSmartPlaybook, validateSmartPlaybook, getPlaybookVariables,
         // i18n
         setLanguage,
+        // R38: Advanced Analytics
+        getROIReport, getHeatmap, exportAnalytics, getPeriodComparison,
     };
 }
 
