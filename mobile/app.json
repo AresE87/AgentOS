@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "name": "AgentOS",
+    "slug": "agentos-mobile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "splash": { "backgroundColor": "#0a0a0f" },
+    "android": { "package": "com.agentos.mobile" },
+    "ios": { "bundleIdentifier": "com.agentos.mobile" }
+  }
+}
