@@ -851,13 +851,22 @@ async fn cmd_test_key_combo(keys: Vec<String>) -> Result<serde_json::Value, Stri
 
 // ── Phase 6: Channels ────────────────────────────────────────
 #[tauri::command]
-async fn cmd_get_channel_status() -> Result<serde_json::Value, String> {
+async fn cmd_get_channel_status(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let has_token = {
+        let settings = state.settings.lock().map_err(|e| e.to_string())?;
+        !settings.telegram_bot_token.is_empty()
+    };
     Ok(serde_json::json!({
         "telegram": {
             "running": channels::telegram::is_running(),
+            "connected": has_token && channels::telegram::is_running(),
+            "bot_name": channels::telegram::bot_name(),
         },
         "discord": {
             "running": channels::discord::is_running(),
+            "connected": false,
         },
     }))
 }
