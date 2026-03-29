@@ -1076,9 +1076,13 @@ async fn cmd_test_key_combo(keys: Vec<String>) -> Result<serde_json::Value, Stri
 async fn cmd_get_channel_status(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let has_token = {
+    let (has_token, has_whatsapp) = {
         let settings = state.settings.lock().map_err(|e| e.to_string())?;
-        !settings.telegram_bot_token.is_empty()
+        (
+            !settings.telegram_bot_token.is_empty(),
+            !settings.whatsapp_phone_number_id.is_empty()
+                && !settings.whatsapp_access_token.is_empty(),
+        )
     };
     Ok(serde_json::json!({
         "telegram": {
@@ -1090,6 +1094,128 @@ async fn cmd_get_channel_status(
             "running": channels::discord::is_running(),
             "connected": false,
         },
+        "whatsapp": {
+            "running": channels::whatsapp::is_running(),
+            "connected": has_whatsapp && channels::whatsapp::is_running(),
+            "phone_number_id": channels::whatsapp::phone_number_id(),
+        },
+    }))
+}
+
+// ── R32: WhatsApp Business API ────────────────────────────────
+#[tauri::command]
+async fn cmd_whatsapp_setup(
+    phone_number_id: String,
+    access_token: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    // Save config
+    {
+        let mut settings = state.settings.lock().map_err(|e| e.to_string())?;
+        settings.set("whatsapp_phone_number_id", &phone_number_id);
+        settings.set("whatsapp_access_token", &access_token);
+        settings.save().map_err(|e| e.to_string())?;
+    }
+
+    // Read verify_token and webhook_port
+    let (verify_token, webhook_port) = {
+        let settings = state.settings.lock().map_err(|e| e.to_string())?;
+        (
+            settings.whatsapp_verify_token.clone(),
+            settings.whatsapp_webhook_port,
+        )
+    };
+
+    // Start webhook server
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<(String, String)>(256);
+    channels::webhook::start_webhook_server(webhook_port, verify_token, tx).await?;
+
+    // Mark as running
+    channels::whatsapp::set_running(true);
+    channels::whatsapp::set_phone_id(&phone_number_id);
+
+    // Spawn message handler (logs incoming messages for now)
+    tokio::spawn(async move {
+        while let Some((from, text)) = rx.recv().await {
+            tracing::info!(from = %from, text = %text, "WhatsApp incoming message");
+        }
+    });
+
+    Ok(serde_json::json!({
+        "ok": true,
+        "webhook_port": webhook_port,
+    }))
+}
+
+#[tauri::command]
+async fn cmd_whatsapp_test(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let config = {
+        let settings = state.settings.lock().map_err(|e| e.to_string())?;
+        if settings.whatsapp_phone_number_id.is_empty() || settings.whatsapp_access_token.is_empty()
+        {
+            return Err("WhatsApp not configured".to_string());
+        }
+        channels::whatsapp::WhatsAppConfig {
+            phone_number_id: settings.whatsapp_phone_number_id.clone(),
+            access_token: settings.whatsapp_access_token.clone(),
+            verify_token: settings.whatsapp_verify_token.clone(),
+            webhook_port: settings.whatsapp_webhook_port,
+        }
+    };
+
+    let channel = channels::whatsapp::WhatsAppChannel::new(config);
+    let connected = channel.test_connection().await?;
+
+    Ok(serde_json::json!({ "connected": connected }))
+}
+
+#[tauri::command]
+async fn cmd_whatsapp_send(
+    to: String,
+    text: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let config = {
+        let settings = state.settings.lock().map_err(|e| e.to_string())?;
+        if settings.whatsapp_phone_number_id.is_empty() || settings.whatsapp_access_token.is_empty()
+        {
+            return Err("WhatsApp not configured".to_string());
+        }
+        channels::whatsapp::WhatsAppConfig {
+            phone_number_id: settings.whatsapp_phone_number_id.clone(),
+            access_token: settings.whatsapp_access_token.clone(),
+            verify_token: settings.whatsapp_verify_token.clone(),
+            webhook_port: settings.whatsapp_webhook_port,
+        }
+    };
+
+    let channel = channels::whatsapp::WhatsAppChannel::new(config);
+    channel.send_message(&to, &text).await?;
+
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+#[tauri::command]
+async fn cmd_get_whatsapp_status(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let (has_config, phone_id, webhook_port) = {
+        let settings = state.settings.lock().map_err(|e| e.to_string())?;
+        (
+            !settings.whatsapp_phone_number_id.is_empty()
+                && !settings.whatsapp_access_token.is_empty(),
+            settings.whatsapp_phone_number_id.clone(),
+            settings.whatsapp_webhook_port,
+        )
+    };
+
+    Ok(serde_json::json!({
+        "configured": has_config,
+        "connected": has_config && channels::whatsapp::is_running(),
+        "phone_number_id": phone_id,
+        "webhook_port": webhook_port,
     }))
 }
 
@@ -2234,6 +2360,11 @@ pub fn run() {
             cmd_get_mesh_capabilities,
             cmd_plan_distributed_execution,
             cmd_execute_distributed_chain,
+            // R32: WhatsApp commands
+            cmd_whatsapp_setup,
+            cmd_whatsapp_test,
+            cmd_whatsapp_send,
+            cmd_get_whatsapp_status,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");

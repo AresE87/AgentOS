@@ -103,6 +103,14 @@ export function useAgent() {
     // Channels
     const getChannelStatus = () => callInvoke<{ channels: Record<string, { connected: boolean; info?: string }> }>('get_channel_status');
 
+    // R32: WhatsApp
+    const whatsappSetup = (phoneNumberId: string, accessToken: string) =>
+        callInvoke<{ ok: boolean; webhook_port: number }>('whatsapp_setup', { phone_number_id: phoneNumberId, access_token: accessToken });
+    const whatsappTest = () => callInvoke<{ connected: boolean }>('whatsapp_test');
+    const whatsappSend = (to: string, text: string) =>
+        callInvoke<{ ok: boolean }>('whatsapp_send', { to, text });
+    const getWhatsappStatus = () => callInvoke<{ configured: boolean; connected: boolean; phone_number_id: string; webhook_port: number }>('get_whatsapp_status');
+
     // R28: Feedback & Insights
     const submitFeedback = (taskId: string, taskText: string, responseText: string, rating: number, comment?: string, modelUsed?: string) =>
         callInvoke<{ ok: boolean }>('submit_feedback', { task_id: taskId, task_text: taskText, response_text: responseText, rating, comment, model_used: modelUsed });
@@ -140,6 +148,8 @@ export function useAgent() {
         submitFeedback, getFeedbackStats, getWeeklyInsights, getRecentFeedback,
         // Enterprise
         getAuditLog, exportAuditLog, getOrg, createOrg, listOrgMembers, addOrgMember,
+        // WhatsApp
+        whatsappSetup, whatsappTest, whatsappSend, getWhatsappStatus,
     };
 }
 

@@ -28,6 +28,16 @@ pub struct Settings {
     #[serde(default = "default_plan_type")]
     pub plan_type: String,
 
+    // R32: WhatsApp Business API
+    #[serde(default)]
+    pub whatsapp_phone_number_id: String,
+    #[serde(default)]
+    pub whatsapp_access_token: String,
+    #[serde(default = "default_whatsapp_verify_token")]
+    pub whatsapp_verify_token: String,
+    #[serde(default = "default_whatsapp_webhook_port")]
+    pub whatsapp_webhook_port: u16,
+
     // R25: Local LLMs (Ollama)
     #[serde(default)]
     pub use_local_llm: bool,
@@ -60,6 +70,12 @@ fn default_screenshot_quality() -> u8 {
 }
 fn default_plan_type() -> String {
     "free".to_string()
+}
+fn default_whatsapp_verify_token() -> String {
+    uuid::Uuid::new_v4().to_string()
+}
+fn default_whatsapp_webhook_port() -> u16 {
+    9099
 }
 fn default_local_llm_url() -> String {
     "http://localhost:11434".to_string()
@@ -136,6 +152,20 @@ impl Settings {
             "local_model" => {
                 self.local_model = value.to_string();
             }
+            "whatsapp_phone_number_id" => {
+                self.whatsapp_phone_number_id = value.to_string();
+            }
+            "whatsapp_access_token" => {
+                self.whatsapp_access_token = value.to_string();
+            }
+            "whatsapp_verify_token" => {
+                self.whatsapp_verify_token = value.to_string();
+            }
+            "whatsapp_webhook_port" => {
+                if let Ok(v) = value.parse() {
+                    self.whatsapp_webhook_port = v;
+                }
+            }
             _ => {}
         }
     }
@@ -167,6 +197,8 @@ impl Settings {
             "has_openai": !self.openai_api_key.is_empty(),
             "has_google": !self.google_api_key.is_empty(),
             "has_telegram": !self.telegram_bot_token.is_empty(),
+            "has_whatsapp": !self.whatsapp_phone_number_id.is_empty() && !self.whatsapp_access_token.is_empty(),
+            "whatsapp_webhook_port": self.whatsapp_webhook_port,
             "plan_type": self.plan_type,
             "use_local_llm": self.use_local_llm,
             "local_llm_url": self.local_llm_url,
@@ -290,6 +322,10 @@ impl Default for Settings {
             openai_api_key: String::new(),
             google_api_key: String::new(),
             telegram_bot_token: String::new(),
+            whatsapp_phone_number_id: String::new(),
+            whatsapp_access_token: String::new(),
+            whatsapp_verify_token: default_whatsapp_verify_token(),
+            whatsapp_webhook_port: default_whatsapp_webhook_port(),
             log_level: default_log_level(),
             max_cost_per_task: default_max_cost(),
             cli_timeout: default_timeout(),
