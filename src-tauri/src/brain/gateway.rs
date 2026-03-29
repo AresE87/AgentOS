@@ -2,6 +2,7 @@ use std::time::Instant;
 use tracing::{info, warn};
 use uuid::Uuid;
 
+use super::local_llm::LocalLLMProvider;
 use super::providers::Providers;
 use super::router::Router;
 use super::types::{LLMResponse, Message};
@@ -293,5 +294,45 @@ impl Gateway {
             "openai": !settings.openai_api_key.is_empty(),
             "google": !settings.google_api_key.is_empty(),
         })
+    }
+
+    /// Try local Ollama first (when enabled), then fall back to cloud.
+    /// Uses `complete_with_system` for the cloud path.
+    pub async fn complete_with_local_fallback(
+        &self,
+        user_text: &str,
+        system_prompt: Option<&str>,
+        settings: &Settings,
+    ) -> Result<LLMResponse, String> {
+        if settings.use_local_llm {
+            let provider = LocalLLMProvider::new(&settings.local_llm_url);
+            let system = system_prompt.unwrap_or("");
+            match provider.complete(&settings.local_model, user_text, system).await {
+                Ok(content) => {
+                    info!(
+                        model = %settings.local_model,
+                        "Local LLM (Ollama) completion used"
+                    );
+                    return Ok(LLMResponse {
+                        task_id: Uuid::new_v4().to_string(),
+                        content,
+                        model: format!("ollama/{}", settings.local_model),
+                        provider: "ollama".to_string(),
+                        tokens_in: 0,
+                        tokens_out: 0,
+                        cost: 0.0,
+                        duration_ms: 0,
+                    });
+                }
+                Err(e) => {
+                    warn!(
+                        model = %settings.local_model,
+                        error = %e,
+                        "Local LLM failed — falling back to cloud"
+                    );
+                }
+            }
+        }
+        self.complete_with_system(user_text, system_prompt, settings).await
     }
 }

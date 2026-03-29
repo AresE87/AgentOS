@@ -38,6 +38,8 @@ pub struct AppState {
     /// Whether the public HTTP API is running
     pub api_enabled: std::sync::Mutex<bool>,
     pub api_port: u16,
+    /// R25: Local LLM provider (Ollama)
+    pub local_llm: Arc<brain::LocalLLMProvider>,
 }
 
 #[tauri::command]
@@ -1412,6 +1414,55 @@ async fn cmd_marketplace_get_reviews(
     Ok(serde_json::json!({ "package_id": package_id, "reviews": reviews }))
 }
 
+// ── R25: Local LLM (Ollama) commands ────────────────────────────
+
+#[tauri::command]
+async fn cmd_get_local_llm_status(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let (use_local_llm, local_model) = {
+        let settings = state.settings.lock().map_err(|e| e.to_string())?;
+        (settings.use_local_llm, settings.local_model.clone())
+    };
+    let mut status = state.local_llm.get_status().await;
+    if use_local_llm {
+        status.selected_model = Some(local_model);
+    }
+    Ok(serde_json::to_value(&status).map_err(|e| e.to_string())?)
+}
+
+#[tauri::command]
+async fn cmd_set_local_llm(
+    enabled: bool,
+    model: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut settings = state.settings.lock().map_err(|e| e.to_string())?;
+    settings.set("use_local_llm", if enabled { "true" } else { "false" });
+    if let Some(m) = model {
+        settings.set("local_model", &m);
+    }
+    settings.save().map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({ "ok": true, "use_local_llm": enabled }))
+}
+
+#[tauri::command]
+async fn cmd_pull_ollama_model(
+    model: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let local_llm = state.local_llm.clone();
+    let model_clone = model.clone();
+    // Kick off pull in background — it can take minutes
+    tauri::async_runtime::spawn(async move {
+        match local_llm.pull_model(&model_clone).await {
+            Ok(()) => tracing::info!(model = %model_clone, "Ollama pull finished"),
+            Err(e) => tracing::warn!(model = %model_clone, error = %e, "Ollama pull failed"),
+        }
+    });
+    Ok(serde_json::json!({ "ok": true, "message": format!("Pull started for {}", model) }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -1466,6 +1517,11 @@ pub fn run() {
             }
 
             let api_port: u16 = 8080;
+
+            // ── R25: Local LLM provider ───────────────────────────────
+            let local_llm_url = settings.local_llm_url.clone();
+            let local_llm = Arc::new(brain::LocalLLMProvider::new(&local_llm_url));
+
             app.manage(AppState {
                 db: std::sync::Mutex::new(db),
                 gateway: tokio::sync::Mutex::new(gateway),
@@ -1479,7 +1535,29 @@ pub fn run() {
                 api_task_store: None,
                 api_enabled: std::sync::Mutex::new(true),
                 api_port,
+                local_llm: local_llm.clone(),
             });
+
+            // ── R25: Connectivity monitor — emits local_llm:status_changed ──
+            {
+                use std::time::Duration;
+                let app_handle_clone = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let mut was_available = false;
+                    loop {
+                        tokio::time::sleep(Duration::from_secs(60)).await;
+                        let status = local_llm.get_status().await;
+                        if status.available != was_available {
+                            was_available = status.available;
+                            let _ = app_handle_clone.emit("local_llm:status_changed", &status);
+                            tracing::info!(
+                                available = was_available,
+                                "Ollama availability changed"
+                            );
+                        }
+                    }
+                });
+            }
 
             // ── R24: Start public HTTP API server ─────────────────────
             {
@@ -1735,6 +1813,10 @@ pub fn run() {
             cmd_api_revoke_key,
             cmd_api_get_status,
             cmd_api_set_enabled,
+            // R25: Local LLM (Ollama) commands
+            cmd_get_local_llm_status,
+            cmd_set_local_llm,
+            cmd_pull_ollama_model,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");

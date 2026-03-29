@@ -28,6 +28,14 @@ pub struct Settings {
     #[serde(default = "default_plan_type")]
     pub plan_type: String,
 
+    // R25: Local LLMs (Ollama)
+    #[serde(default)]
+    pub use_local_llm: bool,
+    #[serde(default = "default_local_llm_url")]
+    pub local_llm_url: String,
+    #[serde(default = "default_local_model")]
+    pub local_model: String,
+
     #[serde(skip)]
     config_path: PathBuf,
 }
@@ -52,6 +60,12 @@ fn default_screenshot_quality() -> u8 {
 }
 fn default_plan_type() -> String {
     "free".to_string()
+}
+fn default_local_llm_url() -> String {
+    "http://localhost:11434".to_string()
+}
+fn default_local_model() -> String {
+    "llama3.2".to_string()
 }
 
 impl Settings {
@@ -113,6 +127,15 @@ impl Settings {
                     self.plan_type = value.to_string();
                 }
             }
+            "use_local_llm" => {
+                self.use_local_llm = value == "true" || value == "1";
+            }
+            "local_llm_url" => {
+                self.local_llm_url = value.to_string();
+            }
+            "local_model" => {
+                self.local_model = value.to_string();
+            }
             _ => {}
         }
     }
@@ -145,6 +168,9 @@ impl Settings {
             "has_google": !self.google_api_key.is_empty(),
             "has_telegram": !self.telegram_bot_token.is_empty(),
             "plan_type": self.plan_type,
+            "use_local_llm": self.use_local_llm,
+            "local_llm_url": self.local_llm_url,
+            "local_model": self.local_model,
         })
     }
 }
@@ -272,6 +298,9 @@ impl Default for Settings {
             screenshot_quality: default_screenshot_quality(),
             pc_control_enabled: false,
             plan_type: default_plan_type(),
+            use_local_llm: false,
+            local_llm_url: default_local_llm_url(),
+            local_model: default_local_model(),
             config_path: PathBuf::new(),
         }
     }
