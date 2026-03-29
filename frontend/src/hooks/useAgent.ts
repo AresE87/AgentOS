@@ -171,6 +171,15 @@ export function useAgent() {
     const saveSpeech = (text: string, outputPath: string) =>
         callInvoke<{ ok: boolean }>('save_speech', { text, output_path: outputPath });
 
+    // R42: Agent-to-Agent Protocol
+    const aapSendTask = (host: string, port: number, task: string) =>
+        callInvoke<any>('aap_send_task', { host, port, task });
+    const aapQueryCapabilities = (host: string, port: number) =>
+        callInvoke<any>('aap_query_capabilities', { host, port });
+    const aapHealth = (host: string, port: number) =>
+        callInvoke<any>('aap_health', { host, port });
+    const getAAPStatus = () => callInvoke<any>('get_aap_status');
+
     return {
         getStatus, processMessage, getTasks, getPlaybooks, setActivePlaybook,
         getSettings, updateSettings, healthCheck, getActiveChain, getChainHistory,
@@ -207,6 +216,8 @@ export function useAgent() {
         getBusinessMetrics, getSystemInfo,
         // R41: Voice Interface
         transcribeAudio, speakText, listVoices, saveSpeech,
+        // R42: Agent-to-Agent Protocol
+        aapSendTask, aapQueryCapabilities, aapHealth, getAAPStatus,
     };
 }
 
