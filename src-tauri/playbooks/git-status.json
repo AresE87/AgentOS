@@ -1,0 +1,18 @@
+{
+  "id": "git-status",
+  "name": "Git Status",
+  "description": "Shows git status of the current directory",
+  "category": "development",
+  "version": "1.0.0",
+  "author": "AgentOS",
+  "tags": ["git", "status", "dev", "version-control"],
+  "steps": [
+    {
+      "id": "step-1",
+      "description": "Show git status",
+      "action_type": "shell",
+      "command": "git -C (Get-Location) status --short --branch 2>&1 | Write-Output"
+    }
+  ],
+  "created_at": "2025-01-01T00:00:00Z"
+}

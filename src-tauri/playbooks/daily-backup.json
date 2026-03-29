@@ -1,0 +1,18 @@
+{
+  "id": "daily-backup",
+  "name": "Daily Backup",
+  "description": "Backs up the Documents folder to a timestamped zip archive",
+  "category": "automation",
+  "version": "1.0.0",
+  "author": "AgentOS",
+  "tags": ["backup", "documents", "archive", "zip"],
+  "steps": [
+    {
+      "id": "step-1",
+      "description": "Zip Documents folder to Desktop",
+      "action_type": "shell",
+      "command": "$ts = Get-Date -Format 'yyyyMMdd'; $dest = \"$env:USERPROFILE\\Desktop\\backup_docs_$ts.zip\"; Compress-Archive -Path \"$env:USERPROFILE\\Documents\" -DestinationPath $dest -Force; $size = [math]::Round((Get-Item $dest).Length/1MB,1); Write-Output \"Backup created: $dest (${size}MB)\""
+    }
+  ],
+  "created_at": "2025-01-01T00:00:00Z"
+}

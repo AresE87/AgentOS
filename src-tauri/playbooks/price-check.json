@@ -1,0 +1,18 @@
+{
+  "id": "price-check",
+  "name": "Price Check",
+  "description": "Opens a product search on Amazon and Google Shopping",
+  "category": "research",
+  "version": "1.0.0",
+  "author": "AgentOS",
+  "tags": ["price", "shopping", "research", "product"],
+  "steps": [
+    {
+      "id": "step-1",
+      "description": "Open product search in browser",
+      "action_type": "shell",
+      "command": "$product = 'mechanical keyboard'; $encoded = [Uri]::EscapeDataString($product); Start-Process \"https://www.google.com/search?q=$encoded+price+site:amazon.com\"; Write-Output \"Opened price search for: $product\""
+    }
+  ],
+  "created_at": "2025-01-01T00:00:00Z"
+}

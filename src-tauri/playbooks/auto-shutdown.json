@@ -1,0 +1,18 @@
+{
+  "id": "auto-shutdown",
+  "name": "Auto Shutdown",
+  "description": "Schedules the PC to shut down after a specified delay",
+  "category": "automation",
+  "version": "1.0.0",
+  "author": "AgentOS",
+  "tags": ["shutdown", "power", "schedule", "automation"],
+  "steps": [
+    {
+      "id": "step-1",
+      "description": "Schedule shutdown in 60 minutes",
+      "action_type": "shell",
+      "command": "shutdown /s /t 3600 /c 'AgentOS scheduled shutdown in 60 minutes'; Write-Output 'PC will shut down in 60 minutes. Run shutdown /a to cancel.'"
+    }
+  ],
+  "created_at": "2025-01-01T00:00:00Z"
+}

@@ -1,0 +1,18 @@
+{
+  "id": "git-daily-report",
+  "name": "Git Daily Report",
+  "description": "Lists all git commits made today in the current repository",
+  "category": "development",
+  "version": "1.0.0",
+  "author": "AgentOS",
+  "tags": ["git", "commits", "report", "daily"],
+  "steps": [
+    {
+      "id": "step-1",
+      "description": "List today's commits",
+      "action_type": "shell",
+      "command": "$today = (Get-Date).ToString('yyyy-MM-dd'); git log --since=\"$today 00:00\" --until=\"$today 23:59\" --pretty=format:'%h %an %s' --all 2>&1 | Write-Output"
+    }
+  ],
+  "created_at": "2025-01-01T00:00:00Z"
+}

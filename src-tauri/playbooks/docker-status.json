@@ -1,0 +1,18 @@
+{
+  "id": "docker-status",
+  "name": "Docker Status",
+  "description": "Lists running Docker containers and their resource usage",
+  "category": "development",
+  "version": "1.0.0",
+  "author": "AgentOS",
+  "tags": ["docker", "containers", "devops"],
+  "steps": [
+    {
+      "id": "step-1",
+      "description": "List running containers",
+      "action_type": "shell",
+      "command": "docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}' 2>&1 | Write-Output"
+    }
+  ],
+  "created_at": "2025-01-01T00:00:00Z"
+}

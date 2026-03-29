@@ -1,0 +1,18 @@
+{
+  "id": "wikipedia-lookup",
+  "name": "Wikipedia Lookup",
+  "description": "Fetches a Wikipedia article summary for a given topic",
+  "category": "research",
+  "version": "1.0.0",
+  "author": "AgentOS",
+  "tags": ["wikipedia", "research", "lookup", "knowledge"],
+  "steps": [
+    {
+      "id": "step-1",
+      "description": "Fetch Wikipedia summary",
+      "action_type": "shell",
+      "command": "$topic = 'Artificial intelligence'; $encoded = [Uri]::EscapeDataString($topic); $response = Invoke-RestMethod -Uri \"https://en.wikipedia.org/api/rest_v1/page/summary/$encoded\"; Write-Output \"Title: $($response.title)\"; Write-Output \"\"; Write-Output $response.extract"
+    }
+  ],
+  "created_at": "2025-01-01T00:00:00Z"
+}

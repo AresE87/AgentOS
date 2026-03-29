@@ -1,0 +1,18 @@
+{
+  "id": "startup-manager",
+  "name": "Startup Manager",
+  "description": "Lists all programs configured to run at Windows startup",
+  "category": "productivity",
+  "version": "1.0.0",
+  "author": "AgentOS",
+  "tags": ["startup", "boot", "programs", "registry"],
+  "steps": [
+    {
+      "id": "step-1",
+      "description": "List startup programs from registry and startup folders",
+      "action_type": "shell",
+      "command": "Get-CimInstance Win32_StartupCommand | Select-Object Name, Command, Location, User | Format-Table -AutoSize"
+    }
+  ],
+  "created_at": "2025-01-01T00:00:00Z"
+}

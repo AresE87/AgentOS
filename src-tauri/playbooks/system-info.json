@@ -1,0 +1,24 @@
+{
+  "id": "system-info",
+  "name": "System Info",
+  "description": "Shows CPU, RAM, and disk usage summary",
+  "category": "productivity",
+  "version": "1.0.0",
+  "author": "AgentOS",
+  "tags": ["system", "cpu", "ram", "disk", "info"],
+  "steps": [
+    {
+      "id": "step-1",
+      "description": "Get CPU and RAM info",
+      "action_type": "shell",
+      "command": "$cpu = Get-CimInstance Win32_Processor | Select-Object -First 1; $ram = Get-CimInstance Win32_ComputerSystem; $ramGB = [math]::Round($ram.TotalPhysicalMemory/1GB, 1); Write-Output \"CPU: $($cpu.Name)\"; Write-Output \"Cores: $($cpu.NumberOfCores) / Threads: $($cpu.NumberOfLogicalProcessors)\"; Write-Output \"RAM: ${ramGB} GB\"; Write-Output \"OS: $((Get-CimInstance Win32_OperatingSystem).Caption)\""
+    },
+    {
+      "id": "step-2",
+      "description": "Get disk usage summary",
+      "action_type": "shell",
+      "command": "Get-PSDrive -PSProvider FileSystem | Select-Object Name, @{N='Used(GB)';E={[math]::Round(($_.Used)/1GB,1)}}, @{N='Free(GB)';E={[math]::Round(($_.Free)/1GB,1)}} | Format-Table -AutoSize"
+    }
+  ],
+  "created_at": "2025-01-01T00:00:00Z"
+}

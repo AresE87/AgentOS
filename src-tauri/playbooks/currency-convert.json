@@ -1,0 +1,18 @@
+{
+  "id": "currency-convert",
+  "name": "Currency Convert",
+  "description": "Converts an amount between two currencies using a public exchange rate API",
+  "category": "research",
+  "version": "1.0.0",
+  "author": "AgentOS",
+  "tags": ["currency", "exchange", "finance", "convert"],
+  "steps": [
+    {
+      "id": "step-1",
+      "description": "Convert USD to EUR",
+      "action_type": "shell",
+      "command": "$from = 'USD'; $to = 'EUR'; $amount = 100; $response = Invoke-RestMethod \"https://open.er-api.com/v6/latest/$from\"; $rate = $response.rates.$to; $result = [math]::Round($amount * $rate, 2); Write-Output \"$amount $from = $result $to (rate: $rate)\""
+    }
+  ],
+  "created_at": "2025-01-01T00:00:00Z"
+}

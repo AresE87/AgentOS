@@ -1,0 +1,18 @@
+{
+  "id": "screenshot-capture",
+  "name": "Screenshot Capture",
+  "description": "Captures the screen and saves it to the desktop with a timestamp",
+  "category": "productivity",
+  "version": "1.0.0",
+  "author": "AgentOS",
+  "tags": ["screenshot", "capture", "desktop"],
+  "steps": [
+    {
+      "id": "step-1",
+      "description": "Capture screen and save to desktop",
+      "action_type": "shell",
+      "command": "Add-Type -AssemblyName System.Windows.Forms; $ts = Get-Date -Format 'yyyyMMdd_HHmmss'; $path = \"$env:USERPROFILE\\Desktop\\screenshot_$ts.png\"; [System.Windows.Forms.Screen]::PrimaryScreen | ForEach-Object { $bmp = New-Object System.Drawing.Bitmap($_.Bounds.Width, $_.Bounds.Height); $g = [System.Drawing.Graphics]::FromImage($bmp); $g.CopyFromScreen($_.Bounds.Location, [System.Drawing.Point]::Empty, $_.Bounds.Size); $bmp.Save($path) }; Write-Output \"Saved to $path\""
+    }
+  ],
+  "created_at": "2025-01-01T00:00:00Z"
+}

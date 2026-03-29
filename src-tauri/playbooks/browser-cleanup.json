@@ -1,0 +1,24 @@
+{
+  "id": "browser-cleanup",
+  "name": "Browser Cleanup",
+  "description": "Clears Chrome and Edge browser cache directories",
+  "category": "automation",
+  "version": "1.0.0",
+  "author": "AgentOS",
+  "tags": ["browser", "cache", "cleanup", "chrome", "edge"],
+  "steps": [
+    {
+      "id": "step-1",
+      "description": "Show cache sizes before cleanup",
+      "action_type": "shell",
+      "command": "$chromePath = \"$env:LOCALAPPDATA\\Google\\Chrome\\User Data\\Default\\Cache\"; $edgePath = \"$env:LOCALAPPDATA\\Microsoft\\Edge\\User Data\\Default\\Cache\"; foreach ($p in @($chromePath, $edgePath)) { if (Test-Path $p) { $size = (Get-ChildItem $p -Recurse -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum; Write-Output \"$p : $([math]::Round($size/1MB,1))MB\" } }"
+    },
+    {
+      "id": "step-2",
+      "description": "Clear cache folders",
+      "action_type": "shell",
+      "command": "$paths = @(\"$env:LOCALAPPDATA\\Google\\Chrome\\User Data\\Default\\Cache\", \"$env:LOCALAPPDATA\\Microsoft\\Edge\\User Data\\Default\\Cache\"); foreach ($p in $paths) { if (Test-Path $p) { Remove-Item \"$p\\*\" -Recurse -Force -ErrorAction SilentlyContinue; Write-Output \"Cleared: $p\" } }"
+    }
+  ],
+  "created_at": "2025-01-01T00:00:00Z"
+}

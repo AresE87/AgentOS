@@ -1,0 +1,24 @@
+{
+  "id": "morning-briefing",
+  "name": "Morning Briefing",
+  "description": "Provides a morning system status summary with date, uptime, and disk info",
+  "category": "automation",
+  "version": "1.0.0",
+  "author": "AgentOS",
+  "tags": ["morning", "briefing", "status", "daily"],
+  "steps": [
+    {
+      "id": "step-1",
+      "description": "Show date, system uptime and greeting",
+      "action_type": "shell",
+      "command": "$now = Get-Date; $os = Get-CimInstance Win32_OperatingSystem; $uptime = (Get-Date) - $os.LastBootUpTime; Write-Output \"Good morning! Today is $($now.ToString('dddd, MMMM d, yyyy')).\"; Write-Output \"System uptime: $([math]::Floor($uptime.TotalHours))h $($uptime.Minutes)m\""
+    },
+    {
+      "id": "step-2",
+      "description": "Show disk and memory status",
+      "action_type": "shell",
+      "command": "$disk = Get-PSDrive C; $free = [math]::Round($disk.Free/1GB,1); $mem = Get-CimInstance Win32_OperatingSystem; $freeMem = [math]::Round($mem.FreePhysicalMemory/1MB,1); Write-Output \"Disk C: ${free}GB free | RAM free: ${freeMem}MB\""
+    }
+  ],
+  "created_at": "2025-01-01T00:00:00Z"
+}

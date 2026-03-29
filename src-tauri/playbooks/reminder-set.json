@@ -1,0 +1,18 @@
+{
+  "id": "reminder-set",
+  "name": "Set Reminder",
+  "description": "Adds a Windows scheduled task reminder that shows a notification",
+  "category": "automation",
+  "version": "1.0.0",
+  "author": "AgentOS",
+  "tags": ["reminder", "notification", "schedule", "alert"],
+  "steps": [
+    {
+      "id": "step-1",
+      "description": "Create a 10-minute reminder task",
+      "action_type": "shell",
+      "command": "$triggerTime = (Get-Date).AddMinutes(10); $trigger = New-ScheduledTaskTrigger -Once -At $triggerTime; $action = New-ScheduledTaskAction -Execute 'msg' -Argument '* Reminder: Your AgentOS reminder is due!'; Register-ScheduledTask -TaskName 'AgentOS_Reminder' -Trigger $trigger -Action $action -Force | Out-Null; Write-Output \"Reminder set for $($triggerTime.ToString('HH:mm'))\""
+    }
+  ],
+  "created_at": "2025-01-01T00:00:00Z"
+}

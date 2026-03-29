@@ -1,0 +1,18 @@
+{
+  "id": "npm-audit",
+  "name": "NPM Audit",
+  "description": "Runs npm audit in the current directory to check for vulnerabilities",
+  "category": "development",
+  "version": "1.0.0",
+  "author": "AgentOS",
+  "tags": ["npm", "audit", "security", "node"],
+  "steps": [
+    {
+      "id": "step-1",
+      "description": "Run npm audit",
+      "action_type": "shell",
+      "command": "npm audit --json 2>&1 | ConvertFrom-Json | Select-Object -ExpandProperty metadata | ConvertTo-Json"
+    }
+  ],
+  "created_at": "2025-01-01T00:00:00Z"
+}

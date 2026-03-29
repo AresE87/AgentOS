@@ -1,0 +1,18 @@
+{
+  "id": "clipboard-history",
+  "name": "Clipboard History",
+  "description": "Shows recent clipboard content and text currently on the clipboard",
+  "category": "productivity",
+  "version": "1.0.0",
+  "author": "AgentOS",
+  "tags": ["clipboard", "history", "text"],
+  "steps": [
+    {
+      "id": "step-1",
+      "description": "Get current clipboard content",
+      "action_type": "shell",
+      "command": "Add-Type -AssemblyName System.Windows.Forms; $clip = [System.Windows.Forms.Clipboard]::GetText(); if ($clip) { Write-Output \"Current clipboard content:\"; Write-Output $clip } else { Write-Output \"Clipboard is empty or contains non-text data\" }"
+    }
+  ],
+  "created_at": "2025-01-01T00:00:00Z"
+}

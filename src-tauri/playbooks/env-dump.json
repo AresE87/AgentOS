@@ -1,0 +1,18 @@
+{
+  "id": "env-dump",
+  "name": "Environment Variables",
+  "description": "Shows all current environment variables",
+  "category": "development",
+  "version": "1.0.0",
+  "author": "AgentOS",
+  "tags": ["env", "environment", "variables", "config"],
+  "steps": [
+    {
+      "id": "step-1",
+      "description": "Dump all environment variables",
+      "action_type": "shell",
+      "command": "Get-ChildItem Env: | Sort-Object Name | Format-Table Name, Value -AutoSize"
+    }
+  ],
+  "created_at": "2025-01-01T00:00:00Z"
+}

@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentOS — Your AI team, running on your PC</title>
+  <style>
+    /* Full landing page with hero, features, pricing, CTA */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Inter, sans-serif; background: #0a0a0f; color: #e0e0e0; }
+
+    nav { display: flex; justify-content: space-between; align-items: center; padding: 20px 80px; border-bottom: 1px solid #1a1a2e; }
+    .logo { color: #00ffff; font-size: 20px; font-weight: bold; }
+    .nav-links a { color: #888; text-decoration: none; margin-left: 24px; }
+    .nav-links a:hover { color: #00ffff; }
+
+    .hero { text-align: center; padding: 120px 80px 80px; }
+    .hero h1 { font-size: 56px; font-weight: 800; line-height: 1.1; color: #fff; }
+    .hero h1 span { color: #00ffff; }
+    .hero p { font-size: 20px; color: #888; margin: 24px auto; max-width: 560px; line-height: 1.6; }
+    .cta-row { display: flex; gap: 16px; justify-content: center; margin-top: 40px; }
+    .btn-primary { background: #00ffff; color: #0a0a0f; padding: 14px 32px; border-radius: 8px; font-weight: bold; text-decoration: none; font-size: 16px; }
+    .btn-secondary { border: 1px solid #333; color: #e0e0e0; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-size: 16px; }
+
+    .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; padding: 80px; }
+    .feature-card { background: #0d0d1a; border: 1px solid #1a1a2e; border-radius: 12px; padding: 32px; }
+    .feature-icon { font-size: 32px; margin-bottom: 16px; }
+    .feature-title { color: #fff; font-size: 18px; font-weight: 600; margin-bottom: 8px; }
+    .feature-desc { color: #888; line-height: 1.6; }
+
+    .pricing { padding: 80px; text-align: center; }
+    .pricing h2 { font-size: 40px; color: #fff; margin-bottom: 48px; }
+    .pricing-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; max-width: 960px; margin: 0 auto; }
+    .pricing-card { background: #0d0d1a; border: 1px solid #1a1a2e; border-radius: 12px; padding: 32px; }
+    .pricing-card.featured { border-color: #00ffff; }
+    .price { font-size: 48px; font-weight: bold; color: #00ffff; }
+    .price-period { color: #888; font-size: 16px; }
+
+    footer { text-align: center; padding: 40px; color: #555; border-top: 1px solid #1a1a2e; }
+  </style>
+</head>
+<body>
+  <nav>
+    <div class="logo">&#9889; AgentOS</div>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#pricing">Pricing</a>
+      <a href="docs/">Docs</a>
+      <a href="https://github.com">GitHub</a>
+    </div>
+  </nav>
+
+  <section class="hero">
+    <h1>Your AI team,<br><span>running on your PC.</span></h1>
+    <p>AgentOS controls your screen, runs commands, automates workflows, and connects to any service — all with simple chat.</p>
+    <div class="cta-row">
+      <a href="#" class="btn-primary">Download for Windows</a>
+      <a href="https://github.com" class="btn-secondary">View on GitHub &rarr;</a>
+    </div>
+  </section>
+
+  <section class="features" id="features">
+    <div class="feature-card">
+      <div class="feature-icon">&#128065;&#65039;</div>
+      <div class="feature-title">Vision Control</div>
+      <div class="feature-desc">AgentOS sees your screen and controls mouse + keyboard to complete visual tasks.</div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">&#9889;</div>
+      <div class="feature-title">PowerShell Integration</div>
+      <div class="feature-desc">Executes PowerShell commands natively. File operations, system management, anything your terminal can do.</div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">&#128203;</div>
+      <div class="feature-title">Playbook Recorder</div>
+      <div class="feature-desc">Record any sequence of steps and replay it with a single click. Visual task automation made simple.</div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">&#128279;</div>
+      <div class="feature-title">Agent Chains</div>
+      <div class="feature-desc">Complex tasks are automatically decomposed into subtasks and executed by specialist AI agents.</div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">&#127760;</div>
+      <div class="feature-title">Multi-PC Mesh</div>
+      <div class="feature-desc">Connect multiple PCs in a mesh network. Send tasks to any node in your network.</div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">&#128274;</div>
+      <div class="feature-title">Local &amp; Secure</div>
+      <div class="feature-desc">Your API keys are encrypted with AES-256. Optionally run with 100% local LLMs via Ollama.</div>
+    </div>
+  </section>
+
+  <section class="pricing" id="pricing">
+    <h2>Simple pricing</h2>
+    <div class="pricing-grid">
+      <div class="pricing-card">
+        <h3 style="color:#fff;margin-bottom:8px">Free</h3>
+        <div class="price">$0</div>
+        <ul style="color:#888;margin-top:24px;list-style:none;line-height:2">
+          <li>&#10003; 20 tasks/day</li>
+          <li>&#10003; Vision control</li>
+          <li>&#10003; Playbooks</li>
+          <li>&#10007; Triggers</li>
+          <li>&#10007; Mesh networking</li>
+        </ul>
+        <a href="#" style="display:block;margin-top:24px;padding:12px;border:1px solid #333;border-radius:8px;color:#e0e0e0;text-decoration:none;text-align:center">Get Started</a>
+      </div>
+      <div class="pricing-card featured">
+        <h3 style="color:#00ffff;margin-bottom:8px">Pro</h3>
+        <div class="price">$19<span class="price-period">/mo</span></div>
+        <ul style="color:#888;margin-top:24px;list-style:none;line-height:2">
+          <li>&#10003; 500 tasks/day</li>
+          <li>&#10003; All Free features</li>
+          <li>&#10003; Triggers &amp; automation</li>
+          <li>&#10003; 5 mesh nodes</li>
+          <li>&#10003; Priority support</li>
+        </ul>
+        <a href="#" style="display:block;margin-top:24px;padding:12px;background:#00ffff;border-radius:8px;color:#0a0a0f;text-decoration:none;text-align:center;font-weight:bold">Upgrade to Pro</a>
+      </div>
+      <div class="pricing-card">
+        <h3 style="color:#fff;margin-bottom:8px">Team</h3>
+        <div class="price">$49<span class="price-period">/mo</span></div>
+        <ul style="color:#888;margin-top:24px;list-style:none;line-height:2">
+          <li>&#10003; Unlimited tasks</li>
+          <li>&#10003; All Pro features</li>
+          <li>&#10003; 50 mesh nodes</li>
+          <li>&#10003; Audit log</li>
+          <li>&#10003; SSO support</li>
+        </ul>
+        <a href="#" style="display:block;margin-top:24px;padding:12px;border:1px solid #333;border-radius:8px;color:#e0e0e0;text-decoration:none;text-align:center">Contact Sales</a>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <p>AgentOS — Built with Tauri + Rust + React. MIT License.</p>
+    <p style="margin-top:8px"><a href="https://github.com" style="color:#555">GitHub</a> &middot; <a href="docs/" style="color:#555">Docs</a> &middot; <a href="#" style="color:#555">Privacy</a></p>
+  </footer>
+</body>
+</html>

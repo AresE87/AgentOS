@@ -1,0 +1,18 @@
+{
+  "id": "news-headlines",
+  "name": "News Headlines",
+  "description": "Fetches the latest news headlines from a public RSS feed",
+  "category": "research",
+  "version": "1.0.0",
+  "author": "AgentOS",
+  "tags": ["news", "headlines", "rss", "current-events"],
+  "steps": [
+    {
+      "id": "step-1",
+      "description": "Fetch headlines from BBC News RSS",
+      "action_type": "shell",
+      "command": "[xml]$rss = Invoke-WebRequest 'https://feeds.bbci.co.uk/news/rss.xml' | Select-Object -ExpandProperty Content; $rss.rss.channel.item | Select-Object -First 10 | ForEach-Object { Write-Output \"- $($_.title)\" }"
+    }
+  ],
+  "created_at": "2025-01-01T00:00:00Z"
+}

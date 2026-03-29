@@ -1,0 +1,18 @@
+{
+  "id": "log-tail",
+  "name": "Log Tail",
+  "description": "Shows the last 50 lines of a log file",
+  "category": "development",
+  "version": "1.0.0",
+  "author": "AgentOS",
+  "tags": ["logs", "tail", "debug", "monitoring"],
+  "steps": [
+    {
+      "id": "step-1",
+      "description": "Tail the last 50 lines of a log file",
+      "action_type": "shell",
+      "command": "$logPath = \"$env:USERPROFILE\\AppData\\Local\\AgentOS\\agentos.log\"; if (Test-Path $logPath) { Get-Content $logPath -Tail 50 } else { Write-Output \"Log file not found at $logPath. Specify the correct path.\" }"
+    }
+  ],
+  "created_at": "2025-01-01T00:00:00Z"
+}

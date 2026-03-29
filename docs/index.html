@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>AgentOS Documentation</title>
+  <style>
+    /* Dark theme, Inter font, sidebar navigation */
+    body { margin: 0; font-family: Inter, sans-serif; background: #0a0a0f; color: #e0e0e0; }
+    .layout { display: flex; min-height: 100vh; }
+    .sidebar { width: 240px; background: #0d0d1a; padding: 24px; border-right: 1px solid #1a1a2e; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+    .content { flex: 1; padding: 40px; max-width: 800px; }
+    h1 { color: #00ffff; }
+    h2 { color: #00cccc; border-bottom: 1px solid #1a1a2e; padding-bottom: 8px; }
+    code { background: #1a1a2e; padding: 2px 6px; border-radius: 4px; font-family: 'JetBrains Mono', monospace; color: #00ffff; }
+    pre { background: #1a1a2e; padding: 16px; border-radius: 8px; overflow-x: auto; }
+    a { color: #00ffff; }
+    .nav-link { display: block; color: #888; text-decoration: none; padding: 6px 0; }
+    .nav-link:hover { color: #00ffff; }
+    .nav-section { color: #555; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; margin: 16px 0 8px; }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <nav class="sidebar">
+      <h3 style="color:#00ffff;margin-top:0">AgentOS</h3>
+      <div class="nav-section">Getting Started</div>
+      <a class="nav-link" href="#install">Installation</a>
+      <a class="nav-link" href="#quickstart">Quick Start</a>
+      <a class="nav-link" href="#api-keys">API Keys</a>
+      <div class="nav-section">Features</div>
+      <a class="nav-link" href="#chat">Chat</a>
+      <a class="nav-link" href="#vision">Vision Control</a>
+      <a class="nav-link" href="#playbooks">Playbooks</a>
+      <a class="nav-link" href="#chains">Chains</a>
+      <a class="nav-link" href="#triggers">Triggers</a>
+      <a class="nav-link" href="#mesh">Mesh</a>
+      <div class="nav-section">API</div>
+      <a class="nav-link" href="#public-api">Public API</a>
+      <a class="nav-link" href="#webhooks">Webhooks</a>
+      <div class="nav-section">Enterprise</div>
+      <a class="nav-link" href="#billing">Plans</a>
+      <a class="nav-link" href="#sso">SSO</a>
+      <a class="nav-link" href="#audit">Audit Log</a>
+    </nav>
+    <main class="content">
+      <h1>AgentOS Documentation</h1>
+      <p>The universal AI agent for your PC. Controls your screen, runs commands, and automates anything.</p>
+
+      <h2 id="install">Installation</h2>
+      <p>Download the installer from <a href="#">GitHub Releases</a> and run it. Requires Windows 10+.</p>
+      <pre><code># Or build from source:
+git clone https://github.com/yourusername/agentos
+cd agentos
+cargo tauri build</code></pre>
+
+      <h2 id="quickstart">Quick Start</h2>
+      <ol>
+        <li>Install AgentOS</li>
+        <li>Open the app and go to Settings</li>
+        <li>Add your Anthropic API key</li>
+        <li>Type a task in the chat: <code>Check my disk space</code></li>
+      </ol>
+
+      <h2 id="api-keys">API Keys Setup</h2>
+      <p>AgentOS supports multiple AI providers. Add at least one to get started:</p>
+      <ul>
+        <li><strong>Anthropic Claude</strong> — Best for complex tasks. <a href="https://console.anthropic.com">Get key &rarr;</a></li>
+        <li><strong>OpenAI GPT</strong> — Alternative provider</li>
+        <li><strong>Ollama</strong> — Run local models for free</li>
+      </ul>
+
+      <h2 id="chat">Chat Interface</h2>
+      <p>The chat interface accepts natural language commands. Examples:</p>
+      <pre><code>"Check my disk space"
+"Open Notepad and type Hello World"
+"Find all PDF files in Downloads"
+"Search for the latest news about AI"</code></pre>
+
+      <h2 id="vision">Vision Control</h2>
+      <p>AgentOS can see and control your screen. Enable vision tasks with:</p>
+      <pre><code>"Click the Start button"
+"Take a screenshot and describe what you see"
+"Open Calculator and compute 15% of 350"</code></pre>
+
+      <h2 id="playbooks">Playbooks</h2>
+      <p>Playbooks are saved sequences of steps. Record one by clicking the Record button in the Playbooks tab.</p>
+
+      <h2 id="chains">Agent Chains</h2>
+      <p>Complex tasks are automatically decomposed into subtasks and routed to specialist agents. Use the Chains tab to view execution history.</p>
+
+      <h2 id="triggers">Triggers</h2>
+      <p>Triggers run playbooks automatically on a schedule (cron) or when conditions are met. Configure them in the Triggers tab.</p>
+
+      <h2 id="mesh">Mesh Networking</h2>
+      <p>Connect multiple PCs in a local mesh network. Each node can receive and execute tasks from any other node.</p>
+
+      <h2 id="public-api">Public API</h2>
+      <p>AgentOS exposes a local REST API on port 8080. Enable it in Settings &rarr; API.</p>
+      <pre><code>curl -H "Authorization: Bearer aos_yourkey" \
+  -d '{"text":"check disk space"}' \
+  http://localhost:8080/v1/message</code></pre>
+
+      <h2 id="webhooks">Webhooks</h2>
+      <p>Register webhook URLs to receive task completion notifications. See <a href="api-reference.md">API Reference</a> for details.</p>
+
+      <h2 id="billing">Plans</h2>
+      <table border="1" style="border-collapse:collapse;width:100%;border-color:#1a1a2e">
+        <tr style="background:#1a1a2e"><th style="padding:8px">Feature</th><th>Free</th><th>Pro</th><th>Team</th></tr>
+        <tr><td style="padding:8px">Tasks/day</td><td>20</td><td>500</td><td>Unlimited</td></tr>
+        <tr><td style="padding:8px">Tokens/day</td><td>50K</td><td>2M</td><td>Unlimited</td></tr>
+        <tr><td style="padding:8px">Triggers</td><td>&#10007;</td><td>&#10003;</td><td>&#10003;</td></tr>
+        <tr><td style="padding:8px">Mesh nodes</td><td>1</td><td>5</td><td>50</td></tr>
+        <tr><td style="padding:8px">Price</td><td>Free</td><td>$19/mo</td><td>$49/mo</td></tr>
+      </table>
+
+      <h2 id="sso">SSO</h2>
+      <p>Team plan includes SAML 2.0 / OIDC SSO. Configure via Settings &rarr; Enterprise &rarr; SSO.</p>
+
+      <h2 id="audit">Audit Log</h2>
+      <p>All agent actions are logged with timestamps, user, and result. Export logs from Settings &rarr; Enterprise &rarr; Audit Log.</p>
+    </main>
+  </div>
+</body>
+</html>

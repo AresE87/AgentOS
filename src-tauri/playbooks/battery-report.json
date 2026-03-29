@@ -1,0 +1,24 @@
+{
+  "id": "battery-report",
+  "name": "Battery Report",
+  "description": "Generates a Windows battery health report and opens it",
+  "category": "productivity",
+  "version": "1.0.0",
+  "author": "AgentOS",
+  "tags": ["battery", "power", "health", "report"],
+  "steps": [
+    {
+      "id": "step-1",
+      "description": "Generate battery report HTML",
+      "action_type": "shell",
+      "command": "powercfg /batteryreport /output \"$env:USERPROFILE\\Desktop\\battery-report.html\"; Write-Output 'Battery report saved to Desktop as battery-report.html'"
+    },
+    {
+      "id": "step-2",
+      "description": "Show current battery status",
+      "action_type": "shell",
+      "command": "Get-CimInstance Win32_Battery | Select-Object Name, EstimatedChargeRemaining, BatteryStatus, DesignCapacity, FullChargeCapacity | Format-List"
+    }
+  ],
+  "created_at": "2025-01-01T00:00:00Z"
+}

@@ -1,0 +1,18 @@
+{
+  "id": "web-search",
+  "name": "Web Search",
+  "description": "Searches DuckDuckGo and returns the top results",
+  "category": "research",
+  "version": "1.0.0",
+  "author": "AgentOS",
+  "tags": ["search", "web", "duckduckgo", "research"],
+  "steps": [
+    {
+      "id": "step-1",
+      "description": "Search DuckDuckGo and display results",
+      "action_type": "shell",
+      "command": "$query = 'latest AI news'; $encoded = [Uri]::EscapeDataString($query); $response = Invoke-RestMethod -Uri \"https://api.duckduckgo.com/?q=$encoded&format=json&no_html=1\"; Write-Output \"Query: $query\"; $response.RelatedTopics | Select-Object -First 5 | ForEach-Object { Write-Output $_.Text }"
+    }
+  ],
+  "created_at": "2025-01-01T00:00:00Z"
+}

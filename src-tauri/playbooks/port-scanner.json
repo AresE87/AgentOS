@@ -1,0 +1,18 @@
+{
+  "id": "port-scanner",
+  "name": "Port Scanner",
+  "description": "Lists all open TCP ports and the processes using them",
+  "category": "development",
+  "version": "1.0.0",
+  "author": "AgentOS",
+  "tags": ["ports", "network", "tcp", "security"],
+  "steps": [
+    {
+      "id": "step-1",
+      "description": "List open TCP ports",
+      "action_type": "shell",
+      "command": "Get-NetTCPConnection -State Listen | Select-Object LocalAddress, LocalPort, OwningProcess | Sort-Object LocalPort | ForEach-Object { $proc = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue; [PSCustomObject]@{Port=$_.LocalPort; Address=$_.LocalAddress; Process=$proc.Name; PID=$_.OwningProcess} } | Format-Table -AutoSize"
+    }
+  ],
+  "created_at": "2025-01-01T00:00:00Z"
+}

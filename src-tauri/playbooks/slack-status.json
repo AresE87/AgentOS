@@ -1,0 +1,18 @@
+{
+  "id": "slack-status",
+  "name": "Slack Status",
+  "description": "Sets your Slack status via the Slack API",
+  "category": "automation",
+  "version": "1.0.0",
+  "author": "AgentOS",
+  "tags": ["slack", "status", "api", "communication"],
+  "steps": [
+    {
+      "id": "step-1",
+      "description": "Set Slack status via API",
+      "action_type": "shell",
+      "command": "$token = $env:SLACK_TOKEN; if (-not $token) { Write-Output 'Set SLACK_TOKEN environment variable first'; exit 1 }; $body = @{ profile = @{ status_text = 'Working remotely'; status_emoji = ':house:'; status_expiration = 0 } } | ConvertTo-Json -Depth 3; Invoke-RestMethod -Uri 'https://slack.com/api/users.profile.set' -Method Post -Headers @{ Authorization = \"Bearer $token\"; 'Content-Type' = 'application/json' } -Body $body | Select-Object ok, error | Format-List"
+    }
+  ],
+  "created_at": "2025-01-01T00:00:00Z"
+}
