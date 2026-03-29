@@ -111,6 +111,14 @@ export function useAgent() {
     const getWeeklyInsights = () => callInvoke<any>('get_weekly_insights');
     const getRecentFeedback = (limit?: number) => callInvoke<any>('get_recent_feedback', { limit });
 
+    // R29: Enterprise
+    const getAuditLog = (limit?: number) => callInvoke<any>('get_audit_log', { limit });
+    const exportAuditLog = () => callInvoke<{ csv: string }>('export_audit_log');
+    const getOrg = () => callInvoke<any>('get_org');
+    const createOrg = (name: string, planType: string) => callInvoke<any>('create_org', { name, plan_type: planType });
+    const listOrgMembers = () => callInvoke<any>('list_org_members');
+    const addOrgMember = (email: string, role: string) => callInvoke<any>('add_org_member', { email, role });
+
     return {
         getStatus, processMessage, getTasks, getPlaybooks, setActivePlaybook,
         getSettings, updateSettings, healthCheck, getActiveChain, getChainHistory,
@@ -130,6 +138,8 @@ export function useAgent() {
         getChannelStatus,
         // Feedback
         submitFeedback, getFeedbackStats, getWeeklyInsights, getRecentFeedback,
+        // Enterprise
+        getAuditLog, exportAuditLog, getOrg, createOrg, listOrgMembers, addOrgMember,
     };
 }
 

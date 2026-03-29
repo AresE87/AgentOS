@@ -5,6 +5,7 @@ pub mod billing;
 pub mod brain;
 mod channels;
 pub mod config;
+pub mod enterprise;
 mod eyes;
 pub mod feedback;
 pub mod hands;
@@ -229,6 +230,19 @@ async fn cmd_process_message(
             .map_err(|e| e.to_string())?;
     }
 
+    // R29: Audit log
+    {
+        let preview = if text.len() > 120 { &text[..120] } else { &text };
+        if let Ok(conn) = rusqlite::Connection::open(&state.db_path) {
+            let _ = enterprise::AuditLog::ensure_table(&conn);
+            let _ = enterprise::AuditLog::log(
+                &conn,
+                "task_executed",
+                serde_json::json!({ "text": preview }),
+            );
+        }
+    }
+
     Ok(serde_json::json!({
         "task_id": response.task_id,
         "status": "completed",
@@ -324,6 +338,16 @@ async fn cmd_update_settings(
         }; // MutexGuard dropped here
         let mut gw = state.gateway.lock().await;
         *gw = brain::Gateway::new(&new_settings);
+    }
+
+    // R29: Audit log (log the key only, not the value for security)
+    if let Ok(conn) = rusqlite::Connection::open(&state.db_path) {
+        let _ = enterprise::AuditLog::ensure_table(&conn);
+        let _ = enterprise::AuditLog::log(
+            &conn,
+            "settings_changed",
+            serde_json::json!({ "key": key }),
+        );
     }
 
     Ok(serde_json::json!({ "ok": true }))
@@ -1188,6 +1212,17 @@ async fn cmd_set_plan(
         settings.save().map_err(|e| e.to_string())?;
     }
     tracing::info!(plan = %plan_type, "Plan updated");
+
+    // R29: Audit log
+    if let Ok(conn) = rusqlite::Connection::open(&state.db_path) {
+        let _ = enterprise::AuditLog::ensure_table(&conn);
+        let _ = enterprise::AuditLog::log(
+            &conn,
+            "plan_changed",
+            serde_json::json!({ "plan_type": plan_type }),
+        );
+    }
+
     Ok(serde_json::json!({ "ok": true, "plan_type": plan_type }))
 }
 
@@ -1201,6 +1236,17 @@ async fn cmd_api_create_key(
     let db_path = state.db_path.clone();
     let conn = rusqlite::Connection::open(&db_path).map_err(|e| e.to_string())?;
     let key = api::auth::create_api_key(&conn, &name)?;
+
+    // R29: Audit log
+    {
+        let _ = enterprise::AuditLog::ensure_table(&conn);
+        let _ = enterprise::AuditLog::log(
+            &conn,
+            "api_key_created",
+            serde_json::json!({ "key_name": name, "key_id": key.id }),
+        );
+    }
+
     Ok(serde_json::json!({
         "id": key.id,
         "name": key.name,
@@ -1537,6 +1583,112 @@ async fn cmd_get_recent_feedback(
     let records =
         feedback::collector::FeedbackCollector::get_recent(&conn, limit.unwrap_or(50))?;
     Ok(serde_json::json!({ "feedback": records }))
+}
+
+// ── R29: Enterprise commands ─────────────────────────────────────
+
+fn open_enterprise_conn(db_path: &std::path::Path) -> Result<rusqlite::Connection, String> {
+    rusqlite::Connection::open(db_path).map_err(|e| format!("DB open error: {}", e))
+}
+
+#[tauri::command]
+async fn cmd_get_audit_log(
+    limit: Option<usize>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    enterprise::AuditLog::ensure_table(&conn)?;
+    let entries = enterprise::AuditLog::get_recent(&conn, limit.unwrap_or(100))?;
+    Ok(serde_json::to_value(&entries).map_err(|e| e.to_string())?)
+}
+
+#[tauri::command]
+async fn cmd_export_audit_log(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    enterprise::AuditLog::ensure_table(&conn)?;
+    let entries = enterprise::AuditLog::get_recent(&conn, 10000)?;
+    let csv = enterprise::AuditLog::export_csv(&entries);
+    Ok(serde_json::json!({ "csv": csv }))
+}
+
+#[tauri::command]
+async fn cmd_get_org(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    enterprise::OrgManager::ensure_tables(&conn)?;
+    let org = enterprise::OrgManager::get_current_org(&conn)?;
+    match org {
+        Some(o) => Ok(serde_json::to_value(&o).map_err(|e| e.to_string())?),
+        None => Ok(serde_json::Value::Null),
+    }
+}
+
+#[tauri::command]
+async fn cmd_create_org(
+    name: String,
+    plan_type: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    enterprise::OrgManager::ensure_tables(&conn)?;
+    let org = enterprise::OrgManager::create_org(&conn, &name, &plan_type)?;
+    // Audit log
+    enterprise::AuditLog::ensure_table(&conn)?;
+    enterprise::AuditLog::log(
+        &conn,
+        "plan_changed",
+        serde_json::json!({ "org_name": name, "plan_type": plan_type }),
+    )?;
+    Ok(serde_json::to_value(&org).map_err(|e| e.to_string())?)
+}
+
+#[tauri::command]
+async fn cmd_list_org_members(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    enterprise::OrgManager::ensure_tables(&conn)?;
+    let org = enterprise::OrgManager::get_current_org(&conn)?;
+    let members = if let Some(o) = org {
+        enterprise::OrgManager::list_members(&conn, &o.id)?
+    } else {
+        vec![]
+    };
+    Ok(serde_json::json!({ "members": members }))
+}
+
+#[tauri::command]
+async fn cmd_add_org_member(
+    email: String,
+    role: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    enterprise::OrgManager::ensure_tables(&conn)?;
+    let org = enterprise::OrgManager::get_current_org(&conn)?
+        .ok_or_else(|| "No organization found — create one first".to_string())?;
+    let member = enterprise::OrgManager::add_member(&conn, &org.id, &email, &role)?;
+    Ok(serde_json::to_value(&member).map_err(|e| e.to_string())?)
+}
+
+#[tauri::command]
+async fn cmd_get_sso_auth_url(
+    provider: String,
+    client_id: String,
+    issuer_url: String,
+    _state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let config = enterprise::sso::SSOConfig {
+        provider,
+        client_id,
+        issuer_url,
+        redirect_uri: "agentos://sso/callback".to_string(),
+    };
+    let url = enterprise::sso::SSOProvider::get_auth_url(&config);
+    Ok(serde_json::json!({ "url": url }))
 }
 
 // ── R26: Platform abstraction commands ──────────────────────────
@@ -1954,6 +2106,14 @@ pub fn run() {
             cmd_get_feedback_stats,
             cmd_get_weekly_insights,
             cmd_get_recent_feedback,
+            // R29: Enterprise commands
+            cmd_get_audit_log,
+            cmd_export_audit_log,
+            cmd_get_org,
+            cmd_create_org,
+            cmd_list_org_members,
+            cmd_add_org_member,
+            cmd_get_sso_auth_url,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");
