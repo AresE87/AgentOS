@@ -768,15 +768,55 @@ async fn cmd_find_agent(task: String) -> Result<serde_json::Value, String> {
 #[tauri::command]
 async fn cmd_get_mesh_nodes() -> Result<serde_json::Value, String> {
     let nodes = mesh::discovery::get_discovered_nodes();
-    Ok(serde_json::json!({ "nodes": nodes }))
+    Ok(serde_json::json!({
+        "nodes": nodes.iter().map(|n| serde_json::json!({
+            "node_id": n.node_id,
+            "display_name": n.display_name,
+            "status": n.status,
+            "last_seen": n.last_seen,
+            "address": n.address,
+            "capabilities": n.capabilities,
+            "mesh_port": n.mesh_port,
+        })).collect::<Vec<_>>()
+    }))
 }
 
 #[tauri::command]
 async fn cmd_send_mesh_task(node_id: String, description: String) -> Result<serde_json::Value, String> {
+    let nodes = mesh::discovery::get_discovered_nodes();
+    let node = nodes
+        .iter()
+        .find(|n| n.node_id == node_id)
+        .ok_or_else(|| format!("Node {} not found in mesh", node_id))?;
+
+    // Extract IP and port from the node address
+    let parts: Vec<&str> = node.address.split(':').collect();
+    let ip = parts.first().ok_or("Invalid node address (no IP)")?.to_string();
+    let port = node.mesh_port;
+
     let task_id = uuid::Uuid::new_v4().to_string();
-    // In production, this would send via gRPC/WebSocket to the target node
-    tracing::info!(node_id, description, task_id, "Mesh task queued (stub)");
-    Ok(serde_json::json!({ "task_id": task_id, "status": "queued" }))
+    tracing::info!(
+        node_id = node_id,
+        description = &description[..description.len().min(80)],
+        task_id = task_id,
+        "Sending mesh task to {} ({}:{})",
+        node.display_name,
+        ip,
+        port
+    );
+
+    match mesh::transport::send_task(&ip, port, &description).await {
+        Ok(output) => Ok(serde_json::json!({
+            "task_id": task_id,
+            "status": "completed",
+            "output": output,
+        })),
+        Err(e) => Ok(serde_json::json!({
+            "task_id": task_id,
+            "status": "error",
+            "error": e,
+        })),
+    }
 }
 
 // ── R2: Vision E2E Test Commands ─────────────────────────────
@@ -937,10 +977,22 @@ pub fn run() {
                 }
             }
 
-            // Start mesh discovery
+            // ── R16: Mesh network — discovery + transport server ──
+            let mesh_port: u16 = std::env::var("MESH_PORT")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(9090);
             let hostname = whoami::fallible::hostname().unwrap_or_else(|_| "AgentOS".to_string());
+            let hostname_clone = hostname.clone();
             tauri::async_runtime::spawn(async move {
-                let _ = mesh::discovery::start_discovery(&hostname).await;
+                let _ = mesh::discovery::start_discovery(&hostname_clone, mesh_port).await;
+            });
+
+            // Start mesh TCP server for receiving tasks from other nodes
+            let mesh_settings = settings.clone();
+            let mesh_kill = Arc::new(AtomicBool::new(false));
+            tauri::async_runtime::spawn(async move {
+                mesh::transport::start_mesh_server(mesh_port, mesh_settings, mesh_kill).await;
             });
 
             // ── R15: System Tray ────────────────────────────────────────
