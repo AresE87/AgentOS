@@ -11,6 +11,7 @@ pub mod marketplace;
 pub mod memory;
 mod mesh;
 pub mod pipeline;
+pub mod platform;
 mod playbooks;
 pub mod types;
 pub mod vault;
@@ -40,6 +41,8 @@ pub struct AppState {
     pub api_port: u16,
     /// R25: Local LLM provider (Ollama)
     pub local_llm: Arc<brain::LocalLLMProvider>,
+    /// R26: Platform abstraction
+    pub platform: Arc<Box<dyn platform::PlatformProvider>>,
 }
 
 #[tauri::command]
@@ -1463,6 +1466,32 @@ async fn cmd_pull_ollama_model(
     Ok(serde_json::json!({ "ok": true, "message": format!("Pull started for {}", model) }))
 }
 
+// ── R26: Platform abstraction commands ──────────────────────────
+
+#[tauri::command]
+async fn cmd_get_platform_info(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let p = &state.platform;
+    Ok(serde_json::json!({
+        "name": p.name(),
+        "os_version": p.os_version(),
+        "can_capture_screen": p.can_capture_screen(),
+        "can_control_input": p.can_control_input(),
+        "default_shell": p.default_shell(),
+        "app_data_dir": p.app_data_dir().to_string_lossy(),
+    }))
+}
+
+#[tauri::command]
+async fn cmd_open_url(
+    url: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    state.platform.open_url(&url)?;
+    Ok(serde_json::json!({ "ok": true, "url": url }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -1522,6 +1551,10 @@ pub fn run() {
             let local_llm_url = settings.local_llm_url.clone();
             let local_llm = Arc::new(brain::LocalLLMProvider::new(&local_llm_url));
 
+            // ── R26: Platform abstraction ─────────────────────────────
+            let platform_provider = Arc::new(platform::get_platform());
+            tracing::info!("Platform: {} ({})", platform_provider.name(), platform_provider.os_version());
+
             app.manage(AppState {
                 db: std::sync::Mutex::new(db),
                 gateway: tokio::sync::Mutex::new(gateway),
@@ -1536,6 +1569,7 @@ pub fn run() {
                 api_enabled: std::sync::Mutex::new(true),
                 api_port,
                 local_llm: local_llm.clone(),
+                platform: platform_provider,
             });
 
             // ── R25: Connectivity monitor — emits local_llm:status_changed ──
@@ -1817,6 +1851,9 @@ pub fn run() {
             cmd_get_local_llm_status,
             cmd_set_local_llm,
             cmd_pull_ollama_model,
+            // R26: Platform abstraction commands
+            cmd_get_platform_info,
+            cmd_open_url,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");
