@@ -3,6 +3,7 @@ pub mod api;
 pub mod automation;
 pub mod billing;
 pub mod brain;
+pub mod cache;
 mod channels;
 pub mod config;
 pub mod enterprise;
@@ -16,6 +17,7 @@ pub mod pipeline;
 pub mod platform;
 mod playbooks;
 pub mod plugins;
+pub mod security;
 pub mod types;
 pub mod vault;
 pub mod web;
@@ -23,6 +25,7 @@ pub mod web;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 use tauri::{Emitter, Manager};
 use tauri::tray::{TrayIconBuilder, MouseButton, MouseButtonState};
 use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem};
@@ -50,26 +53,39 @@ pub struct AppState {
     pub mesh_orchestrator: Arc<tokio::sync::RwLock<mesh::orchestrator::MeshOrchestrator>>,
     /// R34: Plugin manager
     pub plugin_manager: Arc<tokio::sync::Mutex<plugins::PluginManager>>,
+    /// R35: In-memory cache with TTL
+    pub app_cache: cache::AppCache,
+    /// R36: Security — rate limiter
+    pub rate_limiter: security::rate_limiter::RateLimiter,
+    /// R36: Security — command sandbox
+    pub command_sandbox: Arc<security::sandbox::CommandSandbox>,
 }
 
 #[tauri::command]
 async fn cmd_get_status(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
-    let settings = state.settings.lock().map_err(|e| e.to_string())?;
-    let providers = settings.configured_providers();
+    // R35: Cache for 10s
+    if let Some(cached) = state.app_cache.get("status").await {
+        return Ok(cached);
+    }
 
-    let db = state.db.lock().map_err(|e| e.to_string())?;
-    let analytics = db.get_analytics().map_err(|e| e.to_string())?;
-
-    Ok(serde_json::json!({
-        "state": "running",
-        "providers": providers,
-        "active_playbook": null,
-        "session_stats": {
-            "tasks": analytics["total_tasks"],
-            "cost": analytics["total_cost"],
-            "tokens": analytics["total_tokens"],
-        }
-    }))
+    let result = {
+        let settings = state.settings.lock().map_err(|e| e.to_string())?;
+        let providers = settings.configured_providers();
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let analytics = db.get_analytics().map_err(|e| e.to_string())?;
+        serde_json::json!({
+            "state": "running",
+            "providers": providers,
+            "active_playbook": null,
+            "session_stats": {
+                "tasks": analytics["total_tasks"],
+                "cost": analytics["total_cost"],
+                "tokens": analytics["total_tokens"],
+            }
+        })
+    };
+    state.app_cache.set("status", result.clone(), Duration::from_secs(10)).await;
+    Ok(result)
 }
 
 #[tauri::command]
@@ -78,6 +94,14 @@ async fn cmd_process_message(
     app_handle: tauri::AppHandle,
     text: String,
 ) -> Result<serde_json::Value, String> {
+    // ── R36: Security — sanitize input & rate-limit ──────────────
+    let text = security::sanitizer::sanitize_input(&text, 10_000);
+    if let Some(threat) = security::sanitizer::detect_injection(&text) {
+        tracing::warn!("Injection attempt detected: {}", threat);
+        // Don't block — just log. The sandbox will catch dangerous commands.
+    }
+    state.rate_limiter.check("default").await?;
+
     let settings = {
         let s = state.settings.lock().map_err(|e| e.to_string())?;
         s.clone()
@@ -375,16 +399,32 @@ async fn cmd_health_check(
 async fn cmd_get_analytics(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
-    db.get_analytics().map_err(|e| e.to_string())
+    // R35: Cache for 5 min
+    if let Some(cached) = state.app_cache.get("analytics").await {
+        return Ok(cached);
+    }
+    let result = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        db.get_analytics().map_err(|e| e.to_string())?
+    };
+    state.app_cache.set("analytics", result.clone(), Duration::from_secs(300)).await;
+    Ok(result)
 }
 
 #[tauri::command]
 async fn cmd_get_usage_summary(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
-    db.get_usage_summary().map_err(|e| e.to_string())
+    // R35: Cache for 60s
+    if let Some(cached) = state.app_cache.get("usage_summary").await {
+        return Ok(cached);
+    }
+    let result = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        db.get_usage_summary().map_err(|e| e.to_string())?
+    };
+    state.app_cache.set("usage_summary", result.clone(), Duration::from_secs(60)).await;
+    Ok(result)
 }
 
 // ── R7: Intelligence commands ────────────────────────────────
@@ -1433,6 +1473,11 @@ async fn cmd_vault_migrate(
 
 #[tauri::command]
 async fn cmd_get_plan(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    // R35: Cache for 120s
+    if let Some(cached) = state.app_cache.get("plan").await {
+        return Ok(cached);
+    }
+
     let plan_str = {
         let s = state.settings.lock().map_err(|e| e.to_string())?;
         s.plan_type.clone()
@@ -1457,7 +1502,7 @@ async fn cmd_get_plan(state: tauri::State<'_, AppState>) -> Result<serde_json::V
     let tasks_limit = if plan.tasks_per_day == u32::MAX { serde_json::Value::Null } else { serde_json::json!(plan.tasks_per_day) };
     let tokens_limit = if plan.tokens_per_day == u64::MAX { serde_json::Value::Null } else { serde_json::json!(plan.tokens_per_day) };
 
-    Ok(serde_json::json!({
+    let result = serde_json::json!({
         "plan_type": plan_str,
         "display_name": plan.display_name(),
         "limits": {
@@ -1472,7 +1517,9 @@ async fn cmd_get_plan(state: tauri::State<'_, AppState>) -> Result<serde_json::V
             "tokens_today": tokens_today,
             "cost_today": cost_today,
         }
-    }))
+    });
+    state.app_cache.set("plan", result.clone(), Duration::from_secs(120)).await;
+    Ok(result)
 }
 
 #[tauri::command]
@@ -2107,6 +2154,137 @@ async fn cmd_plugin_discover(
     Ok(serde_json::json!({ "discovered": items }))
 }
 
+// ── R35: Performance commands ───────────────────────────────────
+
+#[tauri::command]
+async fn cmd_run_benchmarks() -> Result<serde_json::Value, String> {
+    let results = cache::benchmarks::Benchmarks::run_all();
+    Ok(serde_json::json!({
+        "benchmarks": results,
+        "all_passed": results.iter().all(|r| r.passed),
+    }))
+}
+
+#[tauri::command]
+async fn cmd_get_cache_stats(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let (total, valid) = state.app_cache.stats().await;
+    Ok(serde_json::json!({
+        "total_entries": total,
+        "valid_entries": valid,
+        "expired_entries": total - valid,
+    }))
+}
+
+#[tauri::command]
+async fn cmd_clear_cache(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    state.app_cache.clear().await;
+    Ok(serde_json::json!({ "ok": true, "message": "Cache cleared" }))
+}
+
+// ── R36: Security commands ──────────────────────────────────────────
+
+#[tauri::command]
+async fn cmd_validate_command(command: String) -> Result<serde_json::Value, String> {
+    let sandbox = security::sandbox::CommandSandbox::new();
+    match sandbox.validate_command(&command) {
+        Ok(()) => {
+            // Also check for injection patterns in the command
+            if let Some(reason) = security::sanitizer::detect_injection(&command) {
+                Ok(serde_json::json!({ "safe": false, "reason": reason }))
+            } else {
+                Ok(serde_json::json!({ "safe": true }))
+            }
+        }
+        Err(reason) => Ok(serde_json::json!({ "safe": false, "reason": reason })),
+    }
+}
+
+#[tauri::command]
+async fn cmd_get_security_status(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let sandbox = &state.command_sandbox;
+    let (per_min, per_hour) = state.rate_limiter.get_stats("default").await;
+
+    Ok(serde_json::json!({
+        "rate_limit": {
+            "per_min": per_min,
+            "per_hour": per_hour,
+        },
+        "sandbox": {
+            "timeout_secs": sandbox.timeout.as_secs(),
+            "max_output_kb": sandbox.max_output_bytes / 1024,
+        },
+        "blocked_patterns_count": sandbox.blocked_patterns_count(),
+    }))
+}
+
+#[tauri::command]
+async fn cmd_security_audit() -> Result<serde_json::Value, String> {
+    let sandbox = security::sandbox::CommandSandbox::new();
+    let mut checks = Vec::new();
+
+    // Check 1: Blocked patterns configured
+    let pattern_count = sandbox.blocked_patterns_count();
+    checks.push(serde_json::json!({
+        "name": "Blocked command patterns",
+        "passed": pattern_count > 0,
+        "details": format!("{} dangerous patterns configured", pattern_count),
+    }));
+
+    // Check 2: Timeout configured
+    checks.push(serde_json::json!({
+        "name": "Command timeout",
+        "passed": sandbox.timeout.as_secs() > 0 && sandbox.timeout.as_secs() <= 120,
+        "details": format!("Timeout set to {}s", sandbox.timeout.as_secs()),
+    }));
+
+    // Check 3: Output limit configured
+    checks.push(serde_json::json!({
+        "name": "Output size limit",
+        "passed": sandbox.max_output_bytes > 0 && sandbox.max_output_bytes <= 1_048_576,
+        "details": format!("Max output: {} KB", sandbox.max_output_bytes / 1024),
+    }));
+
+    // Check 4: Input sanitizer available
+    let test_input = "<script>alert(1)</script>";
+    let detected = security::sanitizer::detect_injection(test_input).is_some();
+    checks.push(serde_json::json!({
+        "name": "XSS detection",
+        "passed": detected,
+        "details": "Input sanitizer correctly detects XSS patterns",
+    }));
+
+    // Check 5: SQL injection detection
+    let sql_test = "'; DROP TABLE users --";
+    let sql_detected = security::sanitizer::detect_injection(sql_test).is_some();
+    checks.push(serde_json::json!({
+        "name": "SQL injection detection",
+        "passed": sql_detected,
+        "details": "Input sanitizer correctly detects SQL injection patterns",
+    }));
+
+    // Check 6: Output sanitization
+    let sanitized = security::sanitizer::sanitize_output("<img onerror=alert(1)>");
+    let output_safe = !sanitized.contains('<') && !sanitized.contains('>');
+    checks.push(serde_json::json!({
+        "name": "Output sanitization",
+        "passed": output_safe,
+        "details": "HTML special characters are escaped in output",
+    }));
+
+    let all_passed = checks.iter().all(|c| c["passed"].as_bool().unwrap_or(false));
+
+    Ok(serde_json::json!({
+        "checks": checks,
+        "all_passed": all_passed,
+    }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -2166,15 +2344,14 @@ pub fn run() {
             let local_llm_url = settings.local_llm_url.clone();
             let local_llm = Arc::new(brain::LocalLLMProvider::new(&local_llm_url));
 
-            // ── R34: Plugin manager ────────────────────────────────────
+            // ── R34: Plugin manager (R35: deferred discovery) ──────────
             let plugins_dir = app_dir.join("plugins");
             std::fs::create_dir_all(&plugins_dir).ok();
-            let mut plugin_mgr = plugins::PluginManager::new(plugins_dir);
-            match plugin_mgr.discover() {
-                Ok(found) => tracing::info!("Discovered {} plugins", found.len()),
-                Err(e) => tracing::warn!("Plugin discovery failed: {}", e),
-            }
+            let plugin_mgr = plugins::PluginManager::new(plugins_dir);
             let plugin_manager = Arc::new(tokio::sync::Mutex::new(plugin_mgr));
+
+            // R35: In-memory TTL cache
+            let app_cache = cache::AppCache::new();
 
             // ── R26: Platform abstraction ─────────────────────────────
             let platform_provider = Arc::new(platform::get_platform());
@@ -2201,11 +2378,47 @@ pub fn run() {
                     ),
                 )),
                 plugin_manager,
+                app_cache: app_cache.clone(),
+                rate_limiter: security::rate_limiter::RateLimiter::new(
+                    security::rate_limiter::RateLimits::free(),
+                ),
+                command_sandbox: Arc::new(security::sandbox::CommandSandbox::new()),
             });
+
+            // ── R35: Deferred startup — plugin discovery in background ────
+            {
+                let pm = app.state::<AppState>().plugin_manager.clone();
+                tauri::async_runtime::spawn(async move {
+                    let mut mgr = pm.lock().await;
+                    match mgr.discover() {
+                        Ok(found) => tracing::info!("Deferred: discovered {} plugins", found.len()),
+                        Err(e) => tracing::warn!("Deferred plugin discovery failed: {}", e),
+                    }
+                });
+            }
+
+            // ── R35: Memory monitor — periodic cache cleanup ─────────────
+            {
+                let monitor_cache = app_cache.clone();
+                tauri::async_runtime::spawn(async move {
+                    loop {
+                        tokio::time::sleep(Duration::from_secs(60)).await;
+                        let (total, valid) = monitor_cache.stats().await;
+                        tracing::debug!(
+                            total_entries = total,
+                            valid_entries = valid,
+                            "Cache stats"
+                        );
+                        if total > 100 {
+                            monitor_cache.cleanup().await;
+                            tracing::info!("Cache cleanup: pruned expired entries");
+                        }
+                    }
+                });
+            }
 
             // ── R25: Connectivity monitor — emits local_llm:status_changed ──
             {
-                use std::time::Duration;
                 let app_handle_clone = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     let mut was_available = false;
@@ -2540,6 +2753,14 @@ pub fn run() {
             cmd_plugin_toggle,
             cmd_plugin_execute,
             cmd_plugin_discover,
+            // R35: Performance commands
+            cmd_run_benchmarks,
+            cmd_get_cache_stats,
+            cmd_clear_cache,
+            // R36: Security commands
+            cmd_validate_command,
+            cmd_get_security_status,
+            cmd_security_audit,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");

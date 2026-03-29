@@ -1,4 +1,5 @@
 use crate::hands;
+use crate::security;
 use crate::types::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -31,6 +32,11 @@ pub async fn execute(
 
     match action {
         AgentAction::RunCommand { command, shell } => {
+            // R36: Sandbox validation before execution
+            let sandbox = security::sandbox::CommandSandbox::new();
+            sandbox.validate_command(command)
+                .map_err(|e| format!("Sandbox blocked: {}", e))?;
+
             // Try Terminal execution
             let result = match shell {
                 ShellType::PowerShell => {
