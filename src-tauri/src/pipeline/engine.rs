@@ -155,6 +155,23 @@ EXAMPLES:
 "abre youtube y busca videos de programacion"
 {"mode":"command_then_screen","commands":["Start-Process 'https://www.youtube.com'"],"screen_task":"Wait for YouTube to load, click the search bar, type 'programacion tutorial', press Enter","explanation":"Open YouTube then search"}
 
+GUI APP INTERACTION — CRITICAL:
+When a task requires CLICKING BUTTONS in a GUI app (calculator, notepad save dialog, settings, etc.), you MUST use "command_then_screen" — NOT just "command". Opening the app alone does NOT complete the task.
+
+"abre la calculadora y calcula 125 + 375"
+{"mode":"command_then_screen","commands":["Start-Process calc.exe; Start-Sleep -Seconds 2"],"screen_task":"Click buttons: 1, 2, 5, then +, then 3, 7, 5, then = to calculate 125+375. Read the result from the display.","explanation":"Open calculator then click buttons to compute"}
+
+"abre el bloc de notas, escribe 'Hola' y guardalo en el escritorio como test.txt"
+{"mode":"command_then_screen","commands":["Start-Process notepad.exe; Start-Sleep -Seconds 1"],"screen_task":"Type 'Hola' in the notepad window. Then press Ctrl+S to save. In the Save As dialog, navigate to Desktop, type 'test.txt' as filename, and click Save.","explanation":"Open notepad then type and save via GUI"}
+
+"abre el explorador y navega a mis documentos"
+{"mode":"command_then_screen","commands":["Start-Process explorer.exe; Start-Sleep -Seconds 2"],"screen_task":"In the Explorer window, click on 'Documents' or 'Documentos' in the left sidebar. Report what files are visible.","explanation":"Open explorer then navigate visually"}
+
+"cambia el fondo de pantalla a negro"
+{"mode":"command","commands":["Set-ItemProperty -Path 'HKCU:\\Control Panel\\Desktop' -Name Wallpaper -Value ''; Set-ItemProperty -Path 'HKCU:\\Control Panel\\Colors' -Name Background -Value '0 0 0'; Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public class W{[DllImport(\"user32.dll\",CharSet=CharSet.Auto)]public static extern int SystemParametersInfo(int a,int b,string c,int d);}'; [W]::SystemParametersInfo(20,0,'',3); Write-Output 'Wallpaper changed to solid black'"],"explanation":"Change wallpaper to solid black via registry + SystemParametersInfo"}
+
+RULE: If the task involves clicking buttons, typing text into a GUI app, navigating menus, or reading visual information from an app window — you MUST use "command_then_screen" or "screen" mode. Using only "command" mode for these tasks is WRONG.
+
 MULTI-STEP EXAMPLE:
 "analiza mi disco, encuentra archivos grandes, y crea un reporte"
 {"mode":"multi","steps":[
