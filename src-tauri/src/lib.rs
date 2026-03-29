@@ -5,6 +5,7 @@ mod channels;
 pub mod config;
 mod eyes;
 pub mod hands;
+pub mod marketplace;
 pub mod memory;
 mod mesh;
 pub mod pipeline;
@@ -1071,6 +1072,156 @@ async fn cmd_vault_migrate(
     Ok(serde_json::json!({ "ok": true, "migrated": count }))
 }
 
+// ── R22: Marketplace commands ────────────────────────────────
+
+#[tauri::command]
+async fn cmd_marketplace_list(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let catalog = marketplace::MarketplaceCatalog::load()?;
+    let pkg_mgr = marketplace::PackageManager::new(
+        state.db_path.clone(),
+        state.playbooks_dir.clone(),
+    );
+    pkg_mgr.ensure_tables()?;
+
+    let entries: Vec<serde_json::Value> = catalog
+        .all()
+        .iter()
+        .map(|e| {
+            let installed = pkg_mgr.is_installed(&e.id);
+            serde_json::json!({
+                "id": e.id,
+                "name": e.name,
+                "description": e.description,
+                "category": e.category,
+                "version": e.version,
+                "author": e.author,
+                "downloads": e.downloads,
+                "rating": e.rating,
+                "tags": e.tags,
+                "preview_steps": e.preview_steps,
+                "file_size_kb": e.file_size_kb,
+                "installed": installed,
+            })
+        })
+        .collect();
+
+    Ok(serde_json::json!({ "packages": entries }))
+}
+
+#[tauri::command]
+async fn cmd_marketplace_search(
+    query: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let catalog = marketplace::MarketplaceCatalog::load()?;
+    let pkg_mgr = marketplace::PackageManager::new(
+        state.db_path.clone(),
+        state.playbooks_dir.clone(),
+    );
+    pkg_mgr.ensure_tables()?;
+
+    let results: Vec<serde_json::Value> = catalog
+        .search(&query)
+        .iter()
+        .map(|e| {
+            let installed = pkg_mgr.is_installed(&e.id);
+            serde_json::json!({
+                "id": e.id,
+                "name": e.name,
+                "description": e.description,
+                "category": e.category,
+                "version": e.version,
+                "author": e.author,
+                "downloads": e.downloads,
+                "rating": e.rating,
+                "tags": e.tags,
+                "preview_steps": e.preview_steps,
+                "file_size_kb": e.file_size_kb,
+                "installed": installed,
+            })
+        })
+        .collect();
+
+    Ok(serde_json::json!({ "packages": results, "query": query }))
+}
+
+#[tauri::command]
+async fn cmd_marketplace_install(
+    package_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let catalog = marketplace::MarketplaceCatalog::load()?;
+    let entry = catalog
+        .get_by_id(&package_id)
+        .ok_or_else(|| format!("Package '{}' not found in catalog", package_id))?;
+
+    let pkg_mgr = marketplace::PackageManager::new(
+        state.db_path.clone(),
+        state.playbooks_dir.clone(),
+    );
+    pkg_mgr.ensure_tables()?;
+
+    let installed = pkg_mgr.simulate_install(&entry.id, &entry.name, &entry.version)?;
+
+    Ok(serde_json::json!({
+        "ok": true,
+        "package": {
+            "id": installed.id,
+            "name": installed.name,
+            "version": installed.version,
+            "install_path": installed.install_path,
+            "installed_at": installed.installed_at,
+        }
+    }))
+}
+
+#[tauri::command]
+async fn cmd_marketplace_uninstall(
+    package_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let pkg_mgr = marketplace::PackageManager::new(
+        state.db_path.clone(),
+        state.playbooks_dir.clone(),
+    );
+    pkg_mgr.ensure_tables()?;
+    pkg_mgr.uninstall(&package_id)?;
+    Ok(serde_json::json!({ "ok": true, "package_id": package_id }))
+}
+
+#[tauri::command]
+async fn cmd_marketplace_review(
+    package_id: String,
+    rating: i32,
+    comment: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    if !(1..=5).contains(&rating) {
+        return Err("Rating must be between 1 and 5".to_string());
+    }
+    let pkg_mgr = marketplace::PackageManager::new(
+        state.db_path.clone(),
+        state.playbooks_dir.clone(),
+    );
+    pkg_mgr.ensure_tables()?;
+    let review_id = pkg_mgr.add_review(&package_id, rating, comment.as_deref())?;
+    Ok(serde_json::json!({ "ok": true, "review_id": review_id }))
+}
+
+#[tauri::command]
+async fn cmd_marketplace_get_reviews(
+    package_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let pkg_mgr = marketplace::PackageManager::new(
+        state.db_path.clone(),
+        state.playbooks_dir.clone(),
+    );
+    pkg_mgr.ensure_tables()?;
+    let reviews = pkg_mgr.get_reviews(&package_id)?;
+    Ok(serde_json::json!({ "package_id": package_id, "reviews": reviews }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -1324,6 +1475,13 @@ pub fn run() {
             cmd_vault_retrieve,
             cmd_vault_delete,
             cmd_vault_migrate,
+            // R22: Marketplace commands
+            cmd_marketplace_list,
+            cmd_marketplace_search,
+            cmd_marketplace_install,
+            cmd_marketplace_uninstall,
+            cmd_marketplace_review,
+            cmd_marketplace_get_reviews,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");

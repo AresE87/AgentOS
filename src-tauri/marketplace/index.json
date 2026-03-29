@@ -1,0 +1,172 @@
+[
+  {
+    "id": "disk-cleanup",
+    "name": "Disk Cleanup",
+    "description": "Scans your drives for temporary files, old logs, and browser caches, then removes them safely to free up disk space.",
+    "category": "productivity",
+    "version": "1.2.0",
+    "author": "AgentOS Team",
+    "downloads": 14823,
+    "rating": 4.6,
+    "tags": ["disk", "cleanup", "storage", "performance"],
+    "preview_steps": [
+      "Scan %TEMP% and system temp directories",
+      "Identify files older than 7 days",
+      "Remove selected temp files and empty recycle bin"
+    ],
+    "file_size_kb": 18
+  },
+  {
+    "id": "git-daily",
+    "name": "Git Daily Report",
+    "description": "Summarizes all git commits made today across your repositories and generates a concise markdown report with diffs and stats.",
+    "category": "dev",
+    "version": "2.0.1",
+    "author": "DevOps Guild",
+    "downloads": 9341,
+    "rating": 4.8,
+    "tags": ["git", "report", "productivity", "dev"],
+    "preview_steps": [
+      "Find all git repositories under home directory",
+      "Collect commits from the last 24 hours",
+      "Generate markdown summary with stats"
+    ],
+    "file_size_kb": 12
+  },
+  {
+    "id": "screenshot-ocr",
+    "name": "Screenshot OCR",
+    "description": "Captures the current screen, runs optical character recognition, and copies all extracted text to the clipboard ready to paste.",
+    "category": "productivity",
+    "version": "1.0.3",
+    "author": "Vision Labs",
+    "downloads": 7654,
+    "rating": 4.3,
+    "tags": ["screenshot", "ocr", "text", "vision", "clipboard"],
+    "preview_steps": [
+      "Capture full screen or selected region",
+      "Send image to OCR engine",
+      "Copy extracted text to clipboard"
+    ],
+    "file_size_kb": 9
+  },
+  {
+    "id": "npm-audit-fix",
+    "name": "NPM Audit & Fix",
+    "description": "Runs npm audit on all Node.js projects in the current workspace, then applies safe fixes automatically and reports remaining issues.",
+    "category": "dev",
+    "version": "1.1.0",
+    "author": "Node Tooling Co",
+    "downloads": 5210,
+    "rating": 4.5,
+    "tags": ["npm", "security", "audit", "node", "fix"],
+    "preview_steps": [
+      "Locate package.json files recursively",
+      "Run npm audit --json on each project",
+      "Apply npm audit fix --only=prod for safe fixes"
+    ],
+    "file_size_kb": 14
+  },
+  {
+    "id": "daily-standup",
+    "name": "Daily Standup Writer",
+    "description": "Reads your git log, calendar events, and task history to automatically draft your daily standup message for Slack or Teams.",
+    "category": "productivity",
+    "version": "1.3.2",
+    "author": "Meeting Minimizer",
+    "downloads": 11092,
+    "rating": 4.7,
+    "tags": ["standup", "meeting", "slack", "git", "productivity"],
+    "preview_steps": [
+      "Pull git commits from the last 24 hours",
+      "Read open tasks from task database",
+      "Draft standup message in configured format"
+    ],
+    "file_size_kb": 11
+  },
+  {
+    "id": "docker-prune",
+    "name": "Docker Prune Automation",
+    "description": "Cleans up stopped containers, dangling images, unused volumes, and build cache to reclaim Docker disk space safely.",
+    "category": "dev",
+    "version": "1.0.0",
+    "author": "ContainerOps",
+    "downloads": 4887,
+    "rating": 4.4,
+    "tags": ["docker", "cleanup", "containers", "devops"],
+    "preview_steps": [
+      "List stopped containers and dangling images",
+      "Show estimated disk space to be freed",
+      "Run docker system prune with safe flags"
+    ],
+    "file_size_kb": 8
+  },
+  {
+    "id": "web-research",
+    "name": "Web Research Assistant",
+    "description": "Given a topic, searches the web for top sources, reads each page, and produces a structured research summary with citations.",
+    "category": "research",
+    "version": "2.1.0",
+    "author": "Research Bots Inc",
+    "downloads": 18432,
+    "rating": 4.9,
+    "tags": ["research", "web", "search", "summary", "citations"],
+    "preview_steps": [
+      "Search DuckDuckGo for the given topic",
+      "Fetch and parse top 5 result pages",
+      "Synthesize findings into a structured report"
+    ],
+    "file_size_kb": 16
+  },
+  {
+    "id": "env-backup",
+    "name": "Environment Backup",
+    "description": "Exports all environment variables, installed apps, VS Code extensions, and dotfiles to a timestamped backup archive.",
+    "category": "automation",
+    "version": "1.0.5",
+    "author": "SysAdmin Pro",
+    "downloads": 3621,
+    "rating": 4.2,
+    "tags": ["backup", "env", "dotfiles", "settings", "automation"],
+    "preview_steps": [
+      "Export environment variables to .env.backup",
+      "List installed apps via winget or brew",
+      "Archive dotfiles and VS Code settings"
+    ],
+    "file_size_kb": 21
+  },
+  {
+    "id": "log-analyzer",
+    "name": "Log Analyzer",
+    "description": "Scans application and system log files for errors, warnings, and anomalies, then produces a ranked summary of issues found.",
+    "category": "automation",
+    "version": "1.4.0",
+    "author": "Ops Intelligence",
+    "downloads": 6703,
+    "rating": 4.6,
+    "tags": ["logs", "monitoring", "errors", "analysis", "ops"],
+    "preview_steps": [
+      "Locate log files in common directories",
+      "Parse ERROR and WARN level entries",
+      "Rank and summarize top issues by frequency"
+    ],
+    "file_size_kb": 15
+  },
+  {
+    "id": "code-review-prep",
+    "name": "Code Review Prep",
+    "description": "Before submitting a PR, this playbook checks lint, runs tests, summarizes changed files, and drafts a PR description for you.",
+    "category": "dev",
+    "version": "3.0.0",
+    "author": "PR Quality Guild",
+    "downloads": 8956,
+    "rating": 4.8,
+    "tags": ["git", "pr", "code-review", "lint", "tests"],
+    "preview_steps": [
+      "Run linter and formatter on changed files",
+      "Execute test suite and report failures",
+      "Generate PR description from git diff summary"
+    ],
+    "file_size_kb": 13
+  }
+]
