@@ -16,9 +16,10 @@ interface Message {
 }
 
 const SUGGESTIONS = [
-  'Check my disk space',
-  'Review this code',
-  'Organize my downloads',
+  'What files are on my desktop?',
+  'Open the calculator',
+  'How much disk space do I have?',
+  'List running processes',
 ];
 
 export default function Chat() {
@@ -181,7 +182,7 @@ export default function Chat() {
                   />
                 </svg>
               </div>
-              <p className="text-sm font-mono text-text-muted mb-1">AgentOS v0.1.0</p>
+              <p className="text-sm font-mono text-text-muted mb-1">AgentOS v1.0.0</p>
               <p className="text-sm text-text-secondary mb-6">
                 Start a conversation with your AI agent.
               </p>

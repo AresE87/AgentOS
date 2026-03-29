@@ -1,10 +1,9 @@
 import { useState } from 'react';
 import Button from '../components/Button';
 import Input from '../components/Input';
-import Toggle from '../components/Toggle';
 import { useAgent } from '../hooks/useAgent';
 
-// ─── Step Components ────────────────────────────────────────────────
+// ─── Step 1: Welcome ─────────────────────────────────────────────
 
 function StepWelcome() {
   return (
@@ -15,33 +14,40 @@ function StepWelcome() {
         </svg>
       </div>
       <h1 className="text-3xl font-bold text-[#E6EDF3]">Welcome to AgentOS</h1>
+      <p className="text-[#00E5E5] text-sm font-medium tracking-wide mb-1">
+        Your AI team, running on your PC
+      </p>
       <p className="text-[#C5D0DC] max-w-md leading-relaxed">
-        Your personal desktop AI agent. Let's set up your environment in a few quick steps
-        so your agent can start working for you.
+        Let's connect an AI provider so your agent can start working for you.
       </p>
     </div>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────
+// ─── Step 2: Connect AI Provider ─────────────────────────────────
 
-function StepAIProvider({
-  config,
-  setConfig,
+function StepProvider({
+  keys,
+  setKeys,
 }: {
-  config: WizardConfig;
-  setConfig: React.Dispatch<React.SetStateAction<WizardConfig>>;
+  keys: Record<string, string>;
+  setKeys: React.Dispatch<React.SetStateAction<Record<string, string>>>;
 }) {
-  const { healthCheck, updateSettings } = useAgent();
+  const { updateSettings, healthCheck } = useAgent();
   const [testing, setTesting] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<Record<string, boolean | null>>({});
 
+  const providers = [
+    { id: 'anthropic', label: 'Anthropic (recommended)', placeholder: 'sk-ant-...' },
+    { id: 'openai', label: 'OpenAI', placeholder: 'sk-...' },
+    { id: 'google', label: 'Google AI', placeholder: 'AIza...' },
+  ];
+
   const handleTest = async (provider: string) => {
-    const key = config.api_keys[provider];
+    const key = keys[provider];
     if (!key) return;
     setTesting(provider);
     try {
-      // Save the key first, then run health check
       await updateSettings(`${provider}_api_key`, key);
       const result = await healthCheck();
       setTestResult((prev) => ({ ...prev, [provider]: result.providers[provider] ?? false }));
@@ -51,355 +57,124 @@ function StepAIProvider({
     setTesting(null);
   };
 
-  const providers = [
-    { id: 'anthropic', label: 'Anthropic' },
-    { id: 'openai', label: 'OpenAI' },
-    { id: 'google', label: 'Google AI' },
-  ];
+  const hasAnyKey = Object.values(keys).some((k) => k.trim().length > 0);
+  const hasAnyValid = Object.values(testResult).some((v) => v === true);
 
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-lg font-semibold text-[#E6EDF3]">AI Provider</h2>
-        <p className="text-sm text-[#3D4F5F] mt-1">Choose how the agent accesses language models.</p>
+        <h2 className="text-lg font-semibold text-[#E6EDF3]">Connect an AI Provider</h2>
+        <p className="text-sm text-[#3D4F5F] mt-1">
+          Enter at least one API key. Anthropic Claude is recommended for best results.
+        </p>
       </div>
 
-      {/* Radio: Managed vs BYOK */}
-      <div className="flex gap-4">
-        {(['managed', 'byok'] as const).map((mode) => (
-          <label
-            key={mode}
-            className={`flex-1 cursor-pointer rounded-lg border p-4 transition-colors ${
-              config.ai_provider === mode
-                ? 'border-[#00E5E5] bg-[#00E5E5]/10'
-                : 'border-[#1A1E26] bg-[#0A0E14] hover:border-[#3D4F5F]'
-            }`}
-          >
-            <input
-              type="radio"
-              name="ai_provider"
-              value={mode}
-              checked={config.ai_provider === mode}
-              onChange={() => setConfig((c) => ({ ...c, ai_provider: mode }))}
-              className="sr-only"
-            />
-            <span className="text-sm font-medium text-[#E6EDF3]">
-              {mode === 'managed' ? 'Managed (Free Tier)' : 'Bring Your Own Key'}
-            </span>
-            <p className="text-xs text-[#3D4F5F] mt-1">
-              {mode === 'managed'
-                ? 'We handle API access. Limited free usage included.'
-                : 'Use your own API keys for unlimited access.'}
-            </p>
-          </label>
-        ))}
-      </div>
-
-      {/* BYOK key inputs */}
-      {config.ai_provider === 'byok' && (
-        <div className="space-y-4 pl-1">
-          {providers.map((p) => (
-            <div key={p.id} className="space-y-2">
-              <div className="flex items-end gap-2">
-                <div className="flex-1">
-                  <Input
-                    label={`${p.label} API Key`}
-                    isPassword
-                    placeholder="sk-..."
-                    value={config.api_keys[p.id] || ''}
-                    onChange={(e) =>
-                      setConfig((c) => ({
-                        ...c,
-                        api_keys: { ...c.api_keys, [p.id]: (e.target as HTMLInputElement).value },
-                      }))
-                    }
-                  />
-                </div>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  loading={testing === p.id}
-                  onClick={() => handleTest(p.id)}
-                  disabled={!config.api_keys[p.id]}
-                >
-                  Test
-                </Button>
+      <div className="space-y-4">
+        {providers.map((p) => (
+          <div key={p.id} className="space-y-2">
+            <div className="flex items-end gap-2">
+              <div className="flex-1">
+                <Input
+                  label={p.label}
+                  isPassword
+                  placeholder={p.placeholder}
+                  value={keys[p.id] || ''}
+                  onChange={(e) =>
+                    setKeys((prev) => ({ ...prev, [p.id]: (e.target as HTMLInputElement).value }))
+                  }
+                />
               </div>
-              {testResult[p.id] !== undefined && testResult[p.id] !== null && (
-                <p className={`text-xs ${testResult[p.id] ? 'text-[#2ECC71]' : 'text-[#E74C3C]'}`}>
-                  {testResult[p.id] ? 'Connection successful' : 'Connection failed'}
-                </p>
-              )}
+              <Button
+                size="sm"
+                variant="secondary"
+                loading={testing === p.id}
+                onClick={() => handleTest(p.id)}
+                disabled={!keys[p.id]?.trim()}
+              >
+                Test
+              </Button>
             </div>
-          ))}
-        </div>
+            {testResult[p.id] !== undefined && testResult[p.id] !== null && (
+              <p className={`text-xs flex items-center gap-1 ${testResult[p.id] ? 'text-[#2ECC71]' : 'text-[#E74C3C]'}`}>
+                {testResult[p.id] ? (
+                  <><span className="inline-block h-1.5 w-1.5 rounded-full bg-[#2ECC71] shadow-[0_0_4px_#2ECC71]" /> Connected</>
+                ) : (
+                  <><span className="inline-block h-1.5 w-1.5 rounded-full bg-[#E74C3C]" /> Connection failed — check your key</>
+                )}
+              </p>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {hasAnyKey && !hasAnyValid && (
+        <p className="text-xs text-[#F39C12]">
+          Test at least one key before continuing.
+        </p>
       )}
     </div>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────
+// ─── Step 3: Ready ───────────────────────────────────────────────
 
-function StepMessaging({
-  config,
-  setConfig,
-}: {
-  config: WizardConfig;
-  setConfig: React.Dispatch<React.SetStateAction<WizardConfig>>;
-}) {
-  const { updateSettings, healthCheck } = useAgent();
-  const [testing, setTesting] = useState(false);
-  const [result, setResult] = useState<boolean | null>(null);
-
-  const handleTest = async () => {
-    if (!config.telegram_token) return;
-    setTesting(true);
-    try {
-      await updateSettings('telegram_token', config.telegram_token);
-      const health = await healthCheck();
-      setResult(health.providers['telegram'] ?? false);
-    } catch {
-      setResult(false);
-    }
-    setTesting(false);
-  };
+function StepReady({ keys }: { keys: Record<string, string> }) {
+  const configured = Object.entries(keys)
+    .filter(([, v]) => v.trim().length > 0)
+    .map(([k]) => k.charAt(0).toUpperCase() + k.slice(1));
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-lg font-semibold text-[#E6EDF3]">Messaging</h2>
-        <p className="text-sm text-[#3D4F5F] mt-1">
-          Connect Telegram so you can chat with your agent on the go.
-        </p>
+    <div className="flex flex-col items-center text-center gap-6 py-8">
+      <div className="h-16 w-16 rounded-2xl bg-[#2ECC71]/20 flex items-center justify-center">
+        <svg className="h-8 w-8 text-[#2ECC71]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+        </svg>
       </div>
-
-      <div className="flex items-end gap-2">
-        <div className="flex-1">
-          <Input
-            label="Telegram Bot Token"
-            isPassword
-            placeholder="123456:ABC-DEF..."
-            value={config.telegram_token}
-            onChange={(e) =>
-              setConfig((c) => ({ ...c, telegram_token: (e.target as HTMLInputElement).value }))
-            }
-          />
+      <h1 className="text-2xl font-bold text-[#E6EDF3]">You're ready!</h1>
+      <div className="text-sm text-[#C5D0DC] space-y-2">
+        {configured.length > 0 ? (
+          <>
+            <p>AI providers configured: <span className="text-[#00E5E5] font-medium">{configured.join(', ')}</span></p>
+            <p className="text-[#3D4F5F]">You can add more providers later in Settings.</p>
+          </>
+        ) : (
+          <p>No providers configured yet. You can set them up in Settings.</p>
+        )}
+        <div className="mt-4 rounded-lg border border-[#1A1E26] bg-[#0A0E14] px-4 py-3">
+          <p className="text-xs text-[#3D4F5F] mb-1">Try your first command:</p>
+          <p className="text-sm text-[#00E5E5] font-mono">"Check my disk space"</p>
         </div>
-        <Button
-          size="sm"
-          variant="secondary"
-          loading={testing}
-          onClick={handleTest}
-          disabled={!config.telegram_token}
-        >
-          Test
-        </Button>
-      </div>
-      {result !== null && (
-        <p className={`text-xs ${result ? 'text-[#2ECC71]' : 'text-[#E74C3C]'}`}>
-          {result ? 'Bot connected successfully' : 'Could not connect to bot'}
-        </p>
-      )}
-
-      <button
-        onClick={() => setConfig((c) => ({ ...c, telegram_token: '', skip_telegram: true }))}
-        className="text-xs text-[#3D4F5F] hover:text-[#C5D0DC] underline"
-      >
-        Skip for now
-      </button>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────
-
-const PERMISSION_DEFS = [
-  {
-    key: 'cli' as const,
-    label: 'Command Line',
-    description: 'Allow the agent to execute shell commands on your machine.',
-  },
-  {
-    key: 'screen' as const,
-    label: 'Screen Access',
-    description: 'Allow the agent to view and interact with your screen.',
-  },
-  {
-    key: 'files' as const,
-    label: 'File System',
-    description: 'Allow the agent to read and write files in permitted directories.',
-  },
-  {
-    key: 'network' as const,
-    label: 'Network',
-    description: 'Allow the agent to make outbound HTTP requests.',
-  },
-];
-
-function StepPermissions({
-  config,
-  setConfig,
-}: {
-  config: WizardConfig;
-  setConfig: React.Dispatch<React.SetStateAction<WizardConfig>>;
-}) {
-  return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-lg font-semibold text-[#E6EDF3]">Permissions</h2>
-        <p className="text-sm text-[#3D4F5F] mt-1">
-          Control what your agent is allowed to do. You can change these later in Settings.
-        </p>
-      </div>
-
-      <div className="space-y-5">
-        {PERMISSION_DEFS.map((perm) => (
-          <Toggle
-            key={perm.key}
-            label={perm.label}
-            description={perm.description}
-            checked={config.permissions[perm.key]}
-            onChange={(val) =>
-              setConfig((c) => ({
-                ...c,
-                permissions: { ...c.permissions, [perm.key]: val },
-              }))
-            }
-          />
-        ))}
       </div>
     </div>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────
-
-function StepFinish({ saving }: { saving: boolean }) {
-  const items = [
-    'AI provider configured',
-    'Messaging connected',
-    'Permissions set',
-    'Agent initialized',
-  ];
-
-  return (
-    <div className="space-y-6 py-4">
-      <div className="text-center">
-        <h2 className="text-lg font-semibold text-[#E6EDF3]">Setting up your agent...</h2>
-        <p className="text-sm text-[#3D4F5F] mt-1">This only takes a moment.</p>
-      </div>
-
-      {/* Animated progress bar */}
-      <div className="w-full h-2 rounded-full bg-[#1A1E26] overflow-hidden">
-        <div
-          className={`h-full rounded-full bg-[#00E5E5] transition-all duration-[2000ms] ease-out ${
-            saving ? 'w-full' : 'w-0'
-          }`}
-        />
-      </div>
-
-      {/* Checklist */}
-      <ul className="space-y-3">
-        {items.map((item, i) => (
-          <li key={i} className="flex items-center gap-3">
-            <div
-              className={`h-5 w-5 rounded-full flex items-center justify-center transition-colors duration-500 ${
-                saving ? 'bg-[#2ECC71]/20 text-[#2ECC71]' : 'bg-[#1A1E26] text-[#3D4F5F]'
-              }`}
-              style={{ transitionDelay: `${i * 400}ms` }}
-            >
-              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-              </svg>
-            </div>
-            <span
-              className={`text-sm transition-colors duration-500 ${
-                saving ? 'text-[#E6EDF3]' : 'text-[#3D4F5F]'
-              }`}
-              style={{ transitionDelay: `${i * 400}ms` }}
-            >
-              {item}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-// ─── Wizard Config Type ─────────────────────────────────────────────
-
-interface WizardConfig {
-  ai_provider: 'managed' | 'byok';
-  api_keys: Record<string, string>;
-  telegram_token: string;
-  skip_telegram: boolean;
-  permissions: {
-    cli: boolean;
-    screen: boolean;
-    files: boolean;
-    network: boolean;
-  };
-}
-
-const DEFAULT_CONFIG: WizardConfig = {
-  ai_provider: 'managed',
-  api_keys: {},
-  telegram_token: '',
-  skip_telegram: false,
-  permissions: {
-    cli: true,
-    screen: false,
-    files: true,
-    network: true,
-  },
-};
-
-// ─── Main Wizard ────────────────────────────────────────────────────
+// ─── Main Wizard ─────────────────────────────────────────────────
 
 export default function Wizard({ onComplete }: { onComplete: () => void }) {
   const [step, setStep] = useState(0);
-  const [config, setConfig] = useState<WizardConfig>(DEFAULT_CONFIG);
-  const [saving, setSaving] = useState(false);
+  const [keys, setKeys] = useState<Record<string, string>>({});
   const { updateSettings } = useAgent();
-  const steps = ['Welcome', 'AI Provider', 'Messaging', 'Permissions', 'Finish'];
+  const steps = ['Welcome', 'Provider', 'Ready'];
 
-  const isLast = step === steps.length - 1;
-  const isFirst = step === 0;
-
-  const handleSave = async () => {
-    setSaving(true);
+  const handleFinish = async () => {
+    // Save keys one more time to be sure
     try {
-      // Persist each setting via Tauri IPC
-      if (config.ai_provider === 'byok') {
-        for (const [provider, key] of Object.entries(config.api_keys)) {
-          if (key) await updateSettings(`${provider}_api_key`, key);
+      for (const [provider, key] of Object.entries(keys)) {
+        if (key.trim()) {
+          await updateSettings(`${provider}_api_key`, key);
         }
       }
-      if (config.telegram_token) {
-        await updateSettings('telegram_bot_token', config.telegram_token);
-      }
-      // Save permissions as comma-separated enabled list
-      const enabledPerms = Object.entries(config.permissions)
-        .filter(([, v]) => v)
-        .map(([k]) => k)
-        .join(',');
-      await updateSettings('permissions', enabledPerms);
       await updateSettings('setup_complete', 'true');
     } catch {
-      // proceed anyway — user can fix in Settings
+      // proceed anyway
     }
+    onComplete();
   };
 
-  const handleNext = async () => {
-    if (isLast) {
-      onComplete();
-      return;
-    }
-    if (step === steps.length - 2) {
-      // Moving to Finish step — trigger save
-      setStep((s) => s + 1);
-      await handleSave();
+  const handleNext = () => {
+    if (step === steps.length - 1) {
+      handleFinish();
       return;
     }
     setStep((s) => s + 1);
@@ -425,15 +200,13 @@ export default function Wizard({ onComplete }: { onComplete: () => void }) {
         {/* Step content */}
         <div className="min-h-[320px]">
           {step === 0 && <StepWelcome />}
-          {step === 1 && <StepAIProvider config={config} setConfig={setConfig} />}
-          {step === 2 && <StepMessaging config={config} setConfig={setConfig} />}
-          {step === 3 && <StepPermissions config={config} setConfig={setConfig} />}
-          {step === 4 && <StepFinish saving={saving} />}
+          {step === 1 && <StepProvider keys={keys} setKeys={setKeys} />}
+          {step === 2 && <StepReady keys={keys} />}
         </div>
 
         {/* Navigation */}
         <div className="flex justify-between mt-8">
-          {!isFirst && !isLast ? (
+          {step > 0 && step < steps.length - 1 ? (
             <Button variant="secondary" onClick={handleBack}>
               Back
             </Button>
@@ -441,7 +214,7 @@ export default function Wizard({ onComplete }: { onComplete: () => void }) {
             <div />
           )}
           <Button onClick={handleNext}>
-            {isFirst ? 'Get Started' : isLast ? 'Open Dashboard' : 'Next'}
+            {step === 0 ? 'Get Started' : step === steps.length - 1 ? 'Open Dashboard' : 'Next'}
           </Button>
         </div>
       </div>

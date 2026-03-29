@@ -111,3 +111,64 @@ impl RoutingConfig {
             .unwrap_or_default()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn load_has_7_models() {
+        let config = RoutingConfig::load();
+        assert_eq!(config.models.len(), 7);
+    }
+
+    #[test]
+    fn load_has_3_tiers() {
+        let config = RoutingConfig::load();
+        assert!(config.routing.contains_key("cheap"));
+        assert!(config.routing.contains_key("standard"));
+        assert!(config.routing.contains_key("premium"));
+    }
+
+    #[test]
+    fn get_model_by_id() {
+        let config = RoutingConfig::load();
+        let m = config.get_model("anthropic/haiku").unwrap();
+        assert_eq!(m.provider, "anthropic");
+        assert!(m.model.contains("haiku"));
+    }
+
+    #[test]
+    fn get_model_nonexistent_returns_none() {
+        let config = RoutingConfig::load();
+        assert!(config.get_model("nonexistent/model").is_none());
+    }
+
+    #[test]
+    fn get_models_for_nonexistent_tier_returns_empty() {
+        let config = RoutingConfig::load();
+        let models = config.get_models_for_tier("ultra");
+        assert!(models.is_empty());
+    }
+
+    #[test]
+    fn all_models_have_positive_costs() {
+        let config = RoutingConfig::load();
+        for m in &config.models {
+            assert!(m.cost_per_1k_input > 0.0, "{} has zero input cost", m.id);
+            assert!(m.cost_per_1k_output > 0.0, "{} has zero output cost", m.id);
+        }
+    }
+
+    #[test]
+    fn all_routing_ids_resolve_to_models() {
+        let config = RoutingConfig::load();
+        for (tier, chains) in &config.routing {
+            for chain in chains {
+                for id in chain {
+                    assert!(config.get_model(id).is_some(), "Tier {} references unknown model {}", tier, id);
+                }
+            }
+        }
+    }
+}

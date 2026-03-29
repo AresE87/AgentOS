@@ -1,4 +1,4 @@
-// AOS-P2 — Settings page (upgraded)
+// AOS-R20 — Settings page (release polish)
 import { useState, useEffect, useCallback } from 'react';
 import Card from '../../components/Card';
 import Button from '../../components/Button';
@@ -11,6 +11,7 @@ import {
   RotateCcw,
   Trash2,
   MessageCircle,
+  RefreshCw,
 } from 'lucide-react';
 
 interface SettingsPageProps {
@@ -18,7 +19,7 @@ interface SettingsPageProps {
 }
 
 export default function Settings({ onResetWizard }: SettingsPageProps) {
-  const { getSettings, updateSettings, healthCheck } = useAgent();
+  const { getSettings, updateSettings, healthCheck, getChannelStatus } = useAgent();
   const [settings, setSettings] = useState<AgentSettings | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -26,6 +27,10 @@ export default function Settings({ onResetWizard }: SettingsPageProps) {
   const [keyInputs, setKeyInputs] = useState<Record<string, string>>({});
   const [testing, setTesting] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, boolean>>({});
+
+  // Channel status from backend
+  const [channelStatus, setChannelStatus] = useState<Record<string, { connected: boolean; info?: string }>>({});
+  const [channelLoading, setChannelLoading] = useState(false);
 
   // Permission state
   const [permissions, setPermissions] = useState({
@@ -42,6 +47,15 @@ export default function Settings({ onResetWizard }: SettingsPageProps) {
   const [defaultLevel, setDefaultLevel] = useState('auto');
   const [maxConcurrent, setMaxConcurrent] = useState('3');
 
+  const refreshChannels = useCallback(async () => {
+    setChannelLoading(true);
+    try {
+      const result = await getChannelStatus();
+      setChannelStatus((result as any).channels || {});
+    } catch { /* ignore */ }
+    setChannelLoading(false);
+  }, [getChannelStatus]);
+
   const refresh = useCallback(async () => {
     try {
       const s = await getSettings();
@@ -52,8 +66,9 @@ export default function Settings({ onResetWizard }: SettingsPageProps) {
     } catch {
       // backend not ready
     }
+    await refreshChannels();
     setLoading(false);
-  }, [getSettings]);
+  }, [getSettings, refreshChannels]);
 
   useEffect(() => {
     refresh();
@@ -176,30 +191,42 @@ export default function Settings({ onResetWizard }: SettingsPageProps) {
       </Card>
 
       {/* Messaging */}
-      <Card header="Messaging">
+      <Card header="Messaging Channels">
         <div className="space-y-3">
-          {/* Telegram */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <MessageCircle size={16} className="text-[#E6EDF3]" />
-              <span className="text-sm text-[#E6EDF3]">Telegram</span>
-            </div>
-            {settings?.has_telegram ? (
-              <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full
-                bg-[#2ECC71]/10 text-[#2ECC71] border border-[#2ECC71]/20
-                shadow-[0_0_8px_rgba(46,204,113,0.15)]">
-                <span className="h-1.5 w-1.5 rounded-full bg-[#2ECC71] shadow-[0_0_4px_#2ECC71]" />
-                Connected
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full
-                bg-[#1A1E26] text-[#3D4F5F] border border-[#1A1E26]">
-                Not Configured
-              </span>
-            )}
-          </div>
-
-          {/* WhatsApp */}
+          {[
+            { key: 'telegram', name: 'Telegram', fallback: settings?.has_telegram ?? false },
+            { key: 'discord', name: 'Discord', fallback: false },
+          ].map((ch) => {
+            const status = channelStatus[ch.key];
+            const connected = status ? status.connected : ch.fallback;
+            return (
+              <div key={ch.key} className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <MessageCircle size={16} className="text-[#E6EDF3]" />
+                  <span className="text-sm text-[#E6EDF3]">{ch.name}</span>
+                  {status?.info && (
+                    <span className="text-[10px] text-[#3D4F5F]">{status.info}</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  {connected ? (
+                    <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full
+                      bg-[#2ECC71]/10 text-[#2ECC71] border border-[#2ECC71]/20
+                      shadow-[0_0_8px_rgba(46,204,113,0.15)]">
+                      <span className="h-1.5 w-1.5 rounded-full bg-[#2ECC71] shadow-[0_0_4px_#2ECC71]" />
+                      Connected
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full
+                      bg-[#1A1E26] text-[#3D4F5F] border border-[#1A1E26]">
+                      Not Configured
+                    </span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+          {/* WhatsApp — always coming soon */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <MessageCircle size={16} className="text-[#E6EDF3]" />
@@ -210,22 +237,20 @@ export default function Settings({ onResetWizard }: SettingsPageProps) {
               Coming Soon
             </span>
           </div>
-
-          {/* Discord */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <MessageCircle size={16} className="text-[#E6EDF3]" />
-              <span className="text-sm text-[#E6EDF3]">Discord</span>
-            </div>
-            <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full
-              bg-[#5865F2]/10 text-[#5865F2] border border-[#5865F2]/20">
-              Coming Soon
-            </span>
-          </div>
         </div>
-        <p className="text-xs text-[#3D4F5F] mt-3">
-          To change the Telegram bot token, run the setup wizard again.
-        </p>
+        <div className="flex items-center justify-between mt-3">
+          <p className="text-xs text-[#3D4F5F]">
+            Configure Telegram in the setup wizard. Discord token via DISCORD_BOT_TOKEN env var.
+          </p>
+          <button
+            onClick={refreshChannels}
+            disabled={channelLoading}
+            className="text-[#3D4F5F] hover:text-[#C5D0DC] transition-colors disabled:opacity-50"
+            title="Refresh channel status"
+          >
+            <RefreshCw size={14} className={channelLoading ? 'animate-spin' : ''} />
+          </button>
+        </div>
       </Card>
 
       {/* Permissions */}
@@ -376,7 +401,7 @@ export default function Settings({ onResetWizard }: SettingsPageProps) {
             </div>
             <div>
               <p className="text-sm font-medium text-[#E6EDF3]">AgentOS</p>
-              <p className="text-xs text-[#3D4F5F]">Version 0.1.0</p>
+              <p className="text-xs text-[#3D4F5F]">Version 1.0.0</p>
             </div>
           </div>
 

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Home,
   BookOpen,
@@ -15,6 +15,7 @@ import {
   Video,
   ThumbsUp,
 } from 'lucide-react';
+import { useAgent } from '../hooks/useAgent';
 import HomePg from './dashboard/Home';
 import Playbooks from './dashboard/Playbooks';
 import Chat from './dashboard/Chat';
@@ -58,7 +59,20 @@ interface DashboardProps {
 export default function Dashboard({ onResetWizard }: DashboardProps) {
   const [activeTab, setActiveTab] = useState<Tab>('home');
   const [collapsed, setCollapsed] = useState(false);
-  const [notifications] = useState(3);
+  const [notifications] = useState(0);
+  const [setupIncomplete, setSetupIncomplete] = useState(false);
+  const { getStatus } = useAgent();
+
+  // Check if setup is complete (has at least one provider)
+  useEffect(() => {
+    getStatus()
+      .then((status) => {
+        if (!status.providers || status.providers.length === 0) {
+          setSetupIncomplete(true);
+        }
+      })
+      .catch(() => setSetupIncomplete(true));
+  }, []);
 
   const sidebarWidth = collapsed ? 'w-[52px]' : 'w-[210px]';
 
@@ -192,13 +206,30 @@ export default function Dashboard({ onResetWizard }: DashboardProps) {
 
           {/* Version */}
           {!collapsed && (
-            <div className="px-3 py-1 text-[10px] font-mono text-text-muted">v0.1.0</div>
+            <div className="px-3 py-1 text-[10px] font-mono text-text-muted">v1.0.0</div>
           )}
         </div>
       </aside>
 
       {/* Content */}
       <main className="flex-1 overflow-y-auto">
+        {/* Setup incomplete banner */}
+        {setupIncomplete && (
+          <div className="mx-6 mt-4 flex items-center justify-between rounded-lg border border-[#F39C12]/30 bg-[#F39C12]/10 px-4 py-3">
+            <div className="flex items-center gap-3">
+              <span className="text-[#F39C12] text-sm font-medium">Setup incomplete</span>
+              <span className="text-[#C5D0DC] text-xs">No AI providers configured. The agent needs at least one API key to work.</span>
+            </div>
+            {onResetWizard && (
+              <button
+                onClick={onResetWizard}
+                className="shrink-0 rounded-lg border border-[#F39C12]/40 px-3 py-1.5 text-xs font-medium text-[#F39C12] hover:bg-[#F39C12]/20 transition-colors"
+              >
+                Run Setup
+              </button>
+            )}
+          </div>
+        )}
         {activeTab === 'home' && <HomePg />}
         {activeTab === 'playbooks' && <Playbooks />}
         {activeTab === 'chat' && <Chat />}

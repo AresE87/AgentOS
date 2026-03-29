@@ -151,6 +151,7 @@ export interface MeshNode {
     display_name: string;
     status: 'online' | 'offline';
     last_seen: string;
+    address: string;
     capabilities: string[];
 }
 

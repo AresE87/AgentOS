@@ -1,6 +1,6 @@
 {
   "productName": "AgentOS",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "identifier": "com.agentos.app",
   "build": {
     "beforeDevCommand": "cd ../frontend && npm run dev",
@@ -13,9 +13,9 @@
     "windows": [
       {
         "title": "AgentOS",
-        "width": 1024,
-        "height": 700,
-        "minWidth": 800,
+        "width": 1200,
+        "height": 800,
+        "minWidth": 900,
         "minHeight": 600,
         "center": true,
         "resizable": true,

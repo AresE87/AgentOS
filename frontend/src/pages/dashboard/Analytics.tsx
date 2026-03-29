@@ -89,10 +89,9 @@ export default function Analytics() {
     return (
       <div className="p-6 flex flex-col items-center justify-center h-full text-center">
         <BarChart3 size={48} className="text-[#3D4F5F] mb-4" />
-        <h2 className="text-lg font-medium text-[#E6EDF3] mb-2">Analytics</h2>
+        <h2 className="text-lg font-medium text-[#E6EDF3] mb-2">No analytics data yet</h2>
         <p className="text-sm text-[#3D4F5F] max-w-md">
-          Run some tasks first to see analytics here. Your usage data will appear once you start
-          sending messages to the agent.
+          Complete some tasks first. Your usage charts, cost breakdown, and success rates will appear here.
         </p>
       </div>
     );

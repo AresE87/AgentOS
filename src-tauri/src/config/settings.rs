@@ -138,6 +138,114 @@ impl Settings {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_settings_have_no_api_keys() {
+        let s = Settings::default();
+        assert!(s.anthropic_api_key.is_empty());
+        assert!(s.openai_api_key.is_empty());
+        assert!(s.google_api_key.is_empty());
+    }
+
+    #[test]
+    fn default_settings_have_sensible_values() {
+        let s = Settings::default();
+        assert_eq!(s.log_level, "INFO");
+        assert_eq!(s.max_cost_per_task, 1.0);
+        assert_eq!(s.cli_timeout, 300);
+        assert_eq!(s.max_steps_per_task, 20);
+        assert!(!s.pc_control_enabled);
+    }
+
+    #[test]
+    fn set_api_key() {
+        let mut s = Settings::default();
+        s.set("anthropic_api_key", "sk-test-123");
+        assert_eq!(s.anthropic_api_key, "sk-test-123");
+    }
+
+    #[test]
+    fn set_numeric_value() {
+        let mut s = Settings::default();
+        s.set("cli_timeout", "600");
+        assert_eq!(s.cli_timeout, 600);
+    }
+
+    #[test]
+    fn set_invalid_numeric_ignored() {
+        let mut s = Settings::default();
+        s.set("cli_timeout", "not_a_number");
+        assert_eq!(s.cli_timeout, 300); // unchanged
+    }
+
+    #[test]
+    fn set_boolean_value() {
+        let mut s = Settings::default();
+        s.set("pc_control_enabled", "true");
+        assert!(s.pc_control_enabled);
+        s.set("pc_control_enabled", "false");
+        assert!(!s.pc_control_enabled);
+    }
+
+    #[test]
+    fn set_unknown_key_ignored() {
+        let mut s = Settings::default();
+        s.set("nonexistent_key", "value");
+        // No panic, no error
+    }
+
+    #[test]
+    fn configured_providers_empty_by_default() {
+        let s = Settings::default();
+        assert!(s.configured_providers().is_empty());
+    }
+
+    #[test]
+    fn configured_providers_with_keys() {
+        let mut s = Settings::default();
+        s.set("anthropic_api_key", "sk-test");
+        s.set("google_api_key", "gsk-test");
+        let providers = s.configured_providers();
+        assert_eq!(providers.len(), 2);
+        assert!(providers.contains(&"anthropic".to_string()));
+        assert!(providers.contains(&"google".to_string()));
+    }
+
+    #[test]
+    fn save_and_load_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = Settings::load(dir.path());
+        s.set("anthropic_api_key", "sk-roundtrip-test");
+        s.set("cli_timeout", "999");
+        s.save().unwrap();
+
+        let loaded = Settings::load(dir.path());
+        assert_eq!(loaded.anthropic_api_key, "sk-roundtrip-test");
+        assert_eq!(loaded.cli_timeout, 999);
+    }
+
+    #[test]
+    fn load_nonexistent_returns_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = Settings::load(dir.path());
+        assert_eq!(s.cli_timeout, 300);
+        assert!(s.anthropic_api_key.is_empty());
+    }
+
+    #[test]
+    fn to_json_masks_keys() {
+        let mut s = Settings::default();
+        s.set("anthropic_api_key", "sk-secret");
+        let j = s.to_json();
+        // to_json shows has_anthropic: true, not the actual key
+        assert_eq!(j["has_anthropic"], true);
+        assert!(j.get("anthropic_api_key").is_none());
+    }
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {

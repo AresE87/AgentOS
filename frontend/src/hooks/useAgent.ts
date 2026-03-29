@@ -60,6 +60,21 @@ export function useAgent() {
         callInvoke<{ ok: boolean }>('send_chain_message', { message });
 
     const getAnalytics = () => callInvoke<any>('get_analytics');
+    const getUsageSummary = () => callInvoke<{ tasks_today: number; tokens_today: number; cost_today: number }>('get_usage_summary');
+
+    // Playbooks
+    const getPlaybookDetail = (name: string) =>
+        callInvoke<any>('get_playbook_detail', { name });
+    const startRecording = (name: string) =>
+        callInvoke<{ ok: boolean; session_id: string }>('start_recording', { name });
+    const recordStep = (description: string, actionType: string) =>
+        callInvoke<{ ok: boolean }>('record_step', { description, action_type: actionType });
+    const stopRecording = (name: string) =>
+        callInvoke<{ ok: boolean; name: string; steps_count: number }>('stop_recording', { name });
+    const playPlaybook = (name: string) =>
+        callInvoke<{ ok: boolean }>('play_playbook', { name });
+    const deletePlaybook = (name: string) =>
+        callInvoke<{ ok: boolean }>('delete_playbook', { name });
 
     // Phase 2: PC Control
     const captureScreenshot = () => callInvoke<ScreenshotResult>('capture_screenshot');
@@ -79,10 +94,21 @@ export function useAgent() {
     const sendMeshTask = (nodeId: string, description: string) =>
         callInvoke<{ task_id: string }>('send_mesh_task', { node_id: nodeId, description });
 
+    // Phase 6: Triggers
+    const getTriggers = () => callInvoke<{ triggers: any[] }>('get_triggers');
+    const createTrigger = (trigger: any) => callInvoke<{ ok: boolean }>('create_trigger', trigger);
+    const deleteTrigger = (triggerId: string) => callInvoke<{ ok: boolean }>('delete_trigger', { trigger_id: triggerId });
+    const toggleTrigger = (triggerId: string, enabled: boolean) => callInvoke<{ ok: boolean }>('toggle_trigger', { trigger_id: triggerId, enabled });
+
+    // Channels
+    const getChannelStatus = () => callInvoke<{ channels: Record<string, { connected: boolean; info?: string }> }>('get_channel_status');
+
     return {
         getStatus, processMessage, getTasks, getPlaybooks, setActivePlaybook,
         getSettings, updateSettings, healthCheck, getActiveChain, getChainHistory,
-        sendChainMessage, getAnalytics,
+        sendChainMessage, getAnalytics, getUsageSummary,
+        // Playbooks
+        getPlaybookDetail, startRecording, recordStep, stopRecording, playPlaybook, deletePlaybook,
         // PC Control
         captureScreenshot, getUIElements, listWindows, runPCTask, getTaskSteps,
         killSwitch, resetKillSwitch,
@@ -90,6 +116,10 @@ export function useAgent() {
         findAgent, getAgents,
         // Mesh
         getMeshNodes, sendMeshTask,
+        // Triggers
+        getTriggers, createTrigger, deleteTrigger, toggleTrigger,
+        // Channels
+        getChannelStatus,
     };
 }
 
