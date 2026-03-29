@@ -1,428 +1,256 @@
-import { useState, useEffect, useCallback } from 'react';
-import {
-  Kanban,
-  History,
-  List,
-  Send,
-  Loader2,
-  Clock,
-  DollarSign,
-  XCircle,
-  Link2,
-  ChevronDown,
-} from 'lucide-react';
-import TaskBoardCard from '../../components/TaskBoardCard';
-import AgentLogPanel from '../../components/AgentLogPanel';
-import AgentLevelBadge from '../../components/AgentLevelBadge';
+// R6 — Board: Kanban view for agent task chains
+import { useState, useEffect } from 'react';
+import Card from '../../components/Card';
+import EmptyState from '../../components/EmptyState';
 import { useAgent } from '../../hooks/useAgent';
-import type { ActiveChain, ChainHistoryItem } from '../../types/ipc';
+import { LayoutDashboard, Clock, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 
-type BoardView = 'kanban' | 'history' | 'list';
-
-const VIEW_TABS: { id: BoardView; label: string; icon: typeof Kanban }[] = [
-  { id: 'kanban', label: 'Kanban', icon: Kanban },
-  { id: 'history', label: 'History', icon: History },
-  { id: 'list', label: 'List', icon: List },
-];
-
-const COLUMN_CONFIG = [
-  { key: 'queued' as const,  label: 'QUEUED',      color: 'text-text-muted',   accent: 'bg-text-muted' },
-  { key: 'running' as const, label: 'IN PROGRESS',  color: 'text-cyan',         accent: 'bg-cyan' },
-  { key: 'review' as const,  label: 'REVIEW',       color: 'text-warning',      accent: 'bg-warning' },
-  { key: 'done' as const,    label: 'DONE',         color: 'text-success',      accent: 'bg-success' },
-];
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  const rem = m % 60;
-  return rem > 0 ? `${h}h ${rem}m` : `${h}h`;
+interface ChainSummary {
+  chain_id: string;
+  started_at: string;
+  ended_at: string;
+  event_count: number;
+  agents: string;
 }
 
-function formatDate(iso: string): string {
-  try {
-    return new Date(iso).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  } catch {
-    return iso;
-  }
-}
+type ViewTab = 'kanban' | 'history';
 
-const STATUS_BADGE_STYLES: Record<string, string> = {
-  running: 'bg-cyan/10 text-cyan',
-  done:    'bg-success/10 text-success',
-  failed:  'bg-error/10 text-error',
-  queued:  'bg-text-muted/10 text-text-muted',
-  review:  'bg-warning/10 text-warning',
+const LEVEL_COLORS: Record<string, string> = {
+  junior: 'bg-[#2ECC71]/10 text-[#2ECC71]',
+  specialist: 'bg-[#5865F2]/10 text-[#5865F2]',
+  senior: 'bg-[#378ADD]/10 text-[#378ADD]',
+  manager: 'bg-[#F39C12]/10 text-[#F39C12]',
+  orchestrator: 'bg-[#00E5E5]/10 text-[#00E5E5]',
+};
+
+const EVENT_ICONS: Record<string, typeof CheckCircle2> = {
+  complete: CheckCircle2,
+  error: AlertCircle,
+  progress: Loader2,
+  info: Clock,
+  decision: Clock,
 };
 
 export default function Board() {
-  const { getActiveChain, getChainHistory, sendChainMessage } = useAgent();
-
-  const [chain, setChain] = useState<ActiveChain | null>(null);
-  const [history, setHistory] = useState<ChainHistoryItem[]>([]);
-  const [view, setView] = useState<BoardView>('kanban');
+  const { getActiveChain, getChainHistory } = useAgent();
+  const [tab, setTab] = useState<ViewTab>('kanban');
+  const [activeChain, setActiveChain] = useState<any>(null);
+  const [history, setHistory] = useState<ChainSummary[]>([]);
   const [loading, setLoading] = useState(true);
-  const [input, setInput] = useState('');
-  const [sending, setSending] = useState(false);
 
-  // Fetch active chain
-  const fetchChain = useCallback(async () => {
+  const refresh = async () => {
     try {
-      const data = await getActiveChain();
-      setChain(data);
-    } catch {
-      setChain(null);
-    }
-  }, [getActiveChain]);
-
-  // Fetch history
-  const fetchHistory = useCallback(async () => {
-    try {
-      const data = await getChainHistory();
-      setHistory(data.chains);
-    } catch {
-      setHistory([]);
-    }
-  }, [getChainHistory]);
-
-  // Initial load
-  useEffect(() => {
-    const init = async () => {
-      setLoading(true);
-      await Promise.all([fetchChain(), fetchHistory()]);
-      setLoading(false);
-    };
-    init();
-  }, [fetchChain, fetchHistory]);
-
-  // No polling — load once. User can refresh manually.
-
-  // Auto-select view based on chain
-  useEffect(() => {
-    if (!loading && !chain && view === 'kanban') {
-      setView('history');
-    }
-  }, [chain, loading, view]);
-
-  // Send message
-  const handleSend = async () => {
-    const msg = input.trim();
-    if (!msg || sending) return;
-    setSending(true);
-    setInput('');
-    try {
-      await sendChainMessage(msg);
-    } catch {
-      // handle silently
-    }
-    setSending(false);
+      const [chain, hist] = await Promise.all([
+        getActiveChain(),
+        getChainHistory(),
+      ]);
+      setActiveChain(chain);
+      setHistory((hist as any).chains || []);
+    } catch { /* ignore */ }
+    setLoading(false);
   };
 
-  // Group subtasks by column
-  const columns = COLUMN_CONFIG.map((col) => ({
-    ...col,
-    tasks: chain?.subtasks.filter((s) => s.status === col.key) ?? [],
-  }));
-  const failedTasks = chain?.subtasks.filter((s) => s.status === 'failed') ?? [];
+  useEffect(() => {
+    refresh();
 
-  // Progress stats
-  const doneCount = chain?.subtasks.filter((s) => s.status === 'done').length ?? 0;
-  const totalCount = chain?.subtasks.length ?? 0;
+    // Poll every 3s for active chain updates
+    const interval = setInterval(refresh, 3000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Listen for real-time chain events from Tauri
+  useEffect(() => {
+    let unlistenUpdate: (() => void) | null = null;
+    let unlistenStarted: (() => void) | null = null;
+    let unlistenFinished: (() => void) | null = null;
+
+    const setup = async () => {
+      if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+        const { listen } = await import('@tauri-apps/api/event');
+        unlistenUpdate = await listen<any>('chain:update', () => { refresh(); });
+        unlistenStarted = await listen<any>('chain:started', () => { refresh(); });
+        unlistenFinished = await listen<any>('chain:finished', () => { refresh(); });
+      }
+    };
+
+    setup();
+
+    return () => {
+      if (unlistenUpdate) unlistenUpdate();
+      if (unlistenStarted) unlistenStarted();
+      if (unlistenFinished) unlistenFinished();
+    };
+  }, []);
+
+  const hasActiveChain = activeChain?.chain_id != null;
+  const subtasks: any[] = activeChain?.subtasks || [];
+
+  // Group subtasks into columns
+  const columns = {
+    queued: subtasks.filter((s: any) => s.status === 'queued' || s.status === 'pending'),
+    running: subtasks.filter((s: any) => s.status === 'running' || s.status === 'in_progress'),
+    review: subtasks.filter((s: any) => s.status === 'review'),
+    done: subtasks.filter((s: any) => s.status === 'completed' || s.status === 'done' || s.status === 'failed'),
+  };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <Loader2 size={24} className="text-cyan animate-spin" />
+      <div className="p-6">
+        <p className="text-sm text-[#3D4F5F]">Loading board...</p>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="shrink-0 px-6 py-4 border-b border-[#1A1E26]">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-4">
-            <h1 className="text-[10px] uppercase tracking-[0.2em] font-semibold text-text-muted">
-              Task Board
-            </h1>
-            {chain && (
-              <div className="flex items-center gap-3">
-                <span className="text-sm font-medium text-text-primary truncate max-w-[400px]">
-                  {chain.original_task}
-                </span>
-                <span className={`inline-flex items-center rounded px-2 py-0.5 text-[10px] font-semibold uppercase ${STATUS_BADGE_STYLES[chain.status] ?? STATUS_BADGE_STYLES.queued}`}>
-                  {chain.status}
-                </span>
-                <span className="text-[11px] text-text-muted">
-                  {doneCount}/{totalCount} completed
-                </span>
-                <span className="flex items-center gap-1 text-[11px] font-mono text-text-muted">
-                  <Clock size={10} />
-                  {formatDuration(chain.elapsed_ms)}
-                </span>
-              </div>
-            )}
-          </div>
-
-          <div className="flex items-center gap-2">
-            {/* Filter placeholder */}
+    <div className="p-6 space-y-6 h-full flex flex-col">
+      {/* Header with tabs */}
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-bold text-[#E6EDF3]">Board</h1>
+        <div className="flex gap-1 rounded-lg border border-[#1A1E26] p-0.5">
+          {(['kanban', 'history'] as const).map((t) => (
             <button
-              type="button"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] text-text-secondary bg-bg-elevated border border-[#1A1E26] hover:border-cyan/20 transition-colors"
+              key={t}
+              onClick={() => setTab(t)}
+              className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                tab === t
+                  ? 'bg-[rgba(0,229,229,0.1)] text-[#00E5E5]'
+                  : 'text-[#3D4F5F] hover:text-[#C5D0DC]'
+              }`}
             >
-              Filter
-              <ChevronDown size={12} />
+              {t === 'kanban' ? 'Kanban' : 'History'}
             </button>
-
-            {/* View tabs */}
-            <div className="flex items-center rounded-lg bg-bg-elevated border border-[#1A1E26] p-0.5">
-              {VIEW_TABS.map((tab) => {
-                const Icon = tab.icon;
-                const active = view === tab.id;
-                return (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    onClick={() => setView(tab.id)}
-                    className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-medium transition-all duration-150
-                      ${active
-                        ? 'bg-[rgba(0,229,229,0.08)] text-cyan'
-                        : 'text-text-muted hover:text-text-secondary'
-                      }`}
-                  >
-                    <Icon size={12} />
-                    {tab.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+          ))}
         </div>
       </div>
 
-      {/* Kanban View */}
-      {view === 'kanban' && chain && (
-        <div className="flex-1 flex flex-col overflow-hidden">
-          {/* Kanban columns */}
-          <div className="flex-1 overflow-x-auto overflow-y-hidden">
-            <div className="flex gap-4 p-6 h-full min-w-max">
-              {columns.map((col) => (
-                <div key={col.key} className="w-[280px] flex flex-col shrink-0">
-                  {/* Column header */}
+      {tab === 'kanban' && (
+        <>
+          {!hasActiveChain && subtasks.length === 0 ? (
+            <EmptyState
+              icon={<LayoutDashboard size={48} />}
+              title="No active task chain"
+              description="Send a complex task from Chat and the agent will decompose it into subtasks visible here. Try: 'Research Rust vs Go, create a comparison, and write a summary.'"
+            />
+          ) : (
+            <div className="grid grid-cols-4 gap-4 flex-1 min-h-0">
+              {([
+                { key: 'queued' as const, label: 'QUEUED', color: '#3D4F5F' },
+                { key: 'running' as const, label: 'IN PROGRESS', color: '#00E5E5' },
+                { key: 'review' as const, label: 'REVIEW', color: '#F39C12' },
+                { key: 'done' as const, label: 'DONE', color: '#2ECC71' },
+              ]).map((col) => (
+                <div key={col.key} className="flex flex-col">
                   <div className="flex items-center gap-2 mb-3">
-                    <div className={`h-1.5 w-1.5 rounded-full ${col.accent}`} />
-                    <span className={`text-[10px] uppercase tracking-widest font-semibold ${col.color}`}>
+                    <div className="h-2 w-2 rounded-full" style={{ backgroundColor: col.color }} />
+                    <span className="text-[10px] font-bold tracking-widest text-[#3D4F5F] uppercase">
                       {col.label}
                     </span>
-                    <span className="text-[10px] text-text-dim font-mono">
-                      {col.tasks.length}
+                    <span className="text-[10px] text-[#3D4F5F]">
+                      {columns[col.key].length}
                     </span>
                   </div>
-
-                  {/* Cards */}
-                  <div className="flex-1 space-y-2 overflow-y-auto pr-1">
-                    {col.tasks.map((task) => (
-                      <TaskBoardCard
-                        key={task.id}
-                        subtask={task}
-                        allSubtasks={chain.subtasks}
-                      />
-                    ))}
-                    {col.tasks.length === 0 && (
-                      <div className="rounded-lg border border-dashed border-[#1A1E26] p-4 text-center">
-                        <p className="text-[11px] text-text-dim">No tasks</p>
+                  <div className="space-y-2 overflow-y-auto flex-1">
+                    {columns[col.key].map((task: any, i: number) => (
+                      <div
+                        key={task.id || i}
+                        className="rounded-lg border border-[#1A1E26] bg-[#0D1117] p-3 space-y-2"
+                      >
+                        <p className="text-sm font-medium text-[#E6EDF3] line-clamp-2">
+                          {task.description || task.label || `Subtask ${i + 1}`}
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${
+                            LEVEL_COLORS[task.agent_level?.toLowerCase()] || LEVEL_COLORS.junior
+                          }`}>
+                            {task.agent_level || 'Junior'}
+                          </span>
+                          <span className="text-[10px] text-[#3D4F5F]">
+                            {task.agent_name || 'Agent'}
+                          </span>
+                        </div>
+                        {task.model && (
+                          <p className="text-[10px] text-[#3D4F5F] font-mono">{task.model}</p>
+                        )}
+                        {task.progress != null && task.progress > 0 && (
+                          <div className="h-1 rounded-full bg-[#1A1E26] overflow-hidden">
+                            <div
+                              className="h-full rounded-full bg-[#00E5E5]"
+                              style={{ width: `${task.progress * 100}%` }}
+                            />
+                          </div>
+                        )}
+                        {task.message && (
+                          <p className="text-[10px] text-[#3D4F5F] truncate">{task.message}</p>
+                        )}
                       </div>
-                    )}
+                    ))}
                   </div>
                 </div>
               ))}
             </div>
-          </div>
+          )}
 
-          {/* Failed tasks row */}
-          {failedTasks.length > 0 && (
-            <div className="shrink-0 px-6 pb-2">
-              <div className="flex items-center gap-2 mb-2">
-                <XCircle size={12} className="text-error" />
-                <span className="text-[10px] uppercase tracking-widest font-semibold text-error">
-                  Failed
-                </span>
-                <span className="text-[10px] text-text-dim font-mono">{failedTasks.length}</span>
+          {/* Agent Log panel */}
+          {(activeChain?.log?.length > 0) && (
+            <Card header="Agent Log">
+              <div className="space-y-1 max-h-[200px] overflow-y-auto">
+                {(activeChain.log as any[]).map((event: any, i: number) => {
+                  const Icon = EVENT_ICONS[event.event_type] || Clock;
+                  return (
+                    <div key={i} className="flex items-start gap-2 text-[11px] py-1">
+                      <span className="text-[#3D4F5F] font-mono shrink-0">
+                        {new Date(event.timestamp).toLocaleTimeString()}
+                      </span>
+                      <Icon size={12} className={`shrink-0 mt-0.5 ${
+                        event.event_type === 'complete' ? 'text-[#2ECC71]' :
+                        event.event_type === 'error' ? 'text-[#E74C3C]' :
+                        'text-[#3D4F5F]'
+                      }`} />
+                      <span className="text-[#C5D0DC] font-medium">
+                        {event.agent_name}
+                      </span>
+                      <span className="text-[#C5D0DC]">{event.message}</span>
+                    </div>
+                  );
+                })}
               </div>
-              <div className="flex gap-2 overflow-x-auto pb-1">
-                {failedTasks.map((task) => (
-                  <div key={task.id} className="w-[280px] shrink-0">
-                    <TaskBoardCard subtask={task} allSubtasks={chain.subtasks} />
+            </Card>
+          )}
+        </>
+      )}
+
+      {tab === 'history' && (
+        <Card header="Chain History">
+          {history.length === 0 ? (
+            <p className="text-sm text-[#3D4F5F] py-4 text-center">
+              No completed task chains yet.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {history.map((chain) => (
+                <div
+                  key={chain.chain_id}
+                  className="flex items-center justify-between py-3 px-2 rounded-lg
+                    hover:bg-[rgba(0,229,229,0.04)] transition-colors"
+                >
+                  <div>
+                    <p className="text-sm font-medium text-[#E6EDF3] font-mono">
+                      {chain.chain_id.substring(0, 8)}...
+                    </p>
+                    <p className="text-[10px] text-[#3D4F5F] mt-0.5">
+                      {chain.event_count} events &middot; {chain.agents}
+                    </p>
                   </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Agent Log */}
-          <div className="shrink-0 h-[200px] border-t border-[#1A1E26] bg-bg-deep">
-            <AgentLogPanel log={chain.log} />
-          </div>
-
-          {/* User intervention input */}
-          <div className="shrink-0 px-6 py-3 border-t border-[#1A1E26] bg-bg-surface">
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                placeholder="Add context or instructions for the agents..."
-                className="flex-1 bg-bg-elevated text-[13px] text-text-primary placeholder-text-muted rounded-lg px-4 py-2.5 border border-[#1A1E26] focus:outline-none focus:border-cyan/30 transition-colors"
-              />
-              <button
-                type="button"
-                onClick={handleSend}
-                disabled={sending || !input.trim()}
-                className="p-2.5 rounded-lg bg-cyan/10 text-cyan hover:bg-cyan/20 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
-              >
-                {sending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Kanban view with no active chain */}
-      {view === 'kanban' && !chain && (
-        <div className="flex-1 flex flex-col items-center justify-center gap-4 px-6">
-          <div className="h-12 w-12 rounded-xl bg-cyan/10 flex items-center justify-center">
-            <Kanban size={24} className="text-cyan" />
-          </div>
-          <p className="text-sm text-text-secondary">No active chain running.</p>
-          <p className="text-[11px] text-text-muted">
-            Start a complex task from Chat to see it decomposed here.
-          </p>
-          <button
-            type="button"
-            onClick={() => setView('history')}
-            className="mt-2 px-4 py-2 rounded-lg text-[12px] font-medium text-cyan bg-cyan/10 hover:bg-cyan/15 transition-colors"
-          >
-            View History
-          </button>
-        </div>
-      )}
-
-      {/* History View */}
-      {view === 'history' && (
-        <div className="flex-1 overflow-y-auto p-6 space-y-2">
-          {history.length === 0 && (
-            <div className="flex flex-col items-center justify-center h-full gap-3">
-              <History size={24} className="text-text-muted" />
-              <p className="text-sm text-text-muted">No chain history yet.</p>
-            </div>
-          )}
-          {history.map((item) => (
-            <button
-              key={item.chain_id}
-              type="button"
-              className="w-full text-left flex items-center gap-4 px-4 py-3 rounded-lg bg-bg-surface border border-[#1A1E26] hover:border-cyan/15 hover:bg-bg-elevated transition-all group"
-            >
-              <Link2 size={14} className="text-text-dim shrink-0 group-hover:text-cyan transition-colors" />
-              <div className="flex-1 min-w-0">
-                <p className="text-[13px] font-medium text-text-primary truncate group-hover:text-cyan transition-colors">
-                  {item.task}
-                </p>
-                <div className="flex items-center gap-3 mt-1">
-                  <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase ${STATUS_BADGE_STYLES[item.status] ?? STATUS_BADGE_STYLES.queued}`}>
-                    {item.status}
-                  </span>
-                  <span className="text-[10px] text-text-muted">
-                    {item.completed_count}/{item.subtask_count} subtasks
-                  </span>
+                  <div className="text-right">
+                    <p className="text-[10px] text-[#3D4F5F]">
+                      {new Date(chain.started_at).toLocaleDateString()}
+                    </p>
+                  </div>
                 </div>
-              </div>
-              <div className="flex items-center gap-4 shrink-0">
-                <span className="flex items-center gap-1 text-[10px] font-mono text-text-muted">
-                  <DollarSign size={10} />
-                  {item.total_cost.toFixed(3)}
-                </span>
-                <span className="flex items-center gap-1 text-[10px] font-mono text-text-muted">
-                  <Clock size={10} />
-                  {formatDuration(item.duration_ms)}
-                </span>
-                <span className="text-[10px] text-text-dim">
-                  {formatDate(item.created_at)}
-                </span>
-              </div>
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* List View */}
-      {view === 'list' && chain && (
-        <div className="flex-1 overflow-y-auto p-6">
-          <div className="rounded-lg border border-[#1A1E26] overflow-hidden">
-            {/* List header */}
-            <div className="grid grid-cols-[1fr_100px_120px_100px_80px_80px] gap-2 px-4 py-2 bg-bg-elevated border-b border-[#1A1E26]">
-              <span className="text-[10px] uppercase tracking-widest text-text-muted font-semibold">Task</span>
-              <span className="text-[10px] uppercase tracking-widest text-text-muted font-semibold">Status</span>
-              <span className="text-[10px] uppercase tracking-widest text-text-muted font-semibold">Agent</span>
-              <span className="text-[10px] uppercase tracking-widest text-text-muted font-semibold">Level</span>
-              <span className="text-[10px] uppercase tracking-widest text-text-muted font-semibold text-right">Cost</span>
-              <span className="text-[10px] uppercase tracking-widest text-text-muted font-semibold text-right">Time</span>
+              ))}
             </div>
-            {chain.subtasks.map((task) => (
-              <div
-                key={task.id}
-                className="grid grid-cols-[1fr_100px_120px_100px_80px_80px] gap-2 px-4 py-2.5 border-b border-[#1A1E26] last:border-b-0 hover:bg-bg-elevated/50 transition-colors"
-              >
-                <span className="text-[12px] text-text-primary truncate">{task.description}</span>
-                <span>
-                  <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase ${STATUS_BADGE_STYLES[task.status] ?? STATUS_BADGE_STYLES.queued}`}>
-                    {task.status}
-                  </span>
-                </span>
-                <span className="text-[11px] text-text-secondary truncate">{task.agent_name ?? '-'}</span>
-                <span><AgentLevelBadge level={task.agent_level} /></span>
-                <span className="text-[11px] font-mono text-text-muted text-right">
-                  {task.cost > 0 ? `$${task.cost.toFixed(3)}` : '-'}
-                </span>
-                <span className="text-[11px] font-mono text-text-muted text-right">
-                  {task.duration_ms > 0 ? formatDuration(task.duration_ms) : '-'}
-                </span>
-              </div>
-            ))}
-          </div>
-
-          {/* Log below list */}
-          <div className="mt-4 h-[200px] rounded-lg border border-[#1A1E26] bg-bg-deep overflow-hidden">
-            <AgentLogPanel log={chain.log} />
-          </div>
-        </div>
-      )}
-
-      {/* List view with no active chain */}
-      {view === 'list' && !chain && (
-        <div className="flex-1 flex flex-col items-center justify-center gap-4 px-6">
-          <div className="h-12 w-12 rounded-xl bg-cyan/10 flex items-center justify-center">
-            <List size={24} className="text-cyan" />
-          </div>
-          <p className="text-sm text-text-secondary">No active chain to display in list view.</p>
-          <button
-            type="button"
-            onClick={() => setView('history')}
-            className="mt-2 px-4 py-2 rounded-lg text-[12px] font-medium text-cyan bg-cyan/10 hover:bg-cyan/15 transition-colors"
-          >
-            View History
-          </button>
-        </div>
+          )}
+        </Card>
       )}
     </div>
   );

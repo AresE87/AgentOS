@@ -65,7 +65,48 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
             CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks(created_at);
             CREATE INDEX IF NOT EXISTS idx_steps_task ON task_steps(task_id);
-            CREATE INDEX IF NOT EXISTS idx_llm_task ON llm_calls(task_id);",
+            CREATE INDEX IF NOT EXISTS idx_llm_task ON llm_calls(task_id);
+
+            CREATE TABLE IF NOT EXISTS chain_log (
+                id          TEXT PRIMARY KEY,
+                chain_id    TEXT NOT NULL,
+                timestamp   TEXT NOT NULL DEFAULT (datetime('now')),
+                agent_name  TEXT NOT NULL,
+                agent_level TEXT NOT NULL,
+                event_type  TEXT NOT NULL,
+                message     TEXT NOT NULL,
+                metadata    TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_chain_log_chain ON chain_log(chain_id);
+
+            CREATE TABLE IF NOT EXISTS chains (
+                id TEXT PRIMARY KEY,
+                original_task TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'running',
+                total_cost REAL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                completed_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS chain_subtasks (
+                id TEXT PRIMARY KEY,
+                chain_id TEXT NOT NULL,
+                seq INTEGER NOT NULL,
+                description TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'queued',
+                agent_name TEXT,
+                model TEXT,
+                progress REAL DEFAULT 0,
+                message TEXT DEFAULT '',
+                cost REAL DEFAULT 0,
+                duration_ms INTEGER DEFAULT 0,
+                output TEXT DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_chains_status ON chains(status);
+            CREATE INDEX IF NOT EXISTS idx_chain_subtasks_chain ON chain_subtasks(chain_id);",
         )
     }
 
@@ -221,6 +262,335 @@ impl Database {
         Ok(())
     }
 
+    pub fn get_usage_summary(&self) -> Result<Value, rusqlite::Error> {
+        let tasks_today: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM tasks WHERE date(created_at) = date('now')",
+            [],
+            |r| r.get(0),
+        )?;
+        let tokens_today: i64 = self.conn.query_row(
+            "SELECT COALESCE(SUM(tokens_in + tokens_out), 0) FROM tasks WHERE date(created_at) = date('now')",
+            [],
+            |r| r.get(0),
+        )?;
+        let cost_today: f64 = self.conn.query_row(
+            "SELECT COALESCE(SUM(cost), 0) FROM tasks WHERE date(created_at) = date('now')",
+            [],
+            |r| r.get(0),
+        )?;
+
+        Ok(json!({
+            "tasks_today": tasks_today,
+            "tokens_today": tokens_today,
+            "cost_today": cost_today,
+        }))
+    }
+
+    // ── Enhanced analytics ────────────────────────────────────
+
+    pub fn get_analytics_by_period(&self, period: &str) -> Result<Value, rusqlite::Error> {
+        let date_filter = match period {
+            "today" => "date(created_at) = date('now')",
+            "this_week" => "date(created_at) >= date('now', '-7 days')",
+            "this_month" => "date(created_at) >= date('now', '-30 days')",
+            _ => "1=1", // all time
+        };
+
+        let total: i64 = self.conn.query_row(
+            &format!("SELECT COUNT(*) FROM tasks WHERE {}", date_filter), [], |r| r.get(0))?;
+        let completed: i64 = self.conn.query_row(
+            &format!("SELECT COUNT(*) FROM tasks WHERE status='completed' AND {}", date_filter), [], |r| r.get(0))?;
+        let failed: i64 = self.conn.query_row(
+            &format!("SELECT COUNT(*) FROM tasks WHERE status='failed' AND {}", date_filter), [], |r| r.get(0))?;
+        let total_cost: f64 = self.conn.query_row(
+            &format!("SELECT COALESCE(SUM(cost), 0) FROM tasks WHERE {}", date_filter), [], |r| r.get(0))?;
+        let total_tokens: i64 = self.conn.query_row(
+            &format!("SELECT COALESCE(SUM(tokens_in + tokens_out), 0) FROM tasks WHERE {}", date_filter), [], |r| r.get(0))?;
+        let avg_latency: f64 = self.conn.query_row(
+            &format!("SELECT COALESCE(AVG(duration_ms), 0) FROM tasks WHERE {}", date_filter), [], |r| r.get(0))?;
+
+        let success_rate = if total > 0 { (completed as f64 / total as f64) * 100.0 } else { 0.0 };
+
+        // Cost by provider
+        let mut stmt = self.conn.prepare(
+            &format!("SELECT COALESCE(provider, 'unknown'), SUM(cost) FROM tasks WHERE {} GROUP BY provider", date_filter))?;
+        let cost_by_provider: Vec<Value> = stmt.query_map([], |row| {
+            Ok(json!({ "provider": row.get::<_, String>(0)?, "cost": row.get::<_, f64>(1)? }))
+        })?.filter_map(|r| r.ok()).collect();
+
+        // Tasks by day (last 7 days)
+        let mut stmt = self.conn.prepare(
+            "SELECT date(created_at) as day, COUNT(*) as count
+             FROM tasks WHERE date(created_at) >= date('now', '-7 days')
+             GROUP BY date(created_at) ORDER BY day")?;
+        let daily_tasks: Vec<Value> = stmt.query_map([], |row| {
+            Ok(json!({ "day": row.get::<_, String>(0)?, "tasks": row.get::<_, i32>(1)? }))
+        })?.filter_map(|r| r.ok()).collect();
+
+        // Tasks by type
+        let mut stmt = self.conn.prepare(
+            &format!("SELECT COALESCE(task_type, 'unknown'), COUNT(*) FROM tasks WHERE {} GROUP BY task_type", date_filter))?;
+        let tasks_by_type: Vec<Value> = stmt.query_map([], |row| {
+            Ok(json!({ "name": row.get::<_, String>(0)?, "value": row.get::<_, i32>(1)? }))
+        })?.filter_map(|r| r.ok()).collect();
+
+        Ok(json!({
+            "total_tasks": total,
+            "completed": completed,
+            "failed": failed,
+            "success_rate": success_rate,
+            "total_cost": total_cost,
+            "total_tokens": total_tokens,
+            "avg_latency_ms": avg_latency,
+            "cost_by_provider": cost_by_provider,
+            "daily_tasks": daily_tasks,
+            "tasks_by_type": tasks_by_type,
+        }))
+    }
+
+    /// Find repeated tasks (same input seen >= threshold times in last N days)
+    pub fn get_repeated_tasks(&self, days: i32, threshold: i32) -> Result<Value, rusqlite::Error> {
+        let mut stmt = self.conn.prepare(
+            "SELECT input_text, COUNT(*) as cnt
+             FROM tasks
+             WHERE date(created_at) >= date('now', ?1)
+             GROUP BY input_text
+             HAVING cnt >= ?2
+             ORDER BY cnt DESC
+             LIMIT 5")?;
+
+        let repeated: Vec<Value> = stmt.query_map(
+            params![format!("-{} days", days), threshold],
+            |row| {
+                Ok(json!({
+                    "input": row.get::<_, String>(0)?,
+                    "count": row.get::<_, i32>(1)?,
+                }))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(json!(repeated))
+    }
+
+    // ── Chain log methods ─────────────────────────────────────
+
+    pub fn insert_chain_event(
+        &self,
+        chain_id: &str,
+        agent_name: &str,
+        agent_level: &str,
+        event_type: &str,
+        message: &str,
+        metadata: Option<&str>,
+    ) -> Result<(), rusqlite::Error> {
+        let id = uuid::Uuid::new_v4().to_string();
+        self.conn.execute(
+            "INSERT INTO chain_log (id, chain_id, agent_name, agent_level, event_type, message, metadata)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![id, chain_id, agent_name, agent_level, event_type, message, metadata],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_chain_log(&self, chain_id: &str) -> Result<Value, rusqlite::Error> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, timestamp, agent_name, agent_level, event_type, message, metadata
+             FROM chain_log WHERE chain_id = ?1 ORDER BY timestamp ASC",
+        )?;
+
+        let events: Vec<Value> = stmt
+            .query_map(params![chain_id], |row| {
+                Ok(json!({
+                    "id": row.get::<_, String>(0)?,
+                    "timestamp": row.get::<_, String>(1)?,
+                    "agent_name": row.get::<_, String>(2)?,
+                    "agent_level": row.get::<_, String>(3)?,
+                    "event_type": row.get::<_, String>(4)?,
+                    "message": row.get::<_, String>(5)?,
+                    "metadata": row.get::<_, Option<String>>(6)?,
+                }))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(json!(events))
+    }
+
+    pub fn get_recent_chains(&self, limit: u32) -> Result<Value, rusqlite::Error> {
+        // Get unique chain_ids from chain_log, most recent first
+        let mut stmt = self.conn.prepare(
+            "SELECT chain_id, MIN(timestamp) as started, MAX(timestamp) as ended,
+                    COUNT(*) as event_count,
+                    GROUP_CONCAT(DISTINCT agent_name) as agents
+             FROM chain_log
+             GROUP BY chain_id
+             ORDER BY started DESC
+             LIMIT ?1",
+        )?;
+
+        let chains: Vec<Value> = stmt
+            .query_map(params![limit], |row| {
+                Ok(json!({
+                    "chain_id": row.get::<_, String>(0)?,
+                    "started_at": row.get::<_, String>(1)?,
+                    "ended_at": row.get::<_, String>(2)?,
+                    "event_count": row.get::<_, i32>(3)?,
+                    "agents": row.get::<_, String>(4)?,
+                }))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(json!(chains))
+    }
+
+    pub fn insert_llm_call(
+        &self,
+        task_id: &str,
+        provider: &str,
+        model: &str,
+        tokens_in: u32,
+        tokens_out: u32,
+        cost: f64,
+        latency_ms: u64,
+    ) -> Result<(), rusqlite::Error> {
+        let call_id = uuid::Uuid::new_v4().to_string();
+        self.conn.execute(
+            "INSERT INTO llm_calls (id, task_id, provider, model, tokens_in, tokens_out, cost, latency_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![call_id, task_id, provider, model, tokens_in, tokens_out, cost, latency_ms as i64],
+        )?;
+        Ok(())
+    }
+
+    // ── Chain orchestrator methods ─────────────────────────────
+
+    pub fn create_chain(&self, chain_id: &str, original_task: &str) -> Result<(), rusqlite::Error> {
+        self.conn.execute(
+            "INSERT INTO chains (id, original_task, status) VALUES (?1, ?2, 'running')",
+            params![chain_id, original_task],
+        )?;
+        Ok(())
+    }
+
+    pub fn insert_chain_subtask(
+        &self,
+        id: &str,
+        chain_id: &str,
+        seq: i32,
+        description: &str,
+    ) -> Result<(), rusqlite::Error> {
+        self.conn.execute(
+            "INSERT INTO chain_subtasks (id, chain_id, seq, description, status)
+             VALUES (?1, ?2, ?3, ?4, 'queued')",
+            params![id, chain_id, seq, description],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_chain_subtasks(&self, chain_id: &str) -> Result<Value, rusqlite::Error> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, chain_id, seq, description, status, agent_name, model, progress, message, cost, duration_ms, output, created_at
+             FROM chain_subtasks WHERE chain_id = ?1 ORDER BY seq ASC",
+        )?;
+
+        let subtasks: Vec<Value> = stmt
+            .query_map(params![chain_id], |row| {
+                Ok(json!({
+                    "id": row.get::<_, String>(0)?,
+                    "chain_id": row.get::<_, String>(1)?,
+                    "seq": row.get::<_, i32>(2)?,
+                    "description": row.get::<_, String>(3)?,
+                    "status": row.get::<_, String>(4)?,
+                    "agent_name": row.get::<_, Option<String>>(5)?,
+                    "model": row.get::<_, Option<String>>(6)?,
+                    "progress": row.get::<_, f64>(7)?,
+                    "message": row.get::<_, Option<String>>(8)?,
+                    "cost": row.get::<_, f64>(9)?,
+                    "duration_ms": row.get::<_, i64>(10)?,
+                    "output": row.get::<_, Option<String>>(11)?,
+                    "created_at": row.get::<_, String>(12)?,
+                }))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(json!(subtasks))
+    }
+
+    pub fn update_subtask_status(
+        &self,
+        subtask_id: &str,
+        status: &str,
+        message: &str,
+        output: &str,
+        cost: f64,
+        duration_ms: u64,
+        agent_name: &str,
+        model: &str,
+    ) -> Result<(), rusqlite::Error> {
+        self.conn.execute(
+            "UPDATE chain_subtasks SET status = ?2, message = ?3, output = ?4, cost = ?5,
+             duration_ms = ?6, agent_name = ?7, model = ?8,
+             progress = CASE WHEN ?2 = 'done' THEN 1.0 WHEN ?2 = 'running' THEN 0.5 ELSE 0.0 END
+             WHERE id = ?1",
+            params![subtask_id, status, message, output, cost, duration_ms as i64, agent_name, model],
+        )?;
+        Ok(())
+    }
+
+    pub fn complete_chain(&self, chain_id: &str, total_cost: f64) -> Result<(), rusqlite::Error> {
+        self.conn.execute(
+            "UPDATE chains SET status = 'completed', total_cost = ?2, completed_at = datetime('now') WHERE id = ?1",
+            params![chain_id, total_cost],
+        )?;
+        Ok(())
+    }
+
+    pub fn query_active_chain(&self) -> Result<Option<Value>, rusqlite::Error> {
+        // First try running chains
+        let result = self.conn.query_row(
+            "SELECT id, original_task, status, total_cost, created_at FROM chains WHERE status = 'running' ORDER BY created_at DESC LIMIT 1",
+            [],
+            |row| {
+                Ok(json!({
+                    "id": row.get::<_, String>(0)?,
+                    "original_task": row.get::<_, String>(1)?,
+                    "status": row.get::<_, String>(2)?,
+                    "total_cost": row.get::<_, f64>(3)?,
+                    "created_at": row.get::<_, String>(4)?,
+                }))
+            },
+        );
+
+        match result {
+            Ok(chain) => Ok(Some(chain)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                // Fall back to most recent completed chain
+                let result = self.conn.query_row(
+                    "SELECT id, original_task, status, total_cost, created_at FROM chains ORDER BY created_at DESC LIMIT 1",
+                    [],
+                    |row| {
+                        Ok(json!({
+                            "id": row.get::<_, String>(0)?,
+                            "original_task": row.get::<_, String>(1)?,
+                            "status": row.get::<_, String>(2)?,
+                            "total_cost": row.get::<_, f64>(3)?,
+                            "created_at": row.get::<_, String>(4)?,
+                        }))
+                    },
+                );
+                match result {
+                    Ok(chain) => Ok(Some(chain)),
+                    Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+                    Err(e) => Err(e),
+                }
+            }
+            Err(e) => Err(e),
+        }
+    }
+
     pub fn get_task_steps(&self, task_id: &str) -> Result<Value, rusqlite::Error> {
         let mut stmt = self.conn.prepare(
             "SELECT step_number, action_type, description, screenshot_path, execution_method, success, duration_ms, created_at
@@ -244,5 +614,215 @@ impl Database {
             .collect();
 
         Ok(json!(steps))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use tempfile::NamedTempFile;
+
+    fn temp_db() -> (Database, PathBuf) {
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path().to_path_buf();
+        // Close the temp file so SQLite can open it
+        drop(tmp);
+        let db = Database::new(&path).unwrap();
+        (db, path)
+    }
+
+    fn sample_response(task_id: &str) -> LLMResponse {
+        LLMResponse {
+            task_id: task_id.to_string(),
+            content: "Hello, world!".to_string(),
+            model: "anthropic/haiku".to_string(),
+            provider: "anthropic".to_string(),
+            tokens_in: 10,
+            tokens_out: 20,
+            cost: 0.001,
+            duration_ms: 500,
+        }
+    }
+
+    // ── Migration ──────────────────────────────────────────────
+
+    #[test]
+    fn migration_creates_tables() {
+        let (db, _) = temp_db();
+        // If we got here without error, tables were created
+        // Verify by inserting and querying
+        let tasks = db.get_tasks(10).unwrap();
+        let arr = tasks.as_array().unwrap();
+        assert_eq!(arr.len(), 0);
+    }
+
+    #[test]
+    fn migration_is_idempotent() {
+        let (db, path) = temp_db();
+        // Opening again runs migrate() again — should not error
+        let _db2 = Database::new(&path).unwrap();
+        let tasks = db.get_tasks(10).unwrap();
+        assert!(tasks.as_array().unwrap().is_empty());
+    }
+
+    // ── Insert and retrieve task ───────────────────────────────
+
+    #[test]
+    fn insert_task_and_get_by_list() {
+        let (db, _) = temp_db();
+        let resp = sample_response("task_001");
+        db.insert_task("hello", &resp).unwrap();
+
+        let tasks = db.get_tasks(10).unwrap();
+        let arr = tasks.as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["task_id"], "task_001");
+        assert_eq!(arr[0]["input"], "hello");
+        assert_eq!(arr[0]["output"], "Hello, world!");
+        assert_eq!(arr[0]["status"], "completed");
+        assert_eq!(arr[0]["model"], "anthropic/haiku");
+        assert_eq!(arr[0]["provider"], "anthropic");
+    }
+
+    #[test]
+    fn get_tasks_respects_limit() {
+        let (db, _) = temp_db();
+        for i in 0..5 {
+            let resp = sample_response(&format!("task_{}", i));
+            db.insert_task(&format!("input {}", i), &resp).unwrap();
+        }
+        let tasks = db.get_tasks(3).unwrap();
+        assert_eq!(tasks.as_array().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn get_tasks_ordered_by_created_desc() {
+        let (db, _) = temp_db();
+        for i in 0..3 {
+            let resp = sample_response(&format!("task_{}", i));
+            db.insert_task(&format!("input {}", i), &resp).unwrap();
+        }
+        let tasks = db.get_tasks(10).unwrap();
+        let arr = tasks.as_array().unwrap();
+        // Last inserted should be first (DESC order)
+        assert_eq!(arr[0]["task_id"], "task_2");
+    }
+
+    // ── Pending task lifecycle ──────────────────────────────────
+
+    #[test]
+    fn create_pending_and_update_status() {
+        let (db, _) = temp_db();
+        db.create_task_pending("task_p1", "do something").unwrap();
+
+        let tasks = db.get_tasks(10).unwrap();
+        let arr = tasks.as_array().unwrap();
+        assert_eq!(arr[0]["status"], "running");
+
+        db.update_task_status("task_p1", "completed").unwrap();
+        let tasks = db.get_tasks(10).unwrap();
+        let arr = tasks.as_array().unwrap();
+        assert_eq!(arr[0]["status"], "completed");
+    }
+
+    #[test]
+    fn update_task_output() {
+        let (db, _) = temp_db();
+        db.create_task_pending("task_p2", "do another thing").unwrap();
+        db.update_task_output("task_p2", "Result: success").unwrap();
+
+        let tasks = db.get_tasks(10).unwrap();
+        let arr = tasks.as_array().unwrap();
+        assert_eq!(arr[0]["output"], "Result: success");
+    }
+
+    // ── Task steps ─────────────────────────────────────────────
+
+    #[test]
+    fn insert_and_get_task_steps() {
+        let (db, _) = temp_db();
+        db.create_task_pending("task_s1", "multi-step task").unwrap();
+
+        db.insert_task_step("task_s1", 1, "run_command", "echo hi", "", "terminal", true, 100).unwrap();
+        db.insert_task_step("task_s1", 2, "click", "click button", "", "screen", true, 50).unwrap();
+
+        let steps = db.get_task_steps("task_s1").unwrap();
+        let arr = steps.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0]["step_number"], 1);
+        assert_eq!(arr[0]["action_type"], "run_command");
+        assert_eq!(arr[0]["success"], true);
+        assert_eq!(arr[1]["step_number"], 2);
+        assert_eq!(arr[1]["action_type"], "click");
+    }
+
+    #[test]
+    fn steps_ordered_by_step_number() {
+        let (db, _) = temp_db();
+        db.create_task_pending("task_s2", "ordered steps").unwrap();
+        // Insert out of order
+        db.insert_task_step("task_s2", 3, "type", "typing", "", "screen", true, 30).unwrap();
+        db.insert_task_step("task_s2", 1, "click", "first click", "", "screen", true, 10).unwrap();
+        db.insert_task_step("task_s2", 2, "run_command", "cmd", "", "terminal", true, 20).unwrap();
+
+        let steps = db.get_task_steps("task_s2").unwrap();
+        let arr = steps.as_array().unwrap();
+        assert_eq!(arr[0]["step_number"], 1);
+        assert_eq!(arr[1]["step_number"], 2);
+        assert_eq!(arr[2]["step_number"], 3);
+    }
+
+    // ── Analytics ──────────────────────────────────────────────
+
+    #[test]
+    fn analytics_empty_db() {
+        let (db, _) = temp_db();
+        let a = db.get_analytics().unwrap();
+        assert_eq!(a["total_tasks"], 0);
+        assert_eq!(a["success_rate"], 0.0);
+        assert_eq!(a["total_cost"], 0.0);
+        assert_eq!(a["total_tokens"], 0);
+    }
+
+    #[test]
+    fn analytics_with_tasks() {
+        let (db, _) = temp_db();
+        let r1 = LLMResponse {
+            task_id: "t1".into(), content: "ok".into(), model: "haiku".into(),
+            provider: "anthropic".into(), tokens_in: 100, tokens_out: 200,
+            cost: 0.01, duration_ms: 500,
+        };
+        let r2 = LLMResponse {
+            task_id: "t2".into(), content: "ok".into(), model: "haiku".into(),
+            provider: "anthropic".into(), tokens_in: 50, tokens_out: 150,
+            cost: 0.005, duration_ms: 300,
+        };
+        db.insert_task("hello", &r1).unwrap();
+        db.insert_task("world", &r2).unwrap();
+
+        // Add a failed task
+        db.create_task_pending("t3", "fail task").unwrap();
+        db.update_task_status("t3", "failed").unwrap();
+
+        let a = db.get_analytics().unwrap();
+        assert_eq!(a["total_tasks"], 3);
+        // 2 completed out of 3
+        let rate = a["success_rate"].as_f64().unwrap();
+        assert!((rate - 66.666).abs() < 1.0);
+        let cost = a["total_cost"].as_f64().unwrap();
+        assert!((cost - 0.015).abs() < 0.001);
+        assert_eq!(a["total_tokens"], 500); // 100+200+50+150
+    }
+
+    // ── LLM calls ──────────────────────────────────────────────
+
+    #[test]
+    fn insert_llm_call() {
+        let (db, _) = temp_db();
+        db.create_task_pending("t_llm", "test llm").unwrap();
+        db.insert_llm_call("t_llm", "anthropic", "haiku", 100, 200, 0.01, 500).unwrap();
+        // No panic = success. The llm_calls table is not directly queried in the current API,
+        // but insert_task already creates one, so we verify it doesn't error.
     }
 }

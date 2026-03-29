@@ -60,6 +60,57 @@ async fn cmd_process_message(
     // Detect if this is a PC action task (open apps, calculate, install, navigate, etc.)
     // These need the full pipeline engine with vision, not a simple chat response
     let lower = text.to_lowercase();
+
+    // ── R12: Detect complex tasks that need chain decomposition ──
+    let is_complex = is_complex_task(&lower);
+
+    if is_complex {
+        tracing::info!("Routing to chain orchestrator: {}", &text[..text.len().min(80)]);
+        let chain_id = uuid::Uuid::new_v4().to_string();
+
+        // Create chain in DB
+        {
+            let db = state.db.lock().map_err(|e| e.to_string())?;
+            db.create_chain(&chain_id, &text).map_err(|e| e.to_string())?;
+        }
+
+        // Decompose
+        let subtasks = pipeline::engine::decompose_task(&text, &settings).await
+            .map_err(|e| e.to_string())?;
+
+        let kill_switch = state.kill_switch.clone();
+        let db_path = state.db_path.clone();
+        let cid = chain_id.clone();
+        let desc = text.clone();
+
+        // Spawn chain execution in background
+        tauri::async_runtime::spawn(async move {
+            let result = pipeline::orchestrator::execute_chain(
+                &cid, &desc, subtasks, &settings, &kill_switch,
+                &db_path, &app_handle,
+            ).await;
+
+            match result {
+                Ok(_output) => {
+                    tracing::info!(chain_id = %cid, "Chain completed successfully");
+                }
+                Err(e) => {
+                    tracing::warn!(chain_id = %cid, error = %e, "Chain failed");
+                }
+            }
+        });
+
+        return Ok(serde_json::json!({
+            "task_id": chain_id,
+            "status": "running",
+            "output": "Complex task started — check the Board for progress...",
+            "model": "chain",
+            "cost": 0.0,
+            "duration_ms": 0,
+            "agent": "Orchestrator",
+        }));
+    }
+
     let is_pc_task = is_pc_action_task(&lower);
 
     if is_pc_task {
@@ -164,6 +215,32 @@ fn is_pc_action_task(text: &str) -> bool {
         "configura", "settings",
     ];
     action_patterns.iter().any(|p| text.contains(p))
+}
+
+/// Detect complex tasks that should be decomposed into a chain of subtasks.
+/// Requires at least 2 multi-step indicators, or 1 indicator with a long prompt.
+fn is_complex_task(text: &str) -> bool {
+    // Skip if it looks like a PC action task — those go through the pipeline engine
+    if is_pc_action_task(text) {
+        return false;
+    }
+
+    let multi_step_patterns = [
+        " y luego ", " y después ", " y despues ",
+        " and then ", " after that ",
+        " primero ", " first ",
+        "investiga", "investigate", "research",
+        "compará", "compara", "compare",
+        "analizá", "analiza", "analyze",
+        "hacé un reporte", "write a report", "create a report",
+        "revisá", "review and",
+        "resumí", "resumen", "summarize", "summary",
+        "evalua", "evaluate",
+    ];
+
+    let matches = multi_step_patterns.iter().filter(|p| text.contains(**p)).count();
+    // Need at least 2 indicators to be considered complex, OR very long text with 1 indicator
+    matches >= 2 || (text.split_whitespace().count() > 25 && matches >= 1)
 }
 
 #[tauri::command]
@@ -470,18 +547,39 @@ async fn cmd_delete_playbook(
 }
 
 #[tauri::command]
-async fn cmd_get_active_chain() -> Result<serde_json::Value, String> {
-    // Active chain state is tracked in-memory via events
-    // For now return idle — the frontend listens to chain_update events
-    Ok(serde_json::json!({
-        "chain_id": null,
-        "original_task": null,
-        "status": "idle",
-        "subtasks": [],
-        "log": [],
-        "total_cost": 0,
-        "elapsed_ms": 0,
-    }))
+async fn cmd_get_active_chain(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+
+    // Find the most recent chain (running first, then any)
+    let chain = db.query_active_chain().map_err(|e| e.to_string())?;
+
+    if let Some(chain) = chain {
+        let chain_id = chain["id"].as_str().unwrap_or_default().to_string();
+        let subtasks = db.get_chain_subtasks(&chain_id).map_err(|e| e.to_string())?;
+        let log = db.get_chain_log(&chain_id).map_err(|e| e.to_string())?;
+
+        Ok(serde_json::json!({
+            "chain_id": chain["id"],
+            "original_task": chain["original_task"],
+            "status": chain["status"],
+            "subtasks": subtasks,
+            "log": log,
+            "total_cost": chain["total_cost"],
+            "elapsed_ms": 0,
+        }))
+    } else {
+        Ok(serde_json::json!({
+            "chain_id": null,
+            "original_task": null,
+            "status": "idle",
+            "subtasks": [],
+            "log": [],
+            "total_cost": 0,
+            "elapsed_ms": 0,
+        }))
+    }
 }
 
 #[tauri::command]
