@@ -166,13 +166,16 @@ async fn cmd_process_message(
 
     // Regular chat path for non-PC tasks
     let registry = agents::AgentRegistry::new();
-    let agent = registry.find_best(&text);
+
+    // Use async agent selection with LLM fallback for weak keyword matches
+    let gateway = state.gateway.lock().await;
+    let agent = registry.find_best_async(&text, &gateway, &settings).await;
     let agent_name = agent.name.clone();
+    let agent_level = format!("{:?}", agent.level);
     let system_prompt = agent.system_prompt.clone();
 
-    tracing::info!(agent = %agent_name, "Selected agent for task");
+    tracing::info!(agent = %agent_name, level = %agent_level, "Selected agent for task");
 
-    let gateway = state.gateway.lock().await;
     let response = gateway
         .complete_with_system(&text, Some(&system_prompt), &settings)
         .await
@@ -193,7 +196,7 @@ async fn cmd_process_message(
         "model": response.model,
         "cost": response.cost,
         "duration_ms": response.duration_ms,
-        "agent": agent_name,
+        "agent": format!("{} ({})", agent_name, agent_level),
     }))
 }
 
@@ -755,12 +758,14 @@ async fn cmd_get_agents() -> Result<serde_json::Value, String> {
 #[tauri::command]
 async fn cmd_find_agent(task: String) -> Result<serde_json::Value, String> {
     let registry = agents::AgentRegistry::new();
-    let agent = registry.find_best(&task);
+    let (agent, score) = registry.find_best_scored(&task);
     Ok(serde_json::json!({
         "name": agent.name,
         "category": agent.category,
         "level": format!("{:?}", agent.level),
         "system_prompt": agent.system_prompt,
+        "match_score": score,
+        "display_name": format!("{} ({})", agent.name, format!("{:?}", agent.level)),
     }))
 }
 

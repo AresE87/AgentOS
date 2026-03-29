@@ -63,7 +63,7 @@ pub async fn execute_chain(
         // Find best agent for this subtask
         let registry = agents::AgentRegistry::new();
         let agent = registry.find_best(desc);
-        let agent_name = agent.name.clone();
+        let agent_name = format!("{} ({:?})", agent.name, agent.level);
         let agent_system_prompt = agent.system_prompt.clone();
 
         info!(chain_id, subtask_id = %subtask_id, agent = %agent_name, "Executing subtask");
