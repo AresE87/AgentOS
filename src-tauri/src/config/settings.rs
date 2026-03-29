@@ -25,6 +25,8 @@ pub struct Settings {
     pub screenshot_quality: u8,
     #[serde(default)]
     pub pc_control_enabled: bool,
+    #[serde(default = "default_plan_type")]
+    pub plan_type: String,
 
     #[serde(skip)]
     config_path: PathBuf,
@@ -47,6 +49,9 @@ fn default_input_delay() -> u64 {
 }
 fn default_screenshot_quality() -> u8 {
     80
+}
+fn default_plan_type() -> String {
+    "free".to_string()
 }
 
 impl Settings {
@@ -103,6 +108,11 @@ impl Settings {
             "pc_control_enabled" => {
                 self.pc_control_enabled = value == "true" || value == "1";
             }
+            "plan_type" => {
+                if matches!(value, "free" | "pro" | "team") {
+                    self.plan_type = value.to_string();
+                }
+            }
             _ => {}
         }
     }
@@ -134,6 +144,7 @@ impl Settings {
             "has_openai": !self.openai_api_key.is_empty(),
             "has_google": !self.google_api_key.is_empty(),
             "has_telegram": !self.telegram_bot_token.is_empty(),
+            "plan_type": self.plan_type,
         })
     }
 }
@@ -260,6 +271,7 @@ impl Default for Settings {
             input_delay_ms: default_input_delay(),
             screenshot_quality: default_screenshot_quality(),
             pc_control_enabled: false,
+            plan_type: default_plan_type(),
             config_path: PathBuf::new(),
         }
     }

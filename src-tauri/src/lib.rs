@@ -1,5 +1,6 @@
 pub mod agents;
 pub mod automation;
+pub mod billing;
 pub mod brain;
 mod channels;
 pub mod config;
@@ -63,6 +64,28 @@ async fn cmd_process_message(
         let s = state.settings.lock().map_err(|e| e.to_string())?;
         s.clone()
     };
+
+    // ── R23: Billing — enforce plan limits ─────────────────────
+    {
+        let plan_type = match settings.plan_type.as_str() {
+            "pro" => billing::PlanType::Pro,
+            "team" => billing::PlanType::Team,
+            _ => billing::PlanType::Free,
+        };
+        let plan = billing::Plan::from_type(&plan_type);
+        let limiter = billing::UsageLimiter::new(plan);
+
+        let (tasks_today, tokens_today) = {
+            let db = state.db.lock().map_err(|e| e.to_string())?;
+            let summary = db.get_usage_summary().map_err(|e| e.to_string())?;
+            let t = summary["tasks_today"].as_i64().unwrap_or(0) as u32;
+            let tk = summary["tokens_today"].as_i64().unwrap_or(0) as u64;
+            (t, tk)
+        };
+
+        limiter.can_run_task(tasks_today)?;
+        limiter.can_use_tokens(tokens_today)?;
+    }
 
     // Detect if this is a PC action task (open apps, calculate, install, navigate, etc.)
     // These need the full pipeline engine with vision, not a simple chat response
@@ -1072,6 +1095,90 @@ async fn cmd_vault_migrate(
     Ok(serde_json::json!({ "ok": true, "migrated": count }))
 }
 
+// ── R23: Billing commands ────────────────────────────────────
+
+#[tauri::command]
+async fn cmd_get_plan(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let plan_str = {
+        let s = state.settings.lock().map_err(|e| e.to_string())?;
+        s.plan_type.clone()
+    };
+    let plan_type = match plan_str.as_str() {
+        "pro" => billing::PlanType::Pro,
+        "team" => billing::PlanType::Team,
+        _ => billing::PlanType::Free,
+    };
+    let plan = billing::Plan::from_type(&plan_type);
+
+    let (tasks_today, tokens_today, cost_today) = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let s = db.get_usage_summary().map_err(|e| e.to_string())?;
+        (
+            s["tasks_today"].as_i64().unwrap_or(0),
+            s["tokens_today"].as_i64().unwrap_or(0),
+            s["cost_today"].as_f64().unwrap_or(0.0),
+        )
+    };
+
+    let tasks_limit = if plan.tasks_per_day == u32::MAX { serde_json::Value::Null } else { serde_json::json!(plan.tasks_per_day) };
+    let tokens_limit = if plan.tokens_per_day == u64::MAX { serde_json::Value::Null } else { serde_json::json!(plan.tokens_per_day) };
+
+    Ok(serde_json::json!({
+        "plan_type": plan_str,
+        "display_name": plan.display_name(),
+        "limits": {
+            "tasks_per_day": tasks_limit,
+            "tokens_per_day": tokens_limit,
+            "mesh_nodes": plan.mesh_nodes,
+            "can_use_triggers": plan.can_use_triggers,
+            "can_use_marketplace": plan.can_use_marketplace,
+        },
+        "usage": {
+            "tasks_today": tasks_today,
+            "tokens_today": tokens_today,
+            "cost_today": cost_today,
+        }
+    }))
+}
+
+#[tauri::command]
+async fn cmd_get_checkout_url(
+    plan: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    // Use a placeholder email; a real implementation would pull from account info
+    let _ = state;
+    let url = billing::stripe::get_checkout_url(&plan, "user@example.com");
+    Ok(serde_json::json!({ "url": url, "plan": plan }))
+}
+
+#[tauri::command]
+async fn cmd_open_billing_portal(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let _ = state;
+    let url = billing::stripe::get_portal_url();
+    // Return the URL so the frontend can open it with window.open()
+    Ok(serde_json::json!({ "url": url }))
+}
+
+#[tauri::command]
+async fn cmd_set_plan(
+    plan_type: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    if !matches!(plan_type.as_str(), "free" | "pro" | "team") {
+        return Err(format!("Invalid plan_type '{}'. Must be free, pro, or team.", plan_type));
+    }
+    {
+        let mut settings = state.settings.lock().map_err(|e| e.to_string())?;
+        settings.set("plan_type", &plan_type);
+        settings.save().map_err(|e| e.to_string())?;
+    }
+    tracing::info!(plan = %plan_type, "Plan updated");
+    Ok(serde_json::json!({ "ok": true, "plan_type": plan_type }))
+}
+
 // ── R22: Marketplace commands ────────────────────────────────
 
 #[tauri::command]
@@ -1482,6 +1589,11 @@ pub fn run() {
             cmd_marketplace_uninstall,
             cmd_marketplace_review,
             cmd_marketplace_get_reviews,
+            // R23: Billing commands
+            cmd_get_plan,
+            cmd_get_checkout_url,
+            cmd_open_billing_portal,
+            cmd_set_plan,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");
