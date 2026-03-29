@@ -158,6 +158,10 @@ export function useAgent() {
         callInvoke<{ content: string; format: string }>('export_analytics', { format });
     const getPeriodComparison = () => callInvoke<any>('get_period_comparison');
 
+    // R40: Acquisition Readiness
+    const getBusinessMetrics = () => callInvoke<any>('get_business_metrics');
+    const getSystemInfo = () => callInvoke<any>('get_system_info');
+
     return {
         getStatus, processMessage, getTasks, getPlaybooks, setActivePlaybook,
         getSettings, updateSettings, healthCheck, getActiveChain, getChainHistory,
@@ -190,6 +194,8 @@ export function useAgent() {
         // R39: Compliance
         exportUserData, deleteAllData, getDataInventory, getPrivacyInfo,
         setRetentionPolicy, applyRetention, setPrivacySettings,
+        // R40: Acquisition Readiness
+        getBusinessMetrics, getSystemInfo,
     };
 }
 

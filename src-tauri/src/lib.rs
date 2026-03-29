@@ -3009,6 +3009,9 @@ pub fn run() {
             cmd_set_retention_policy,
             cmd_apply_retention,
             cmd_set_privacy_settings,
+            // R40: Acquisition Readiness commands
+            cmd_get_business_metrics,
+            cmd_get_system_info,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");
