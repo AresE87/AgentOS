@@ -46,6 +46,16 @@ pub struct Settings {
     #[serde(default = "default_hourly_rate")]
     pub hourly_rate: f64,
 
+    // R39: Compliance
+    #[serde(default = "default_retention_days")]
+    pub retention_days: u32,
+    #[serde(default)]
+    pub auto_delete_enabled: bool,
+    #[serde(default)]
+    pub analytics_enabled: bool,
+    #[serde(default)]
+    pub crash_reports_enabled: bool,
+
     // R25: Local LLMs (Ollama)
     #[serde(default)]
     pub use_local_llm: bool,
@@ -90,6 +100,9 @@ fn default_language() -> String {
 }
 fn default_hourly_rate() -> f64 {
     50.0
+}
+fn default_retention_days() -> u32 {
+    90
 }
 fn default_local_llm_url() -> String {
     "http://localhost:11434".to_string()
@@ -190,6 +203,20 @@ impl Settings {
                     self.hourly_rate = v;
                 }
             }
+            "retention_days" => {
+                if let Ok(v) = value.parse() {
+                    self.retention_days = v;
+                }
+            }
+            "auto_delete_enabled" => {
+                self.auto_delete_enabled = value == "true" || value == "1";
+            }
+            "analytics_enabled" => {
+                self.analytics_enabled = value == "true" || value == "1";
+            }
+            "crash_reports_enabled" => {
+                self.crash_reports_enabled = value == "true" || value == "1";
+            }
             _ => {}
         }
     }
@@ -229,6 +256,10 @@ impl Settings {
             "local_llm_url": self.local_llm_url,
             "local_model": self.local_model,
             "hourly_rate": self.hourly_rate,
+            "retention_days": self.retention_days,
+            "auto_delete_enabled": self.auto_delete_enabled,
+            "analytics_enabled": self.analytics_enabled,
+            "crash_reports_enabled": self.crash_reports_enabled,
         })
     }
 }
@@ -362,6 +393,10 @@ impl Default for Settings {
             plan_type: default_plan_type(),
             language: default_language(),
             hourly_rate: default_hourly_rate(),
+            retention_days: default_retention_days(),
+            auto_delete_enabled: false,
+            analytics_enabled: false,
+            crash_reports_enabled: false,
             use_local_llm: false,
             local_llm_url: default_local_llm_url(),
             local_model: default_local_model(),

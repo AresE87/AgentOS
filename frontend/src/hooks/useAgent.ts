@@ -139,6 +139,17 @@ export function useAgent() {
     const listOrgMembers = () => callInvoke<any>('list_org_members');
     const addOrgMember = (email: string, role: string) => callInvoke<any>('add_org_member', { email, role });
 
+    // R39: Compliance (GDPR, SOC 2, Privacy)
+    const exportUserData = () => callInvoke<any>('export_user_data');
+    const deleteAllData = () => callInvoke<{ deleted: number }>('delete_all_data');
+    const getDataInventory = () => callInvoke<any>('get_data_inventory');
+    const getPrivacyInfo = () => callInvoke<any>('get_privacy_info');
+    const setRetentionPolicy = (days: number, autoDelete: boolean) =>
+        callInvoke<any>('set_retention_policy', { retention_days: days, auto_delete: autoDelete });
+    const applyRetention = () => callInvoke<any>('apply_retention');
+    const setPrivacySettings = (analytics: boolean, crashReports: boolean) =>
+        callInvoke<any>('set_privacy_settings', { analytics, crash_reports: crashReports });
+
     // R38: Advanced Analytics
     const getROIReport = (period?: string, hourlyRate?: number) =>
         callInvoke<any>('get_roi_report', { period, hourly_rate: hourlyRate });
@@ -176,6 +187,9 @@ export function useAgent() {
         setLanguage,
         // R38: Advanced Analytics
         getROIReport, getHeatmap, exportAnalytics, getPeriodComparison,
+        // R39: Compliance
+        exportUserData, deleteAllData, getDataInventory, getPrivacyInfo,
+        setRetentionPolicy, applyRetention, setPrivacySettings,
     };
 }
 

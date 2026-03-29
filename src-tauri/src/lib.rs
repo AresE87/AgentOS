@@ -20,7 +20,9 @@ mod playbooks;
 pub mod plugins;
 pub mod security;
 pub mod types;
+pub mod metrics;
 pub mod vault;
+pub mod compliance;
 pub mod web;
 
 use std::path::PathBuf;
@@ -2397,6 +2399,125 @@ async fn cmd_get_period_comparison(
     }))
 }
 
+// ── R39: Compliance (GDPR, SOC 2, Privacy) commands ─────────────────
+
+#[tauri::command]
+async fn cmd_export_user_data(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_analytics_conn(&state.db_path)?;
+    let export = compliance::GDPRManager::export_all_data(&conn)?;
+    serde_json::to_value(&export).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_delete_all_data(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_analytics_conn(&state.db_path)?;
+    let deleted = compliance::GDPRManager::delete_all_data(&conn)?;
+    Ok(serde_json::json!({ "deleted": deleted, "status": "all_data_erased" }))
+}
+
+#[tauri::command]
+async fn cmd_get_data_inventory(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_analytics_conn(&state.db_path)?;
+    let inventory = compliance::GDPRManager::get_data_inventory(&conn)?;
+    serde_json::to_value(&inventory).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_get_privacy_info() -> Result<serde_json::Value, String> {
+    let residency = compliance::privacy::get_data_residency_info();
+    let soc2 = compliance::privacy::get_soc2_checklist();
+    let soc2_val = serde_json::to_value(&soc2).map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({
+        "data_residency": residency,
+        "soc2_checklist": soc2_val,
+    }))
+}
+
+#[tauri::command]
+async fn cmd_set_retention_policy(
+    retention_days: u32,
+    auto_delete: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut settings = state.settings.lock().map_err(|e| e.to_string())?;
+    settings.retention_days = retention_days;
+    settings.auto_delete_enabled = auto_delete;
+    settings.save().map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({
+        "ok": true,
+        "retention_days": retention_days,
+        "auto_delete_enabled": auto_delete,
+    }))
+}
+
+#[tauri::command]
+async fn cmd_apply_retention(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let policy = {
+        let settings = state.settings.lock().map_err(|e| e.to_string())?;
+        compliance::RetentionPolicy {
+            retention_days: settings.retention_days,
+            auto_delete_enabled: settings.auto_delete_enabled,
+        }
+    };
+    let conn = open_analytics_conn(&state.db_path)?;
+    let deleted = policy.apply(&conn)?;
+    Ok(serde_json::json!({ "deleted": deleted, "policy": serde_json::to_value(&policy).unwrap_or_default() }))
+}
+
+#[tauri::command]
+async fn cmd_set_privacy_settings(
+    analytics: bool,
+    crash_reports: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut settings = state.settings.lock().map_err(|e| e.to_string())?;
+    settings.analytics_enabled = analytics;
+    settings.crash_reports_enabled = crash_reports;
+    settings.save().map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({
+        "ok": true,
+        "analytics_enabled": analytics,
+        "crash_reports_enabled": crash_reports,
+    }))
+}
+
+// ── R40: Acquisition Readiness commands ─────────────────────────────
+
+#[tauri::command]
+async fn cmd_get_business_metrics(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_analytics_conn(&state.db_path)?;
+    let m = metrics::BusinessMetrics::calculate(&conn)?;
+    serde_json::to_value(&m).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_get_system_info(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db_size_mb = std::fs::metadata(&state.db_path)
+        .map(|m| m.len() as f64 / (1024.0 * 1024.0))
+        .unwrap_or(0.0);
+
+    Ok(serde_json::json!({
+        "rust_version": env!("CARGO_PKG_RUST_VERSION", "unknown"),
+        "tauri_version": "2.x",
+        "db_size_mb": (db_size_mb * 100.0).round() / 100.0,
+        "uptime_hours": 0.0,
+        "os": std::env::consts::OS,
+        "architecture": std::env::consts::ARCH,
+    }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -2880,6 +3001,14 @@ pub fn run() {
             cmd_get_heatmap,
             cmd_export_analytics,
             cmd_get_period_comparison,
+            // R39: Compliance (GDPR, SOC 2, Privacy)
+            cmd_export_user_data,
+            cmd_delete_all_data,
+            cmd_get_data_inventory,
+            cmd_get_privacy_info,
+            cmd_set_retention_policy,
+            cmd_apply_retention,
+            cmd_set_privacy_settings,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");
