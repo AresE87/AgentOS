@@ -162,6 +162,15 @@ export function useAgent() {
     const getBusinessMetrics = () => callInvoke<any>('get_business_metrics');
     const getSystemInfo = () => callInvoke<any>('get_system_info');
 
+    // R41: Voice Interface
+    const transcribeAudio = (audioBase64: string, language?: string) =>
+        callInvoke<{ text: string }>('transcribe_audio', { audio_base64: audioBase64, language });
+    const speakText = (text: string, rate?: number, volume?: number) =>
+        callInvoke<{ ok: boolean }>('speak_text', { text, rate, volume });
+    const listVoices = () => callInvoke<{ voices: string[] }>('list_voices');
+    const saveSpeech = (text: string, outputPath: string) =>
+        callInvoke<{ ok: boolean }>('save_speech', { text, output_path: outputPath });
+
     return {
         getStatus, processMessage, getTasks, getPlaybooks, setActivePlaybook,
         getSettings, updateSettings, healthCheck, getActiveChain, getChainHistory,
@@ -196,6 +205,8 @@ export function useAgent() {
         setRetentionPolicy, applyRetention, setPrivacySettings,
         // R40: Acquisition Readiness
         getBusinessMetrics, getSystemInfo,
+        // R41: Voice Interface
+        transcribeAudio, speakText, listVoices, saveSpeech,
     };
 }
 

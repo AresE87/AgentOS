@@ -23,6 +23,8 @@ pub mod types;
 pub mod metrics;
 pub mod vault;
 pub mod compliance;
+pub mod voice;
+pub mod protocol;
 pub mod web;
 
 use std::path::PathBuf;
@@ -2518,6 +2520,127 @@ async fn cmd_get_system_info(
     }))
 }
 
+// ── R41: Voice Interface commands ────────────────────────────────────
+
+#[tauri::command]
+async fn cmd_transcribe_audio(
+    audio_base64: String,
+    language: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let (api_key, lang) = {
+        let settings = state.settings.lock().map_err(|e| e.to_string())?;
+        if settings.openai_api_key.is_empty() {
+            return Err("OpenAI API key not configured. Set it in Settings to use voice transcription.".to_string());
+        }
+        let key = settings.openai_api_key.clone();
+        let l = language.or_else(|| {
+            let v = settings.voice_language.clone();
+            if v.is_empty() || v == "auto" { None } else { Some(v) }
+        });
+        (key, l)
+    };
+
+    let audio_bytes = base64::Engine::decode(
+        &base64::engine::general_purpose::STANDARD,
+        &audio_base64,
+    )
+    .map_err(|e| format!("Invalid base64 audio: {}", e))?;
+
+    let stt = voice::SpeechToText::new();
+    let text = stt.transcribe(&audio_bytes, &api_key, lang.as_deref()).await?;
+    Ok(serde_json::json!({ "text": text }))
+}
+
+#[tauri::command]
+async fn cmd_speak_text(
+    text: String,
+    rate: Option<i32>,
+    volume: Option<i32>,
+) -> Result<serde_json::Value, String> {
+    let mut tts = voice::TextToSpeech::new();
+    if let Some(r) = rate {
+        tts = tts.with_rate(r);
+    }
+    if let Some(v) = volume {
+        tts = tts.with_volume(v);
+    }
+    tts.speak(&text).await?;
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+#[tauri::command]
+async fn cmd_list_voices() -> Result<serde_json::Value, String> {
+    let voices = voice::TextToSpeech::list_voices().await?;
+    Ok(serde_json::json!({ "voices": voices }))
+}
+
+#[tauri::command]
+async fn cmd_save_speech(
+    text: String,
+    output_path: String,
+) -> Result<serde_json::Value, String> {
+    let tts = voice::TextToSpeech::new();
+    tts.save_to_file(&text, &output_path).await?;
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+// ── R42: Agent-to-Agent Protocol (AAP) commands ─────────────────────
+
+#[tauri::command]
+async fn cmd_aap_send_task(
+    host: String,
+    port: u16,
+    task: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let (node_id, node_name) = {
+        let settings = state.settings.lock().map_err(|e| e.to_string())?;
+        if !settings.aap_enabled {
+            return Err("AAP is disabled in settings".to_string());
+        }
+        ("agentos-desktop".to_string(), "AgentOS-Desktop".to_string())
+    };
+    let client = protocol::AAPClient::new();
+    client.send_task(&host, port, &node_id, &node_name, &task).await
+}
+
+#[tauri::command]
+async fn cmd_aap_query_capabilities(
+    host: String,
+    port: u16,
+) -> Result<serde_json::Value, String> {
+    let client = protocol::AAPClient::new();
+    client.query_capabilities(&host, port).await
+}
+
+#[tauri::command]
+async fn cmd_aap_health(
+    host: String,
+    port: u16,
+) -> Result<serde_json::Value, String> {
+    let client = protocol::AAPClient::new();
+    let alive = client.health_check(&host, port).await;
+    Ok(serde_json::json!({
+        "host": host,
+        "port": port,
+        "alive": alive
+    }))
+}
+
+#[tauri::command]
+async fn cmd_get_aap_status(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let settings = state.settings.lock().map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({
+        "enabled": settings.aap_enabled,
+        "port": settings.aap_port,
+        "protocol_version": protocol::spec::AAP_VERSION,
+        "connected_agents": []
+    }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -3012,6 +3135,16 @@ pub fn run() {
             // R40: Acquisition Readiness commands
             cmd_get_business_metrics,
             cmd_get_system_info,
+            // R41: Voice Interface commands
+            cmd_transcribe_audio,
+            cmd_speak_text,
+            cmd_list_voices,
+            cmd_save_speech,
+            // R42: Agent-to-Agent Protocol commands
+            cmd_aap_send_task,
+            cmd_aap_query_capabilities,
+            cmd_aap_health,
+            cmd_get_aap_status,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");

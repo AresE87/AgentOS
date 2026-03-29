@@ -56,6 +56,24 @@ pub struct Settings {
     #[serde(default)]
     pub crash_reports_enabled: bool,
 
+    // R41: Voice Interface
+    #[serde(default)]
+    pub voice_enabled: bool,
+    #[serde(default = "default_voice_language")]
+    pub voice_language: String,
+    #[serde(default)]
+    pub voice_rate: i32,
+    #[serde(default = "default_voice_volume")]
+    pub voice_volume: i32,
+    #[serde(default)]
+    pub voice_auto_listen: bool,
+
+    // R42: Agent-to-Agent Protocol
+    #[serde(default = "default_aap_enabled")]
+    pub aap_enabled: bool,
+    #[serde(default = "default_aap_port")]
+    pub aap_port: u16,
+
     // R25: Local LLMs (Ollama)
     #[serde(default)]
     pub use_local_llm: bool,
@@ -104,6 +122,20 @@ fn default_hourly_rate() -> f64 {
 fn default_retention_days() -> u32 {
     90
 }
+fn default_voice_language() -> String {
+    "en".to_string()
+}
+fn default_voice_volume() -> i32 {
+    100
+}
+
+fn default_aap_enabled() -> bool {
+    true
+}
+fn default_aap_port() -> u16 {
+    9100
+}
+
 fn default_local_llm_url() -> String {
     "http://localhost:11434".to_string()
 }
@@ -175,6 +207,25 @@ impl Settings {
                     self.language = value.to_string();
                 }
             }
+            "voice_enabled" => {
+                self.voice_enabled = value == "true" || value == "1";
+            }
+            "voice_language" => {
+                self.voice_language = value.to_string();
+            }
+            "voice_rate" => {
+                if let Ok(v) = value.parse::<i32>() {
+                    self.voice_rate = v.clamp(-10, 10);
+                }
+            }
+            "voice_volume" => {
+                if let Ok(v) = value.parse::<i32>() {
+                    self.voice_volume = v.clamp(0, 100);
+                }
+            }
+            "voice_auto_listen" => {
+                self.voice_auto_listen = value == "true" || value == "1";
+            }
             "use_local_llm" => {
                 self.use_local_llm = value == "true" || value == "1";
             }
@@ -216,6 +267,14 @@ impl Settings {
             }
             "crash_reports_enabled" => {
                 self.crash_reports_enabled = value == "true" || value == "1";
+            }
+            "aap_enabled" => {
+                self.aap_enabled = value == "true" || value == "1";
+            }
+            "aap_port" => {
+                if let Ok(v) = value.parse() {
+                    self.aap_port = v;
+                }
             }
             _ => {}
         }
@@ -260,6 +319,13 @@ impl Settings {
             "auto_delete_enabled": self.auto_delete_enabled,
             "analytics_enabled": self.analytics_enabled,
             "crash_reports_enabled": self.crash_reports_enabled,
+            "voice_enabled": self.voice_enabled,
+            "voice_language": self.voice_language,
+            "voice_rate": self.voice_rate,
+            "voice_volume": self.voice_volume,
+            "voice_auto_listen": self.voice_auto_listen,
+            "aap_enabled": self.aap_enabled,
+            "aap_port": self.aap_port,
         })
     }
 }
@@ -397,6 +463,13 @@ impl Default for Settings {
             auto_delete_enabled: false,
             analytics_enabled: false,
             crash_reports_enabled: false,
+            voice_enabled: false,
+            voice_language: default_voice_language(),
+            voice_rate: 0,
+            voice_volume: default_voice_volume(),
+            voice_auto_listen: false,
+            aap_enabled: default_aap_enabled(),
+            aap_port: default_aap_port(),
             use_local_llm: false,
             local_llm_url: default_local_llm_url(),
             local_model: default_local_model(),
