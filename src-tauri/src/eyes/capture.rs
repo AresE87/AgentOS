@@ -134,6 +134,35 @@ pub fn save_screenshot(
     Ok(path)
 }
 
+/// Save screenshot as JPEG to a specific file path
+pub fn save_screenshot_to(
+    data: &ScreenshotData,
+    path: &Path,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let img: RgbaImage =
+        ImageBuffer::from_raw(data.width, data.height, data.rgba.clone())
+            .ok_or("Failed to create image buffer")?;
+
+    let img = if data.width > 1920 {
+        let ratio = 1920.0 / data.width as f64;
+        let new_h = (data.height as f64 * ratio) as u32;
+        image::imageops::resize(&img, 1920, new_h, image::imageops::FilterType::Triangle)
+    } else {
+        img
+    };
+
+    let rgb = image::DynamicImage::ImageRgba8(img).to_rgb8();
+    let mut buf = std::io::BufWriter::new(std::fs::File::create(path)?);
+    let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, 85);
+    encoder.encode(rgb.as_raw(), rgb.width(), rgb.height(), image::ExtendedColorType::Rgb8)?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

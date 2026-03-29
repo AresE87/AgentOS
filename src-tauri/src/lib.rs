@@ -420,15 +420,13 @@ async fn cmd_start_recording(
     state: tauri::State<'_, AppState>,
     name: String,
 ) -> Result<serde_json::Value, String> {
-    let screenshots_dir = state.screenshots_dir.clone();
+    let playbooks_dir = state.playbooks_dir.clone();
     let mut recorder_lock = state.recorder.lock().map_err(|e| e.to_string())?;
 
-    let mut recorder = playbooks::PlaybookRecorder::new(&screenshots_dir);
-    let session_id = recorder.start();
-    // Store name for later
+    let mut recorder = playbooks::PlaybookRecorder::new(&playbooks_dir);
+    let session_id = recorder.start(&name);
     *recorder_lock = Some(recorder);
 
-    // Store name in a way we can retrieve it (use the session_id)
     Ok(serde_json::json!({ "ok": true, "session_id": session_id, "name": name }))
 }
 
@@ -498,13 +496,12 @@ async fn cmd_play_playbook(
         s.clone()
     };
     let kill_switch = state.kill_switch.clone();
-    let screenshots_dir = state.screenshots_dir.clone();
 
-    // Run playbook in background
+    // Run playbook in background with vision-guided replay
     tauri::async_runtime::spawn(async move {
         let _ = app_handle.emit("playbook:started", serde_json::json!({ "name": name }));
 
-        match playbooks::PlaybookPlayer::play(&pb, settings.cli_timeout, &kill_switch, &screenshots_dir).await {
+        match playbooks::PlaybookPlayer::play(&pb, &settings, &kill_switch, &app_handle).await {
             Ok(results) => {
                 let success = results.iter().all(|r| r.success);
                 let _ = app_handle.emit("playbook:completed", serde_json::json!({
