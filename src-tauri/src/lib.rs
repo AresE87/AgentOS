@@ -1,4 +1,5 @@
 pub mod agents;
+pub mod analytics;
 pub mod api;
 pub mod automation;
 pub mod billing;
@@ -380,6 +381,18 @@ async fn cmd_update_settings(
     }
 
     Ok(serde_json::json!({ "ok": true }))
+}
+
+// R37: Internationalization
+#[tauri::command]
+async fn cmd_set_language(
+    language: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut settings = state.settings.lock().map_err(|e| e.to_string())?;
+    settings.set("language", &language);
+    settings.save().map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({ "ok": true, "language": settings.language }))
 }
 
 #[tauri::command]
@@ -2285,6 +2298,105 @@ async fn cmd_security_audit() -> Result<serde_json::Value, String> {
     }))
 }
 
+// ── R38: Advanced Analytics commands ────────────────────────────────
+
+fn open_analytics_conn(db_path: &std::path::Path) -> Result<rusqlite::Connection, String> {
+    rusqlite::Connection::open(db_path).map_err(|e| format!("DB open error: {}", e))
+}
+
+#[tauri::command]
+async fn cmd_get_roi_report(
+    period: Option<String>,
+    hourly_rate: Option<f64>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_analytics_conn(&state.db_path)?;
+    let rate = hourly_rate.unwrap_or_else(|| {
+        state.settings.lock().map(|s| s.hourly_rate).unwrap_or(50.0)
+    });
+    let p = period.as_deref().unwrap_or("all");
+    let report = analytics::ROICalculator::calculate(&conn, p, rate, 5.0)?;
+    serde_json::to_value(&report).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_get_heatmap(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_analytics_conn(&state.db_path)?;
+    let heatmap = analytics::HeatmapData::generate(&conn)?;
+    serde_json::to_value(&heatmap).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_export_analytics(
+    format: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_analytics_conn(&state.db_path)?;
+    let rate = state.settings.lock().map(|s| s.hourly_rate).unwrap_or(50.0);
+    let report = analytics::ROICalculator::calculate(&conn, "all", rate, 5.0)?;
+
+    let (content, fmt) = match format.as_str() {
+        "csv" => (analytics::export::AnalyticsExporter::export_csv(&report), "csv"),
+        "heatmap_csv" => {
+            let heatmap = analytics::HeatmapData::generate(&conn)?;
+            (analytics::export::AnalyticsExporter::export_heatmap_csv(&heatmap), "csv")
+        }
+        _ => (analytics::export::AnalyticsExporter::export_roi_text(&report), "text"),
+    };
+
+    Ok(serde_json::json!({ "content": content, "format": fmt }))
+}
+
+#[tauri::command]
+async fn cmd_get_period_comparison(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_analytics_conn(&state.db_path)?;
+    let rate = state.settings.lock().map(|s| s.hourly_rate).unwrap_or(50.0);
+
+    let this_week = analytics::ROICalculator::calculate(&conn, "week", rate, 5.0)?;
+
+    // Last week: query tasks from 14 days ago to 7 days ago
+    let last_week_tasks: u32 = conn.query_row(
+        "SELECT COUNT(*) FROM tasks WHERE created_at > datetime('now', '-14 days') AND created_at <= datetime('now', '-7 days')",
+        [],
+        |row| row.get(0),
+    ).unwrap_or(0);
+
+    let last_week_cost: f64 = conn.query_row(
+        "SELECT COALESCE(SUM(CAST(cost AS REAL)), 0) FROM tasks WHERE created_at > datetime('now', '-14 days') AND created_at <= datetime('now', '-7 days')",
+        [],
+        |row| row.get(0),
+    ).unwrap_or(0.0);
+
+    let last_time_saved = last_week_tasks as f64 * 5.0;
+    let last_manual_cost = (last_time_saved / 60.0) * rate;
+    let last_net = last_manual_cost - last_week_cost;
+
+    let change_pct = if last_net > 0.0 {
+        ((this_week.net_savings - last_net) / last_net) * 100.0
+    } else if this_week.net_savings > 0.0 {
+        100.0
+    } else {
+        0.0
+    };
+
+    Ok(serde_json::json!({
+        "this_week": {
+            "tasks_completed": this_week.tasks_completed,
+            "net_savings": this_week.net_savings,
+            "roi_percentage": this_week.roi_percentage,
+        },
+        "last_week": {
+            "tasks_completed": last_week_tasks,
+            "net_savings": last_net,
+        },
+        "change_pct": change_pct,
+    }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -2761,6 +2873,13 @@ pub fn run() {
             cmd_validate_command,
             cmd_get_security_status,
             cmd_security_audit,
+            // R37: Internationalization
+            cmd_set_language,
+            // R38: Advanced Analytics commands
+            cmd_get_roi_report,
+            cmd_get_heatmap,
+            cmd_export_analytics,
+            cmd_get_period_comparison,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");

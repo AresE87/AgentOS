@@ -38,6 +38,14 @@ pub struct Settings {
     #[serde(default = "default_whatsapp_webhook_port")]
     pub whatsapp_webhook_port: u16,
 
+    // R37: Internationalization
+    #[serde(default = "default_language")]
+    pub language: String,
+
+    // R38: Analytics
+    #[serde(default = "default_hourly_rate")]
+    pub hourly_rate: f64,
+
     // R25: Local LLMs (Ollama)
     #[serde(default)]
     pub use_local_llm: bool,
@@ -76,6 +84,12 @@ fn default_whatsapp_verify_token() -> String {
 }
 fn default_whatsapp_webhook_port() -> u16 {
     9099
+}
+fn default_language() -> String {
+    "auto".to_string()
+}
+fn default_hourly_rate() -> f64 {
+    50.0
 }
 fn default_local_llm_url() -> String {
     "http://localhost:11434".to_string()
@@ -143,6 +157,11 @@ impl Settings {
                     self.plan_type = value.to_string();
                 }
             }
+            "language" => {
+                if matches!(value, "auto" | "en" | "es" | "pt") {
+                    self.language = value.to_string();
+                }
+            }
             "use_local_llm" => {
                 self.use_local_llm = value == "true" || value == "1";
             }
@@ -164,6 +183,11 @@ impl Settings {
             "whatsapp_webhook_port" => {
                 if let Ok(v) = value.parse() {
                     self.whatsapp_webhook_port = v;
+                }
+            }
+            "hourly_rate" => {
+                if let Ok(v) = value.parse() {
+                    self.hourly_rate = v;
                 }
             }
             _ => {}
@@ -200,9 +224,11 @@ impl Settings {
             "has_whatsapp": !self.whatsapp_phone_number_id.is_empty() && !self.whatsapp_access_token.is_empty(),
             "whatsapp_webhook_port": self.whatsapp_webhook_port,
             "plan_type": self.plan_type,
+            "language": self.language,
             "use_local_llm": self.use_local_llm,
             "local_llm_url": self.local_llm_url,
             "local_model": self.local_model,
+            "hourly_rate": self.hourly_rate,
         })
     }
 }
@@ -334,6 +360,8 @@ impl Default for Settings {
             screenshot_quality: default_screenshot_quality(),
             pc_control_enabled: false,
             plan_type: default_plan_type(),
+            language: default_language(),
+            hourly_rate: default_hourly_rate(),
             use_local_llm: false,
             local_llm_url: default_local_llm_url(),
             local_model: default_local_model(),

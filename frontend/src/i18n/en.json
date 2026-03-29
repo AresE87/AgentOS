@@ -1,0 +1,137 @@
+{
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "close": "Close",
+    "loading": "Loading...",
+    "error": "Error",
+    "success": "Success",
+    "confirm": "Confirm",
+    "back": "Back",
+    "next": "Next",
+    "search": "Search",
+    "settings": "Settings",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "connected": "Connected",
+    "disconnected": "Disconnected"
+  },
+  "nav": {
+    "home": "Home",
+    "chat": "Chat",
+    "board": "Board",
+    "playbooks": "Playbooks",
+    "analytics": "Analytics",
+    "mesh": "Mesh",
+    "marketplace": "Marketplace",
+    "settings": "Settings",
+    "triggers": "Triggers"
+  },
+  "home": {
+    "welcome": "Welcome to AgentOS",
+    "tasksToday": "Tasks Today",
+    "tokensUsed": "Tokens Used",
+    "costToday": "Cost Today",
+    "quickActions": "Quick Actions",
+    "recentTasks": "Recent Tasks",
+    "noTasks": "No tasks yet. Try sending a message!"
+  },
+  "chat": {
+    "placeholder": "Type a message or task...",
+    "send": "Send",
+    "thinking": "Thinking...",
+    "executing": "Executing...",
+    "copyCode": "Copy code",
+    "feedback": "Was this helpful?",
+    "thumbsUp": "Helpful",
+    "thumbsDown": "Not helpful"
+  },
+  "board": {
+    "queued": "Queued",
+    "inProgress": "In Progress",
+    "completed": "Completed",
+    "failed": "Failed",
+    "noChains": "No active chains",
+    "chainHistory": "Chain History"
+  },
+  "playbooks": {
+    "title": "Playbooks",
+    "record": "Record",
+    "play": "Play",
+    "stop": "Stop",
+    "recording": "Recording...",
+    "noPlaybooks": "No playbooks yet",
+    "createFirst": "Record your first playbook",
+    "steps": "steps",
+    "variables": "Variables",
+    "smart": "Smart Playbook"
+  },
+  "settings": {
+    "title": "Settings",
+    "apiKeys": "API Keys",
+    "providers": "AI Providers",
+    "language": "Language",
+    "theme": "Theme",
+    "plan": "Plan",
+    "channels": "Channels",
+    "security": "Security",
+    "advanced": "Advanced",
+    "localLLM": "Local LLM (Ollama)",
+    "apiServer": "API Server",
+    "whatsapp": "WhatsApp",
+    "telegram": "Telegram"
+  },
+  "analytics": {
+    "title": "Analytics",
+    "tasksByDay": "Tasks by Day",
+    "tokenUsage": "Token Usage",
+    "costBreakdown": "Cost Breakdown",
+    "successRate": "Success Rate",
+    "modelUsage": "Model Usage"
+  },
+  "mesh": {
+    "title": "Mesh Network",
+    "nodes": "Nodes",
+    "selfNode": "This PC",
+    "online": "Online",
+    "offline": "Offline",
+    "sendTask": "Send Task",
+    "noNodes": "No mesh nodes connected"
+  },
+  "marketplace": {
+    "title": "Marketplace",
+    "install": "Install",
+    "uninstall": "Uninstall",
+    "installed": "Installed",
+    "search": "Search marketplace...",
+    "categories": "Categories",
+    "reviews": "Reviews",
+    "rating": "Rating"
+  },
+  "wizard": {
+    "welcome": "Welcome to AgentOS",
+    "welcomeDesc": "Your AI team, running on your PC",
+    "setupApi": "Set up API Key",
+    "setupApiDesc": "Connect to an AI provider to get started",
+    "ready": "You're all set!",
+    "readyDesc": "Start by trying one of these tasks",
+    "tryThis": "Try this"
+  },
+  "billing": {
+    "free": "Free",
+    "pro": "Pro",
+    "team": "Team",
+    "upgrade": "Upgrade",
+    "currentPlan": "Current Plan",
+    "tasksPerDay": "tasks/day",
+    "tokensPerDay": "tokens/day"
+  },
+  "enterprise": {
+    "auditLog": "Audit Log",
+    "organization": "Organization",
+    "members": "Members",
+    "sso": "Single Sign-On"
+  }
+}

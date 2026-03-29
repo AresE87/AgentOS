@@ -111,6 +111,10 @@ export function useAgent() {
     const getPlaybookVariables = (playbookJson: string) =>
         callInvoke<any>('get_playbook_variables', { playbook_json: playbookJson });
 
+    // R37: Internationalization
+    const setLanguage = (language: string) =>
+        callInvoke<{ ok: boolean; language: string }>('set_language', { language });
+
     // R32: WhatsApp
     const whatsappSetup = (phoneNumberId: string, accessToken: string) =>
         callInvoke<{ ok: boolean; webhook_port: number }>('whatsapp_setup', { phone_number_id: phoneNumberId, access_token: accessToken });
@@ -160,6 +164,8 @@ export function useAgent() {
         whatsappSetup, whatsappTest, whatsappSend, getWhatsappStatus,
         // Smart Playbooks
         runSmartPlaybook, validateSmartPlaybook, getPlaybookVariables,
+        // i18n
+        setLanguage,
     };
 }
 

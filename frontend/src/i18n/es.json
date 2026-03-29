@@ -1,0 +1,137 @@
+{
+  "common": {
+    "save": "Guardar",
+    "cancel": "Cancelar",
+    "delete": "Eliminar",
+    "edit": "Editar",
+    "close": "Cerrar",
+    "loading": "Cargando...",
+    "error": "Error",
+    "success": "Éxito",
+    "confirm": "Confirmar",
+    "back": "Atrás",
+    "next": "Siguiente",
+    "search": "Buscar",
+    "settings": "Configuración",
+    "enabled": "Activado",
+    "disabled": "Desactivado",
+    "connected": "Conectado",
+    "disconnected": "Desconectado"
+  },
+  "nav": {
+    "home": "Inicio",
+    "chat": "Chat",
+    "board": "Tablero",
+    "playbooks": "Playbooks",
+    "analytics": "Analíticas",
+    "mesh": "Red Mesh",
+    "marketplace": "Marketplace",
+    "settings": "Configuración",
+    "triggers": "Automatizaciones"
+  },
+  "home": {
+    "welcome": "Bienvenido a AgentOS",
+    "tasksToday": "Tareas Hoy",
+    "tokensUsed": "Tokens Usados",
+    "costToday": "Costo Hoy",
+    "quickActions": "Acciones Rápidas",
+    "recentTasks": "Tareas Recientes",
+    "noTasks": "Sin tareas aún. ¡Intenta enviar un mensaje!"
+  },
+  "chat": {
+    "placeholder": "Escribe un mensaje o tarea...",
+    "send": "Enviar",
+    "thinking": "Pensando...",
+    "executing": "Ejecutando...",
+    "copyCode": "Copiar código",
+    "feedback": "¿Fue útil?",
+    "thumbsUp": "Útil",
+    "thumbsDown": "No útil"
+  },
+  "board": {
+    "queued": "En Cola",
+    "inProgress": "En Progreso",
+    "completed": "Completado",
+    "failed": "Fallido",
+    "noChains": "Sin cadenas activas",
+    "chainHistory": "Historial de Cadenas"
+  },
+  "playbooks": {
+    "title": "Playbooks",
+    "record": "Grabar",
+    "play": "Reproducir",
+    "stop": "Detener",
+    "recording": "Grabando...",
+    "noPlaybooks": "Sin playbooks aún",
+    "createFirst": "Graba tu primer playbook",
+    "steps": "pasos",
+    "variables": "Variables",
+    "smart": "Playbook Inteligente"
+  },
+  "settings": {
+    "title": "Configuración",
+    "apiKeys": "Claves API",
+    "providers": "Proveedores IA",
+    "language": "Idioma",
+    "theme": "Tema",
+    "plan": "Plan",
+    "channels": "Canales",
+    "security": "Seguridad",
+    "advanced": "Avanzado",
+    "localLLM": "LLM Local (Ollama)",
+    "apiServer": "Servidor API",
+    "whatsapp": "WhatsApp",
+    "telegram": "Telegram"
+  },
+  "analytics": {
+    "title": "Analíticas",
+    "tasksByDay": "Tareas por Día",
+    "tokenUsage": "Uso de Tokens",
+    "costBreakdown": "Desglose de Costos",
+    "successRate": "Tasa de Éxito",
+    "modelUsage": "Uso de Modelos"
+  },
+  "mesh": {
+    "title": "Red Mesh",
+    "nodes": "Nodos",
+    "selfNode": "Esta PC",
+    "online": "En Línea",
+    "offline": "Fuera de Línea",
+    "sendTask": "Enviar Tarea",
+    "noNodes": "Sin nodos mesh conectados"
+  },
+  "marketplace": {
+    "title": "Marketplace",
+    "install": "Instalar",
+    "uninstall": "Desinstalar",
+    "installed": "Instalado",
+    "search": "Buscar en marketplace...",
+    "categories": "Categorías",
+    "reviews": "Reseñas",
+    "rating": "Calificación"
+  },
+  "wizard": {
+    "welcome": "Bienvenido a AgentOS",
+    "welcomeDesc": "Tu equipo de IA, corriendo en tu PC",
+    "setupApi": "Configurar Clave API",
+    "setupApiDesc": "Conecta un proveedor de IA para empezar",
+    "ready": "¡Todo listo!",
+    "readyDesc": "Empieza probando una de estas tareas",
+    "tryThis": "Prueba esto"
+  },
+  "billing": {
+    "free": "Gratis",
+    "pro": "Pro",
+    "team": "Equipo",
+    "upgrade": "Mejorar Plan",
+    "currentPlan": "Plan Actual",
+    "tasksPerDay": "tareas/día",
+    "tokensPerDay": "tokens/día"
+  },
+  "enterprise": {
+    "auditLog": "Registro de Auditoría",
+    "organization": "Organización",
+    "members": "Miembros",
+    "sso": "Inicio de Sesión Único"
+  }
+}
