@@ -1,12 +1,12 @@
-mod agents;
-mod brain;
+pub mod agents;
+pub mod brain;
 mod channels;
-mod config;
+pub mod config;
 mod eyes;
-mod hands;
-mod memory;
+pub mod hands;
+pub mod memory;
 mod mesh;
-mod pipeline;
+pub mod pipeline;
 mod playbooks;
 pub mod types;
 
@@ -22,6 +22,8 @@ pub struct AppState {
     pub kill_switch: Arc<AtomicBool>,
     pub screenshots_dir: PathBuf,
     pub db_path: PathBuf,
+    pub playbooks_dir: PathBuf,
+    pub recorder: std::sync::Mutex<Option<playbooks::PlaybookRecorder>>,
 }
 
 #[tauri::command]
@@ -47,6 +49,7 @@ async fn cmd_get_status(state: tauri::State<'_, AppState>) -> Result<serde_json:
 #[tauri::command]
 async fn cmd_process_message(
     state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
     text: String,
 ) -> Result<serde_json::Value, String> {
     let settings = {
@@ -54,7 +57,61 @@ async fn cmd_process_message(
         s.clone()
     };
 
-    // Find the best agent for this task
+    // Detect if this is a PC action task (open apps, calculate, install, navigate, etc.)
+    // These need the full pipeline engine with vision, not a simple chat response
+    let lower = text.to_lowercase();
+    let is_pc_task = is_pc_action_task(&lower);
+
+    if is_pc_task {
+        tracing::info!("Routing to PC task pipeline: {}", &text[..text.len().min(80)]);
+        let task_id = uuid::Uuid::new_v4().to_string();
+
+        // Create pending task in DB
+        {
+            let db = state.db.lock().map_err(|e| e.to_string())?;
+            db.create_task_pending(&task_id, &text).map_err(|e| e.to_string())?;
+        }
+
+        let kill_switch = state.kill_switch.clone();
+        let screenshots_dir = state.screenshots_dir.clone();
+        let db_path = state.db_path.clone();
+        let tid = task_id.clone();
+        let desc = text.clone();
+
+        // Spawn pipeline engine in background
+        tauri::async_runtime::spawn(async move {
+            let result = pipeline::engine::run_task(
+                &tid, &desc, &settings, &kill_switch,
+                &screenshots_dir, &db_path, &app_handle,
+            ).await;
+
+            match result {
+                Ok(r) => {
+                    let _ = app_handle.emit("agent:task_completed", serde_json::json!({
+                        "task_id": tid, "success": r.success,
+                        "steps": r.steps.len(), "duration_ms": r.duration_ms,
+                    }));
+                }
+                Err(e) => {
+                    let _ = app_handle.emit("agent:task_completed", serde_json::json!({
+                        "task_id": tid, "success": false, "error": e,
+                    }));
+                }
+            }
+        });
+
+        return Ok(serde_json::json!({
+            "task_id": task_id,
+            "status": "running",
+            "output": "Task started — the agent is working on it...",
+            "model": "anthropic/sonnet",
+            "cost": 0.0,
+            "duration_ms": 0,
+            "agent": "PC Controller",
+        }));
+    }
+
+    // Regular chat path for non-PC tasks
     let registry = agents::AgentRegistry::new();
     let agent = registry.find_best(&text);
     let agent_name = agent.name.clone();
@@ -62,7 +119,6 @@ async fn cmd_process_message(
 
     tracing::info!(agent = %agent_name, "Selected agent for task");
 
-    // Call LLM with agent's system prompt
     let gateway = state.gateway.lock().await;
     let response = gateway
         .complete_with_system(&text, Some(&system_prompt), &settings)
@@ -86,6 +142,28 @@ async fn cmd_process_message(
         "duration_ms": response.duration_ms,
         "agent": agent_name,
     }))
+}
+
+/// Detect if a message is a PC action task that needs the pipeline engine
+fn is_pc_action_task(text: &str) -> bool {
+    let action_patterns = [
+        "abrí", "abre", "abrir", "open",
+        "calculadora", "calculator", "calc",
+        "calcula", "calculate",
+        "notepad", "bloc de notas",
+        "explorador", "explorer",
+        "instala", "install", "descarga", "download",
+        "wallpaper", "fondo de pantalla",
+        "navega", "navigate",
+        "busca en", "search for",
+        "ejecuta", "execute", "run",
+        "cierra", "close",
+        "escribe en", "type in",
+        "click", "haz click",
+        "captura", "screenshot",
+        "configura", "settings",
+    ];
+    action_patterns.iter().any(|p| text.contains(p))
 }
 
 #[tauri::command]
@@ -150,10 +228,73 @@ async fn cmd_get_analytics(
     db.get_analytics().map_err(|e| e.to_string())
 }
 
-// Stub commands for frontend compatibility
 #[tauri::command]
-async fn cmd_get_playbooks() -> Result<serde_json::Value, String> {
-    Ok(serde_json::json!({ "playbooks": [] }))
+async fn cmd_get_usage_summary(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.get_usage_summary().map_err(|e| e.to_string())
+}
+
+// ── R7: Intelligence commands ────────────────────────────────
+
+#[tauri::command]
+async fn cmd_get_analytics_by_period(
+    state: tauri::State<'_, AppState>,
+    period: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.get_analytics_by_period(&period.unwrap_or_else(|| "all".into()))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_get_suggestions(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let mut suggestions: Vec<serde_json::Value> = Vec::new();
+
+    // 1. Repeated tasks (same input >= 3 times in 7 days)
+    if let Ok(repeated) = db.get_repeated_tasks(7, 3) {
+        if let Some(arr) = repeated.as_array() {
+            for task in arr.iter().take(2) {
+                let input = task["input"].as_str().unwrap_or("");
+                let count = task["count"].as_i64().unwrap_or(0);
+                suggestions.push(serde_json::json!({
+                    "type": "recurring",
+                    "message": format!("You've run \"{}\" {} times this week. Want to automate it?", input, count),
+                    "action": "automate",
+                    "task": input,
+                }));
+            }
+        }
+    }
+
+    Ok(serde_json::json!({ "suggestions": suggestions }))
+}
+
+// ── Playbook commands ────────────────────────────────────────
+
+#[tauri::command]
+async fn cmd_get_playbooks(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let dir = state.playbooks_dir.clone();
+    let playbooks = playbooks::PlaybookPlayer::list_playbooks(&dir).map_err(|e| e.to_string())?;
+    let list: Vec<serde_json::Value> = playbooks
+        .iter()
+        .map(|pb| {
+            serde_json::json!({
+                "name": pb.name,
+                "description": pb.description,
+                "steps_count": pb.steps.len(),
+                "created_at": pb.created_at,
+                "version": pb.version,
+            })
+        })
+        .collect();
+    Ok(serde_json::json!({ "playbooks": list }))
 }
 
 #[tauri::command]
@@ -162,7 +303,176 @@ async fn cmd_set_active_playbook(_path: String) -> Result<serde_json::Value, Str
 }
 
 #[tauri::command]
+async fn cmd_get_playbook_detail(
+    state: tauri::State<'_, AppState>,
+    name: String,
+) -> Result<serde_json::Value, String> {
+    let dir = state.playbooks_dir.clone();
+    let playbooks = playbooks::PlaybookPlayer::list_playbooks(&dir).map_err(|e| e.to_string())?;
+    let pb = playbooks
+        .iter()
+        .find(|p| p.name == name)
+        .ok_or_else(|| format!("Playbook '{}' not found", name))?;
+
+    let steps: Vec<serde_json::Value> = pb
+        .steps
+        .iter()
+        .map(|s| {
+            serde_json::json!({
+                "step_number": s.step_number,
+                "description": s.description,
+                "screenshot_path": s.screenshot_path,
+                "timestamp": s.timestamp,
+                "action_type": format!("{:?}", s.action),
+            })
+        })
+        .collect();
+
+    Ok(serde_json::json!({
+        "name": pb.name,
+        "description": pb.description,
+        "version": pb.version,
+        "author": pb.author,
+        "steps": steps,
+        "created_at": pb.created_at,
+    }))
+}
+
+#[tauri::command]
+async fn cmd_start_recording(
+    state: tauri::State<'_, AppState>,
+    name: String,
+) -> Result<serde_json::Value, String> {
+    let screenshots_dir = state.screenshots_dir.clone();
+    let mut recorder_lock = state.recorder.lock().map_err(|e| e.to_string())?;
+
+    let mut recorder = playbooks::PlaybookRecorder::new(&screenshots_dir);
+    let session_id = recorder.start();
+    // Store name for later
+    *recorder_lock = Some(recorder);
+
+    // Store name in a way we can retrieve it (use the session_id)
+    Ok(serde_json::json!({ "ok": true, "session_id": session_id, "name": name }))
+}
+
+#[tauri::command]
+async fn cmd_record_step(
+    state: tauri::State<'_, AppState>,
+    description: String,
+    action_type: String,
+) -> Result<serde_json::Value, String> {
+    let action = match action_type.as_str() {
+        "click" => types::AgentAction::Screenshot, // placeholder — real action comes from vision
+        "keyboard" => types::AgentAction::Screenshot,
+        "manual" => types::AgentAction::Screenshot,
+        _ => types::AgentAction::Screenshot,
+    };
+
+    let mut recorder_lock = state.recorder.lock().map_err(|e| e.to_string())?;
+    let recorder = recorder_lock.as_mut().ok_or("Not recording")?;
+
+    tokio::task::block_in_place(|| {
+        recorder.record_step(action, &description).map_err(|e| e.to_string())
+    })?;
+
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+#[tauri::command]
+async fn cmd_stop_recording(
+    state: tauri::State<'_, AppState>,
+    name: String,
+) -> Result<serde_json::Value, String> {
+    let playbooks_dir = state.playbooks_dir.clone();
+    let mut recorder_lock = state.recorder.lock().map_err(|e| e.to_string())?;
+
+    let recorder = recorder_lock.as_mut().ok_or("Not recording")?;
+    let mut playbook = recorder.stop();
+    playbook.name = name.clone();
+
+    // Save to disk
+    playbooks::PlaybookRecorder::save_playbook(&playbook, &playbooks_dir)
+        .map_err(|e| e.to_string())?;
+
+    *recorder_lock = None;
+
+    Ok(serde_json::json!({
+        "ok": true,
+        "name": playbook.name,
+        "steps_count": playbook.steps.len(),
+    }))
+}
+
+#[tauri::command]
+async fn cmd_play_playbook(
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+    name: String,
+) -> Result<serde_json::Value, String> {
+    let dir = state.playbooks_dir.clone();
+    let playbooks = playbooks::PlaybookPlayer::list_playbooks(&dir).map_err(|e| e.to_string())?;
+    let pb = playbooks
+        .into_iter()
+        .find(|p| p.name == name)
+        .ok_or_else(|| format!("Playbook '{}' not found", name))?;
+
+    let settings = {
+        let s = state.settings.lock().map_err(|e| e.to_string())?;
+        s.clone()
+    };
+    let kill_switch = state.kill_switch.clone();
+    let screenshots_dir = state.screenshots_dir.clone();
+
+    // Run playbook in background
+    tauri::async_runtime::spawn(async move {
+        let _ = app_handle.emit("playbook:started", serde_json::json!({ "name": name }));
+
+        match playbooks::PlaybookPlayer::play(&pb, settings.cli_timeout, &kill_switch, &screenshots_dir).await {
+            Ok(results) => {
+                let success = results.iter().all(|r| r.success);
+                let _ = app_handle.emit("playbook:completed", serde_json::json!({
+                    "name": name,
+                    "success": success,
+                    "steps_completed": results.len(),
+                }));
+            }
+            Err(e) => {
+                let _ = app_handle.emit("playbook:error", serde_json::json!({
+                    "name": name,
+                    "error": e,
+                }));
+            }
+        }
+    });
+
+    Ok(serde_json::json!({ "ok": true, "status": "started" }))
+}
+
+#[tauri::command]
+async fn cmd_delete_playbook(
+    state: tauri::State<'_, AppState>,
+    name: String,
+) -> Result<serde_json::Value, String> {
+    let dir = state.playbooks_dir.clone();
+    let filename = format!(
+        "{}.json",
+        name.to_lowercase()
+            .replace(' ', "_")
+            .chars()
+            .filter(|c| c.is_alphanumeric() || *c == '_')
+            .collect::<String>()
+    );
+    let path = dir.join(&filename);
+    if path.exists() {
+        std::fs::remove_file(&path).map_err(|e| e.to_string())?;
+    }
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+#[tauri::command]
 async fn cmd_get_active_chain() -> Result<serde_json::Value, String> {
+    // Active chain state is tracked in-memory via events
+    // For now return idle — the frontend listens to chain_update events
     Ok(serde_json::json!({
         "chain_id": null,
         "original_task": null,
@@ -175,8 +485,35 @@ async fn cmd_get_active_chain() -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
-async fn cmd_get_chain_history() -> Result<serde_json::Value, String> {
-    Ok(serde_json::json!({ "chains": [] }))
+async fn cmd_get_chain_history(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let chains = db.get_recent_chains(20).map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({ "chains": chains }))
+}
+
+#[tauri::command]
+async fn cmd_get_chain_log(
+    state: tauri::State<'_, AppState>,
+    chain_id: String,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let log = db.get_chain_log(&chain_id).map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({ "log": log }))
+}
+
+#[tauri::command]
+async fn cmd_decompose_task(
+    state: tauri::State<'_, AppState>,
+    description: String,
+) -> Result<serde_json::Value, String> {
+    let settings = {
+        let s = state.settings.lock().map_err(|e| e.to_string())?;
+        s.clone()
+    };
+    let subtasks = pipeline::engine::decompose_task(&description, &settings).await?;
+    Ok(serde_json::json!({ "subtasks": subtasks }))
 }
 
 #[tauri::command]
@@ -345,12 +682,88 @@ async fn cmd_send_mesh_task(node_id: String, description: String) -> Result<serd
     Ok(serde_json::json!({ "task_id": task_id, "status": "queued" }))
 }
 
+// ── R2: Vision E2E Test Commands ─────────────────────────────
+
+#[tauri::command]
+async fn cmd_test_vision(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let screenshots_dir = state.screenshots_dir.clone();
+
+    // Capture screenshot
+    let (path, b64) = tokio::task::spawn_blocking(move || {
+        let data = eyes::capture::capture_full_screen().map_err(|e| e.to_string())?;
+        let path = eyes::capture::save_screenshot(&data, &screenshots_dir).map_err(|e| e.to_string())?;
+        let b64 = eyes::capture::to_base64_jpeg(&data, 80).map_err(|e| e.to_string())?;
+        Ok::<_, String>((path, b64))
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    // Send to vision LLM
+    let settings = {
+        let s = state.settings.lock().map_err(|e| e.to_string())?;
+        s.clone()
+    };
+    let gateway = state.gateway.lock().await;
+
+    let prompt = "Describe what you see on this screenshot in detail. What application windows are open? What text is visible?";
+    let response = gateway
+        .complete_with_vision(prompt, &b64, &settings)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(serde_json::json!({
+        "screenshot_path": path.to_string_lossy(),
+        "analysis": response.content,
+        "model": response.model,
+        "tokens_in": response.tokens_in,
+        "tokens_out": response.tokens_out,
+    }))
+}
+
+#[tauri::command]
+async fn cmd_test_click(x: i32, y: i32) -> Result<serde_json::Value, String> {
+    tokio::task::spawn_blocking(move || {
+        hands::input::click(x, y).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(serde_json::json!({ "ok": true, "clicked": [x, y] }))
+}
+
+#[tauri::command]
+async fn cmd_test_type(text: String) -> Result<serde_json::Value, String> {
+    let t = text.clone();
+    tokio::task::spawn_blocking(move || {
+        hands::input::type_text(&t).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(serde_json::json!({ "ok": true, "typed": text }))
+}
+
+#[tauri::command]
+async fn cmd_test_key_combo(keys: Vec<String>) -> Result<serde_json::Value, String> {
+    let k = keys.clone();
+    tokio::task::spawn_blocking(move || {
+        hands::input::key_combo(&k).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(serde_json::json!({ "ok": true, "keys": keys }))
+}
+
 // ── Phase 6: Channels ────────────────────────────────────────
 #[tauri::command]
 async fn cmd_get_channel_status() -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({
-        "telegram": channels::telegram::is_configured(),
-        "discord": channels::discord::is_configured(),
+        "telegram": {
+            "running": channels::telegram::is_running(),
+        },
+        "discord": {
+            "running": channels::discord::is_running(),
+        },
     }))
 }
 
@@ -378,6 +791,9 @@ pub fn run() {
             let screenshots_dir = app_dir.join("screenshots");
             std::fs::create_dir_all(&screenshots_dir).ok();
 
+            let playbooks_dir = app_dir.join("playbooks");
+            std::fs::create_dir_all(&playbooks_dir).ok();
+
             let settings = config::Settings::load(&app_dir);
             let gateway = brain::Gateway::new(&settings);
 
@@ -388,6 +804,8 @@ pub fn run() {
                 kill_switch: Arc::new(AtomicBool::new(false)),
                 screenshots_dir,
                 db_path,
+                playbooks_dir,
+                recorder: std::sync::Mutex::new(None),
             });
 
             // Start Telegram bot if configured
@@ -398,6 +816,19 @@ pub fn run() {
                     tracing::info!("Starting Telegram bot...");
                     channels::telegram::run_bot_loop(&token, &settings_clone).await;
                 });
+            }
+
+            // Start Discord bot if configured
+            // Discord token can be stored as discord_bot_token in settings
+            // For now, check if there's a token file or env var
+            if let Ok(discord_token) = std::env::var("DISCORD_BOT_TOKEN") {
+                if !discord_token.is_empty() {
+                    let settings_clone = settings.clone();
+                    tauri::async_runtime::spawn(async move {
+                        tracing::info!("Starting Discord bot...");
+                        channels::discord::run_bot_loop(&discord_token, &settings_clone).await;
+                    });
+                }
             }
 
             // Start mesh discovery
@@ -416,6 +847,7 @@ pub fn run() {
             cmd_update_settings,
             cmd_health_check,
             cmd_get_analytics,
+            cmd_get_usage_summary,
             cmd_get_playbooks,
             cmd_set_active_playbook,
             cmd_get_active_chain,
@@ -433,6 +865,22 @@ pub fn run() {
             cmd_get_mesh_nodes,
             cmd_send_mesh_task,
             cmd_get_channel_status,
+            cmd_get_analytics_by_period,
+            cmd_get_suggestions,
+            cmd_get_chain_log,
+            cmd_decompose_task,
+            // R4: Playbook commands
+            cmd_get_playbook_detail,
+            cmd_start_recording,
+            cmd_record_step,
+            cmd_stop_recording,
+            cmd_play_playbook,
+            cmd_delete_playbook,
+            // R2: Vision test commands
+            cmd_test_vision,
+            cmd_test_click,
+            cmd_test_type,
+            cmd_test_key_combo,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");
