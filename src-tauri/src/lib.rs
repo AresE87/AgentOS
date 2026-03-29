@@ -6,6 +6,7 @@ pub mod brain;
 mod channels;
 pub mod config;
 mod eyes;
+pub mod feedback;
 pub mod hands;
 pub mod marketplace;
 pub mod memory;
@@ -1466,6 +1467,78 @@ async fn cmd_pull_ollama_model(
     Ok(serde_json::json!({ "ok": true, "message": format!("Pull started for {}", model) }))
 }
 
+// ── R28: Feedback & Insights commands ───────────────────────────
+
+fn open_feedback_conn(db_path: &std::path::Path) -> Result<rusqlite::Connection, String> {
+    rusqlite::Connection::open(db_path).map_err(|e| format!("DB open error: {}", e))
+}
+
+#[tauri::command]
+async fn cmd_submit_feedback(
+    task_id: String,
+    task_text: String,
+    response_text: String,
+    rating: i8,
+    comment: Option<String>,
+    model_used: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_feedback_conn(&state.db_path)?;
+    feedback::collector::FeedbackCollector::ensure_table(&conn)?;
+    let model = model_used.unwrap_or_default();
+    feedback::collector::FeedbackCollector::record(
+        &conn,
+        &task_id,
+        &task_text,
+        &response_text,
+        rating,
+        comment.as_deref(),
+        &model,
+    )?;
+    tracing::info!(task_id = %task_id, rating = rating, "Feedback recorded");
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+#[tauri::command]
+async fn cmd_get_feedback_stats(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_feedback_conn(&state.db_path)?;
+    feedback::collector::FeedbackCollector::ensure_table(&conn)?;
+    let stats = feedback::collector::FeedbackCollector::get_stats(&conn)?;
+    Ok(serde_json::to_value(&stats).map_err(|e| e.to_string())?)
+}
+
+#[tauri::command]
+async fn cmd_get_weekly_insights(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_feedback_conn(&state.db_path)?;
+    feedback::collector::FeedbackCollector::ensure_table(&conn)?;
+    let records = feedback::collector::FeedbackCollector::get_recent(&conn, 200)?;
+    let stats = feedback::collector::FeedbackCollector::get_stats(&conn)?;
+    let insights =
+        feedback::analyzer::InsightAnalyzer::generate_weekly_insights(&records, &stats);
+    let suggestions = feedback::analyzer::InsightAnalyzer::get_routing_suggestions(&records);
+    Ok(serde_json::json!({
+        "insights": insights,
+        "suggestions": suggestions,
+        "stats": stats,
+    }))
+}
+
+#[tauri::command]
+async fn cmd_get_recent_feedback(
+    limit: Option<usize>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_feedback_conn(&state.db_path)?;
+    feedback::collector::FeedbackCollector::ensure_table(&conn)?;
+    let records =
+        feedback::collector::FeedbackCollector::get_recent(&conn, limit.unwrap_or(50))?;
+    Ok(serde_json::json!({ "feedback": records }))
+}
+
 // ── R26: Platform abstraction commands ──────────────────────────
 
 #[tauri::command]
@@ -1700,6 +1773,28 @@ pub fn run() {
                 });
             }
 
+            // ── R28: Weekly insights — emit on startup ────────────────
+            {
+                let report_db_path = db_path.clone();
+                let report_handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    // Open a fresh connection for the report
+                    if let Ok(conn) = rusqlite::Connection::open(&report_db_path) {
+                        if feedback::collector::FeedbackCollector::ensure_table(&conn).is_ok() {
+                            let records = feedback::collector::FeedbackCollector::get_recent(&conn, 200)
+                                .unwrap_or_default();
+                            let stats = feedback::collector::FeedbackCollector::get_stats(&conn)
+                                .unwrap_or(feedback::collector::FeedbackStats {
+                                    total: 0, positive: 0, negative: 0, positive_rate: 0.0,
+                                });
+                            let insights = feedback::analyzer::InsightAnalyzer::generate_weekly_insights(&records, &stats);
+                            let _ = report_handle.emit("feedback:weekly_report", &insights);
+                            tracing::info!("Weekly feedback report emitted on startup");
+                        }
+                    }
+                });
+            }
+
             // ── R15: System Tray ────────────────────────────────────────
             let open = MenuItemBuilder::with_id("open", "Open Dashboard").build(app)?;
             let pause = MenuItemBuilder::with_id("pause", "Pause Agent").build(app)?;
@@ -1854,6 +1949,11 @@ pub fn run() {
             // R26: Platform abstraction commands
             cmd_get_platform_info,
             cmd_open_url,
+            // R28: Feedback & Insights commands
+            cmd_submit_feedback,
+            cmd_get_feedback_stats,
+            cmd_get_weekly_insights,
+            cmd_get_recent_feedback,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");

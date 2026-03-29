@@ -103,6 +103,14 @@ export function useAgent() {
     // Channels
     const getChannelStatus = () => callInvoke<{ channels: Record<string, { connected: boolean; info?: string }> }>('get_channel_status');
 
+    // R28: Feedback & Insights
+    const submitFeedback = (taskId: string, taskText: string, responseText: string, rating: number, comment?: string, modelUsed?: string) =>
+        callInvoke<{ ok: boolean }>('submit_feedback', { task_id: taskId, task_text: taskText, response_text: responseText, rating, comment, model_used: modelUsed });
+
+    const getFeedbackStats = () => callInvoke<any>('get_feedback_stats');
+    const getWeeklyInsights = () => callInvoke<any>('get_weekly_insights');
+    const getRecentFeedback = (limit?: number) => callInvoke<any>('get_recent_feedback', { limit });
+
     return {
         getStatus, processMessage, getTasks, getPlaybooks, setActivePlaybook,
         getSettings, updateSettings, healthCheck, getActiveChain, getChainHistory,
@@ -120,6 +128,8 @@ export function useAgent() {
         getTriggers, createTrigger, deleteTrigger, toggleTrigger,
         // Channels
         getChannelStatus,
+        // Feedback
+        submitFeedback, getFeedbackStats, getWeeklyInsights, getRecentFeedback,
     };
 }
 
