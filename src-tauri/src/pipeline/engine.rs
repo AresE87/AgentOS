@@ -212,8 +212,9 @@ pub async fn run_task(
 
     emit(app_handle, "agent:step_started", task_id, 0, "Planning...");
 
-    // Initial LLM call
-    let plan = gateway.complete_with_system(description, Some(SYSTEM_PROMPT), settings)
+    // Initial LLM call — force Standard tier (sonnet/gpt-4o) for PC control
+    // Cheap models (haiku, flash) can't follow the complex agent system prompt
+    let plan = gateway.complete_as_agent(description, SYSTEM_PROMPT, settings)
         .await
         .map_err(|e| { fail(db_path, task_id, &e); e })?;
 
@@ -312,7 +313,7 @@ pub async fn run_task(
                         );
                         conversation.push(("user".into(), followup.clone()));
 
-                        if let Ok(fix) = gateway.complete_with_system(&followup, Some(SYSTEM_PROMPT), settings).await {
+                        if let Ok(fix) = gateway.complete_as_agent(&followup, SYSTEM_PROMPT, settings).await {
                             current_response = fix.content.trim().to_string();
                             conversation.push(("assistant".into(), current_response.clone()));
                             // Will be processed in the next turn
@@ -409,7 +410,7 @@ pub async fn run_task(
 
                     conversation.push(("user".into(), followup.clone()));
 
-                    if let Ok(next) = gateway.complete_with_system(&followup, Some(SYSTEM_PROMPT), settings).await {
+                    if let Ok(next) = gateway.complete_as_agent(&followup, SYSTEM_PROMPT, settings).await {
                         current_response = next.content.trim().to_string();
                         conversation.push(("assistant".into(), current_response.clone()));
                         continue; // Next turn
@@ -736,7 +737,7 @@ async fn execute_with_retry(
                     let prompt = format!("Original task: \"{}\"\n\n{}",
                         task, RETRY_PROMPT.replace("{ERROR}", &err).replace("{COMMAND}", &current));
 
-                    if let Ok(fix) = gateway.complete_with_system(&prompt, Some(SYSTEM_PROMPT), settings).await {
+                    if let Ok(fix) = gateway.complete_as_agent(&prompt, SYSTEM_PROMPT, settings).await {
                         if let Some(j) = extract_json(fix.content.trim()) {
                             if let Some(cmds) = j["commands"].as_array() {
                                 let new: Vec<&str> = cmds.iter().filter_map(|v| v.as_str()).collect();
