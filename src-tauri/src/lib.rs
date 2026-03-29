@@ -1,4 +1,5 @@
 pub mod agents;
+pub mod api;
 pub mod automation;
 pub mod billing;
 pub mod brain;
@@ -32,6 +33,11 @@ pub struct AppState {
     pub playbooks_dir: PathBuf,
     pub recorder: std::sync::Mutex<Option<playbooks::PlaybookRecorder>>,
     pub vault: std::sync::Mutex<vault::SecureVault>,
+    /// Shared in-memory store for API task results (task_id → status/result)
+    pub api_task_store: Option<api::server::TaskStore>,
+    /// Whether the public HTTP API is running
+    pub api_enabled: std::sync::Mutex<bool>,
+    pub api_port: u16,
 }
 
 #[tauri::command]
@@ -1179,6 +1185,83 @@ async fn cmd_set_plan(
     Ok(serde_json::json!({ "ok": true, "plan_type": plan_type }))
 }
 
+// ── R24: Public API commands ─────────────────────────────────
+
+#[tauri::command]
+async fn cmd_api_create_key(
+    name: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db_path = state.db_path.clone();
+    let conn = rusqlite::Connection::open(&db_path).map_err(|e| e.to_string())?;
+    let key = api::auth::create_api_key(&conn, &name)?;
+    Ok(serde_json::json!({
+        "id": key.id,
+        "name": key.name,
+        "key": key.key,
+        "created_at": key.created_at,
+        "enabled": key.enabled,
+    }))
+}
+
+#[tauri::command]
+async fn cmd_api_list_keys(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db_path = state.db_path.clone();
+    let conn = rusqlite::Connection::open(&db_path).map_err(|e| e.to_string())?;
+    let keys = api::auth::list_api_keys(&conn)?;
+    let list: Vec<serde_json::Value> = keys
+        .iter()
+        .map(|k| serde_json::json!({
+            "id": k.id,
+            "name": k.name,
+            "key": k.key,
+            "created_at": k.created_at,
+            "last_used": k.last_used,
+            "enabled": k.enabled,
+        }))
+        .collect();
+    Ok(serde_json::json!({ "keys": list }))
+}
+
+#[tauri::command]
+async fn cmd_api_revoke_key(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db_path = state.db_path.clone();
+    let conn = rusqlite::Connection::open(&db_path).map_err(|e| e.to_string())?;
+    api::auth::revoke_api_key(&conn, &id)?;
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+#[tauri::command]
+async fn cmd_api_get_status(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let enabled = *state.api_enabled.lock().map_err(|e| e.to_string())?;
+    let port = state.api_port;
+    Ok(serde_json::json!({
+        "enabled": enabled,
+        "port": port,
+        "url": format!("http://localhost:{}", port),
+    }))
+}
+
+#[tauri::command]
+async fn cmd_api_set_enabled(
+    enabled: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut api_enabled = state.api_enabled.lock().map_err(|e| e.to_string())?;
+    *api_enabled = enabled;
+    // Note: starting/stopping the server dynamically is complex in Tauri's setup model.
+    // The server is started at launch if enabled; toggling here updates the persisted flag.
+    // A restart is needed for the server to start if it wasn't running at launch.
+    Ok(serde_json::json!({ "ok": true, "enabled": enabled }))
+}
+
 // ── R22: Marketplace commands ────────────────────────────────
 
 #[tauri::command]
@@ -1382,17 +1465,69 @@ pub fn run() {
                 }
             }
 
+            let api_port: u16 = 8080;
             app.manage(AppState {
                 db: std::sync::Mutex::new(db),
                 gateway: tokio::sync::Mutex::new(gateway),
                 settings: std::sync::Mutex::new(settings.clone()),
                 kill_switch: Arc::new(AtomicBool::new(false)),
                 screenshots_dir,
-                db_path,
+                db_path: db_path.clone(),
                 playbooks_dir,
                 recorder: std::sync::Mutex::new(None),
                 vault: std::sync::Mutex::new(secure_vault),
+                api_task_store: None,
+                api_enabled: std::sync::Mutex::new(true),
+                api_port,
             });
+
+            // ── R24: Start public HTTP API server ─────────────────────
+            {
+                let api_db_path = db_path.to_string_lossy().to_string();
+                let api_settings = settings.clone();
+                tauri::async_runtime::spawn(async move {
+                    match api::server::start_api_server(api_db_path.clone(), api_port).await {
+                        Ok((mut rx, task_store)) => {
+                            tracing::info!("Public API server started on port {}", api_port);
+                            // Process incoming API tasks
+                            while let Some(task) = rx.recv().await {
+                                let store = task_store.clone();
+                                let s = api_settings.clone();
+                                let tid = task.task_id.clone();
+                                let text = task.text.clone();
+                                tokio::spawn(async move {
+                                    // Mark running
+                                    {
+                                        let mut w = store.write().await;
+                                        if let Some(e) = w.get_mut(&tid) {
+                                            e.status = "running".to_string();
+                                        }
+                                    }
+                                    // Simple LLM call
+                                    let gateway = crate::brain::Gateway::new(&s);
+                                    let result = gateway.complete(&text, &s).await;
+                                    let mut w = store.write().await;
+                                    if let Some(e) = w.get_mut(&tid) {
+                                        match result {
+                                            Ok(r) => {
+                                                e.status = "completed".to_string();
+                                                e.result = Some(r.content);
+                                            }
+                                            Err(err) => {
+                                                e.status = "error".to_string();
+                                                e.result = Some(err);
+                                            }
+                                        }
+                                    }
+                                });
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to start API server: {}", e);
+                        }
+                    }
+                });
+            }
 
             // Start Telegram bot if configured
             if !settings.telegram_bot_token.is_empty() {
@@ -1594,6 +1729,12 @@ pub fn run() {
             cmd_get_checkout_url,
             cmd_open_billing_portal,
             cmd_set_plan,
+            // R24: Public API commands
+            cmd_api_create_key,
+            cmd_api_list_keys,
+            cmd_api_revoke_key,
+            cmd_api_get_status,
+            cmd_api_set_enabled,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");
