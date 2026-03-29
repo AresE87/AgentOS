@@ -1,4 +1,5 @@
 pub mod agents;
+pub mod automation;
 pub mod brain;
 mod channels;
 pub mod config;
@@ -918,6 +919,67 @@ async fn cmd_get_channel_status(
     }))
 }
 
+// ── R18: Trigger / automation commands ──────────────────────
+
+#[tauri::command]
+async fn cmd_get_triggers(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let triggers = db.get_triggers().map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({ "triggers": triggers }))
+}
+
+#[tauri::command]
+async fn cmd_create_trigger(
+    state: tauri::State<'_, AppState>,
+    name: String,
+    trigger_type: String,
+    config: String,
+    task_text: String,
+) -> Result<serde_json::Value, String> {
+    let id = uuid::Uuid::new_v4().to_string();
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.create_trigger(&id, &name, &trigger_type, &config, &task_text)
+        .map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({ "ok": true, "id": id }))
+}
+
+#[tauri::command]
+async fn cmd_update_trigger(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    name: String,
+    config: String,
+    task_text: String,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.update_trigger(&id, &name, &config, &task_text)
+        .map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+#[tauri::command]
+async fn cmd_delete_trigger(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.delete_trigger(&id).map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+#[tauri::command]
+async fn cmd_toggle_trigger(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    enabled: bool,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.toggle_trigger(&id, enabled).map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({ "ok": true }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -999,6 +1061,24 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 mesh::transport::start_mesh_server(mesh_port, mesh_settings, mesh_kill).await;
             });
+
+            // ── R18: Scheduler — cron triggers ────────────────────────
+            {
+                let st = app.state::<AppState>();
+                let scheduler_settings = settings.clone();
+                let scheduler_kill = st.kill_switch.clone();
+                let scheduler_db_path = st.db_path.clone();
+                let scheduler_handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    automation::scheduler::start_scheduler(
+                        &scheduler_db_path,
+                        scheduler_settings,
+                        scheduler_kill,
+                        scheduler_handle,
+                    )
+                    .await;
+                });
+            }
 
             // ── R15: System Tray ────────────────────────────────────────
             let open = MenuItemBuilder::with_id("open", "Open Dashboard").build(app)?;
@@ -1114,6 +1194,12 @@ pub fn run() {
             cmd_test_click,
             cmd_test_type,
             cmd_test_key_combo,
+            // R18: Trigger/automation commands
+            cmd_get_triggers,
+            cmd_create_trigger,
+            cmd_update_trigger,
+            cmd_delete_trigger,
+            cmd_toggle_trigger,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");

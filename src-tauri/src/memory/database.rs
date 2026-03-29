@@ -1,3 +1,4 @@
+use crate::automation::scheduler::Trigger;
 use crate::brain::LLMResponse;
 use rusqlite::{params, Connection};
 use serde_json::{json, Value};
@@ -106,7 +107,20 @@ impl Database {
             );
 
             CREATE INDEX IF NOT EXISTS idx_chains_status ON chains(status);
-            CREATE INDEX IF NOT EXISTS idx_chain_subtasks_chain ON chain_subtasks(chain_id);",
+            CREATE INDEX IF NOT EXISTS idx_chain_subtasks_chain ON chain_subtasks(chain_id);
+
+            CREATE TABLE IF NOT EXISTS triggers (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                trigger_type TEXT NOT NULL,
+                config TEXT NOT NULL,
+                task_text TEXT NOT NULL,
+                enabled INTEGER DEFAULT 1,
+                last_run TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_triggers_enabled ON triggers(enabled);",
         )
     }
 
@@ -615,6 +629,105 @@ impl Database {
 
         Ok(json!(steps))
     }
+
+    // ── R18: Trigger / automation methods ─────────────────────
+
+    pub fn get_triggers(&self) -> Result<Vec<Trigger>, rusqlite::Error> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, trigger_type, config, task_text, enabled, last_run, created_at
+             FROM triggers ORDER BY created_at DESC",
+        )?;
+        let triggers = stmt
+            .query_map([], |row| {
+                Ok(Trigger {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    trigger_type: row.get(2)?,
+                    config: row.get(3)?,
+                    task_text: row.get(4)?,
+                    enabled: row.get::<_, i32>(5)? == 1,
+                    last_run: row.get(6)?,
+                    created_at: row.get(7)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(triggers)
+    }
+
+    pub fn get_enabled_triggers(&self) -> Result<Vec<Trigger>, rusqlite::Error> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, trigger_type, config, task_text, enabled, last_run, created_at
+             FROM triggers WHERE enabled = 1 ORDER BY created_at DESC",
+        )?;
+        let triggers = stmt
+            .query_map([], |row| {
+                Ok(Trigger {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    trigger_type: row.get(2)?,
+                    config: row.get(3)?,
+                    task_text: row.get(4)?,
+                    enabled: row.get::<_, i32>(5)? == 1,
+                    last_run: row.get(6)?,
+                    created_at: row.get(7)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(triggers)
+    }
+
+    pub fn create_trigger(
+        &self,
+        id: &str,
+        name: &str,
+        trigger_type: &str,
+        config: &str,
+        task_text: &str,
+    ) -> Result<(), rusqlite::Error> {
+        self.conn.execute(
+            "INSERT INTO triggers (id, name, trigger_type, config, task_text)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![id, name, trigger_type, config, task_text],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_trigger(
+        &self,
+        id: &str,
+        name: &str,
+        config: &str,
+        task_text: &str,
+    ) -> Result<(), rusqlite::Error> {
+        self.conn.execute(
+            "UPDATE triggers SET name = ?2, config = ?3, task_text = ?4 WHERE id = ?1",
+            params![id, name, config, task_text],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_trigger(&self, id: &str) -> Result<(), rusqlite::Error> {
+        self.conn.execute("DELETE FROM triggers WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    pub fn toggle_trigger(&self, id: &str, enabled: bool) -> Result<(), rusqlite::Error> {
+        self.conn.execute(
+            "UPDATE triggers SET enabled = ?2 WHERE id = ?1",
+            params![id, enabled as i32],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_trigger_last_run(&self, id: &str, last_run: &str) -> Result<(), rusqlite::Error> {
+        self.conn.execute(
+            "UPDATE triggers SET last_run = ?2 WHERE id = ?1",
+            params![id, last_run],
+        )?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -824,5 +937,77 @@ mod tests {
         db.insert_llm_call("t_llm", "anthropic", "haiku", 100, 200, 0.01, 500).unwrap();
         // No panic = success. The llm_calls table is not directly queried in the current API,
         // but insert_task already creates one, so we verify it doesn't error.
+    }
+
+    // ── Trigger CRUD ──────────────────────────────────────────
+
+    #[test]
+    fn create_and_list_triggers() {
+        let (db, _) = temp_db();
+        db.create_trigger("tr1", "Morning report", "cron", r#"{"cron":"0 9 * * *"}"#, "Generate daily report")
+            .unwrap();
+        db.create_trigger("tr2", "Hourly check", "cron", r#"{"cron":"0 * * * *"}"#, "Check system status")
+            .unwrap();
+
+        let triggers = db.get_triggers().unwrap();
+        assert_eq!(triggers.len(), 2);
+        let names: Vec<&str> = triggers.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"Morning report"));
+        assert!(names.contains(&"Hourly check"));
+    }
+
+    #[test]
+    fn toggle_trigger() {
+        let (db, _) = temp_db();
+        db.create_trigger("tr1", "Test", "cron", r#"{"cron":"*/5 * * * *"}"#, "test")
+            .unwrap();
+
+        let enabled = db.get_enabled_triggers().unwrap();
+        assert_eq!(enabled.len(), 1);
+
+        db.toggle_trigger("tr1", false).unwrap();
+        let enabled = db.get_enabled_triggers().unwrap();
+        assert_eq!(enabled.len(), 0);
+
+        let all = db.get_triggers().unwrap();
+        assert_eq!(all.len(), 1);
+        assert!(!all[0].enabled);
+    }
+
+    #[test]
+    fn update_trigger() {
+        let (db, _) = temp_db();
+        db.create_trigger("tr1", "Old Name", "cron", r#"{"cron":"*/5 * * * *"}"#, "old task")
+            .unwrap();
+
+        db.update_trigger("tr1", "New Name", r#"{"cron":"*/10 * * * *"}"#, "new task")
+            .unwrap();
+
+        let triggers = db.get_triggers().unwrap();
+        assert_eq!(triggers[0].name, "New Name");
+        assert_eq!(triggers[0].task_text, "new task");
+    }
+
+    #[test]
+    fn delete_trigger() {
+        let (db, _) = temp_db();
+        db.create_trigger("tr1", "Test", "cron", r#"{"cron":"*/5 * * * *"}"#, "test")
+            .unwrap();
+
+        db.delete_trigger("tr1").unwrap();
+        let triggers = db.get_triggers().unwrap();
+        assert_eq!(triggers.len(), 0);
+    }
+
+    #[test]
+    fn update_trigger_last_run() {
+        let (db, _) = temp_db();
+        db.create_trigger("tr1", "Test", "cron", r#"{"cron":"*/5 * * * *"}"#, "test")
+            .unwrap();
+
+        db.update_trigger_last_run("tr1", "2026-03-29T10:00:00Z").unwrap();
+
+        let triggers = db.get_triggers().unwrap();
+        assert_eq!(triggers[0].last_run, Some("2026-03-29T10:00:00Z".to_string()));
     }
 }
