@@ -1,6 +1,8 @@
-# Agent Economy (v4.2)
+# Agent Economy (v4.2.0)
 
-AgentOS v4.2 introduces a full agent economy: creators build and publish agents, users hire them, payments flow through escrow, and reputation drives discovery.
+AgentOS v4.2.0 introduces a full agent economy: creators build and publish agents, users hire them, payments flow through escrow, and reputation drives discovery.
+
+> "AgentOS isn't just software. It's an economy."
 
 ## Modules
 
