@@ -2899,6 +2899,64 @@ async fn cmd_screen_diff(
     }))
 }
 
+// ── R46: Observability commands ─────────────────────────────────────
+
+#[tauri::command]
+async fn cmd_get_logs(
+    limit: Option<usize>,
+    level: Option<String>,
+    module: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let entries = state.structured_logger.get_recent(
+        limit.unwrap_or(100),
+        level.as_deref(),
+        module.as_deref(),
+    );
+    Ok(serde_json::json!({ "logs": entries, "count": entries.len() }))
+}
+
+#[tauri::command]
+async fn cmd_export_logs(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let content = state.structured_logger.export()?;
+    let line_count = content.lines().count();
+    Ok(serde_json::json!({ "content": content, "lines": line_count }))
+}
+
+#[tauri::command]
+async fn cmd_get_alerts(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.alert_manager.lock().await;
+    let active: Vec<_> = mgr.get_active().into_iter().cloned().collect();
+    let all = mgr.get_all().to_vec();
+    let rules = mgr.get_rules().to_vec();
+    Ok(serde_json::json!({
+        "active": active,
+        "all": all,
+        "rules": rules,
+        "active_count": active.len()
+    }))
+}
+
+#[tauri::command]
+async fn cmd_acknowledge_alert(
+    alert_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.alert_manager.lock().await;
+    mgr.acknowledge(&alert_id);
+    Ok(serde_json::json!({ "ok": true, "alert_id": alert_id }))
+}
+
+#[tauri::command]
+async fn cmd_get_health() -> Result<serde_json::Value, String> {
+    let status = observability::HealthDashboard::check_all().await;
+    Ok(serde_json::json!(status))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -3008,6 +3066,12 @@ pub fn run() {
                 command_sandbox: Arc::new(security::sandbox::CommandSandbox::new()),
                 relay_client: tokio::sync::Mutex::new(None),
                 branding: Arc::new(tokio::sync::RwLock::new(branding_config)),
+                structured_logger: Arc::new(observability::logger::StructuredLogger::new(
+                    app_dir.join("logs"),
+                )),
+                alert_manager: Arc::new(tokio::sync::Mutex::new(
+                    observability::alerts::AlertManager::new(),
+                )),
             });
 
             // ── R35: Deferred startup — plugin discovery in background ────
@@ -3429,6 +3493,12 @@ pub fn run() {
             cmd_update_branding,
             cmd_get_css_variables,
             cmd_reset_branding,
+            // R46: Observability commands
+            cmd_get_logs,
+            cmd_export_logs,
+            cmd_get_alerts,
+            cmd_acknowledge_alert,
+            cmd_get_health,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");

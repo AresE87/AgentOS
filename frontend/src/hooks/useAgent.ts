@@ -202,6 +202,15 @@ export function useAgent() {
     const getCssVariables = () => callInvoke<{ css: string }>('get_css_variables');
     const resetBranding = () => callInvoke<any>('reset_branding');
 
+    // R46: Observability
+    const getLogs = (limit?: number, level?: string, module?: string) =>
+        callInvoke<any>('get_logs', { limit, level, module });
+    const exportLogs = () => callInvoke<any>('export_logs');
+    const getAlerts = () => callInvoke<any>('get_alerts');
+    const acknowledgeAlert = (alertId: string) =>
+        callInvoke<any>('acknowledge_alert', { alert_id: alertId });
+    const getHealth = () => callInvoke<any>('get_health');
+
     return {
         getStatus, processMessage, getTasks, getPlaybooks, setActivePlaybook,
         getSettings, updateSettings, healthCheck, getActiveChain, getChainHistory,
@@ -246,6 +255,8 @@ export function useAgent() {
         relayConnect, relayDisconnect, relayListNodes, relaySendTask, getRelayStatus,
         // R45: White-Label / OEM Branding
         getBranding, updateBranding, getCssVariables, resetBranding,
+        // R46: Observability
+        getLogs, exportLogs, getAlerts, acknowledgeAlert, getHealth,
     };
 }
 
