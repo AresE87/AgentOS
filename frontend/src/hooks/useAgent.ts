@@ -485,6 +485,31 @@ export function useAgent() {
     const analyticsCostForecast = () => callInvoke<any>('analytics_cost_forecast');
     const analyticsModelComparison = () => callInvoke<any>('analytics_model_comparison');
 
+    // R77: Embeddable Agent Widget
+    const generateWidgetSnippet = (config: { api_key: string; agent_url: string; persona?: string; theme: string; position: string; welcome_message: string }) =>
+        callInvoke<{ snippet: string }>('generate_widget_snippet', { config });
+    const generateWidgetIframe = (config: { api_key: string; agent_url: string; persona?: string; theme: string; position: string; welcome_message: string }) =>
+        callInvoke<{ url: string }>('generate_widget_iframe', { config });
+
+    // R78: CLI Power Mode
+    const terminalExecute = (command: string) =>
+        callInvoke<{ command: string; stdout: string; stderr: string; exit_code: number; duration_ms: number }>('terminal_execute', { command });
+    const terminalExplainError = (errorText: string) =>
+        callInvoke<{ error_text: string; explanation: string; suggested_fix: string; confidence: number }>('terminal_explain_error', { error_text: errorText });
+    const terminalNlToCommand = (naturalLanguage: string) =>
+        callInvoke<{ prompt: string; input: string }>('terminal_nl_to_command', { natural_language: naturalLanguage });
+    const terminalHistory = (limit?: number) =>
+        callInvoke<any[]>('terminal_history', { limit });
+
+    // R79: Extension API V2
+    const pluginGetUI = (name: string) => callInvoke<any>('plugin_get_ui', { name });
+    const pluginInvokeMethod = (name: string, method: string, args: any) =>
+        callInvoke<any>('plugin_invoke_method', { name, method, args });
+    const pluginStorageGet = (name: string, key: string) =>
+        callInvoke<{ plugin: string; key: string; value: string | null }>('plugin_storage_get', { name, key });
+    const pluginStorageSet = (name: string, key: string, value: string) =>
+        callInvoke<{ ok: boolean }>('plugin_storage_set', { name, key, value });
+
     return {
         getStatus, processMessage, getTasks, getPlaybooks, setActivePlaybook,
         getSettings, updateSettings, healthCheck, getActiveChain, getChainHistory,
@@ -587,6 +612,12 @@ export function useAgent() {
         playbookVersions, playbookSaveVersion, playbookRollback, playbookDiff, playbookBranches, playbookCreateBranch,
         // R76: Analytics Pro
         analyticsFunnel, analyticsRetention, analyticsCostForecast, analyticsModelComparison,
+        // R77: Embeddable Agent Widget
+        generateWidgetSnippet, generateWidgetIframe,
+        // R78: CLI Power Mode
+        terminalExecute, terminalExplainError, terminalNlToCommand, terminalHistory,
+        // R79: Extension API V2
+        pluginGetUI, pluginInvokeMethod, pluginStorageGet, pluginStorageSet,
     };
 }
 

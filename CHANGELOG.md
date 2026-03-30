@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.3.0] - 2026-03-29
+
+### Added
+- R71: Visual Workflow Builder — drag-and-drop workflow canvas, node types, execution engine
+- R72: Webhook Actions — inbound webhook triggers with task templates and filters
+- R73: Fine-Tuning Pipeline — training data export, fine-tune job management, preview
+- R74: Agent Testing — test suites, assertions, template generation, automated runs
+- R75: Playbook Version Control — version history, rollback, diff, branching
+- R76: Analytics Pro — funnel analysis, retention cohorts, cost forecasting, model comparison
+- R77: Embeddable Agent Widget — JS snippet generator, iframe config, embed demo page
+- R78: CLI Power Mode — smart terminal execution, error explanation, NL-to-command translation
+- R79: Extension API V2 — plugin UI pages and widgets, method invocation, scoped storage (SQLite)
+- R80: Plugin certification 5-step process, partner program (Bronze/Silver/Gold/Platinum tiers)
+
+### Changed
+- Version bump to 1.3.0 across Cargo.toml, frontend, and mobile packages
+
 ## [1.2.0] - 2026-03-29
 
 ### Added

@@ -46,6 +46,8 @@ pub mod teams;
 pub mod workflows;
 pub mod webhooks;
 pub mod testing;
+pub mod widget;
+pub mod terminal;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -116,6 +118,12 @@ pub struct AppState {
     pub api_registry: Arc<tokio::sync::Mutex<integrations::APIRegistry>>,
     /// R70: Department quota manager
     pub quota_manager: Arc<enterprise::QuotaManager>,
+    /// R77: Embeddable Agent Widget — embed generator config
+    pub embed_widget_config: std::sync::Mutex<widget::WidgetConfig>,
+    /// R78: CLI Power Mode — smart terminal
+    pub smart_terminal: Arc<tokio::sync::Mutex<terminal::SmartTerminal>>,
+    /// R79: Extension API V2 — plugin UI, scoped storage
+    pub extension_api_v2: Arc<tokio::sync::Mutex<plugins::ExtensionAPIv2>>,
 }
 
 // ── R44: Cloud Mesh Relay commands ──────────────────────────────────
@@ -4707,6 +4715,121 @@ async fn cmd_analytics_model_comparison(
     serde_json::to_value(&scores).map_err(|e| e.to_string())
 }
 
+// ── R77: Embeddable Agent Widget commands ─────────────────────────
+
+#[tauri::command]
+async fn cmd_generate_widget_snippet(
+    config: widget::WidgetConfig,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    // Store the config for future reference
+    {
+        let mut cfg = state.embed_widget_config.lock().map_err(|e| e.to_string())?;
+        *cfg = config.clone();
+    }
+    let snippet = widget::EmbedGenerator::generate_snippet(&config);
+    Ok(serde_json::json!({ "snippet": snippet }))
+}
+
+#[tauri::command]
+async fn cmd_generate_widget_iframe(
+    config: widget::WidgetConfig,
+    _state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let url = widget::EmbedGenerator::generate_iframe_url(&config);
+    Ok(serde_json::json!({ "url": url }))
+}
+
+// ── R78: CLI Power Mode commands ──────────────────────────────────
+
+#[tauri::command]
+async fn cmd_terminal_execute(
+    command: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut terminal = state.smart_terminal.lock().await;
+    let output = terminal.execute(&command).await?;
+    serde_json::to_value(&output).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_terminal_explain_error(
+    error_text: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let terminal = state.smart_terminal.lock().await;
+    let explanation = terminal.explain_error(&error_text);
+    serde_json::to_value(&explanation).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_terminal_nl_to_command(
+    natural_language: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let terminal = state.smart_terminal.lock().await;
+    let prompt = terminal.nl_to_command(&natural_language);
+    Ok(serde_json::json!({ "prompt": prompt, "input": natural_language }))
+}
+
+#[tauri::command]
+async fn cmd_terminal_history(
+    limit: Option<usize>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let terminal = state.smart_terminal.lock().await;
+    let history = terminal.get_history(limit.unwrap_or(20));
+    serde_json::to_value(&history).map_err(|e| e.to_string())
+}
+
+// ── R79: Extension API V2 commands ────────────────────────────────
+
+#[tauri::command]
+async fn cmd_plugin_get_ui(
+    name: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let api = state.extension_api_v2.lock().await;
+    match api.get_plugin_ui(&name) {
+        Some(ui) => serde_json::to_value(ui).map_err(|e| e.to_string()),
+        None => Ok(serde_json::json!({ "error": "Plugin UI not found", "name": name })),
+    }
+}
+
+#[tauri::command]
+async fn cmd_plugin_invoke_method(
+    name: String,
+    method: String,
+    args: serde_json::Value,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let api = state.extension_api_v2.lock().await;
+    api.invoke_plugin_method(&name, &method, &args)
+}
+
+#[tauri::command]
+async fn cmd_plugin_storage_get(
+    name: String,
+    key: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let api = state.extension_api_v2.lock().await;
+    let value = api.plugin_storage_get(&name, &key)?;
+    Ok(serde_json::json!({ "plugin": name, "key": key, "value": value }))
+}
+
+#[tauri::command]
+async fn cmd_plugin_storage_set(
+    name: String,
+    key: String,
+    value: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let api = state.extension_api_v2.lock().await;
+    api.plugin_storage_set(&name, &key, &value)?;
+    Ok(serde_json::json!({ "ok": true, "plugin": name, "key": key }))
+}
+
 /// Simple non-cryptographic hash for referral IDs (not security-sensitive).
 fn md5_simple(data: &[u8]) -> u64 {
     let mut hash: u64 = 0xcbf29ce484222325;
@@ -4868,6 +4991,13 @@ pub fn run() {
                     integrations::APIRegistry::new(),
                 )),
                 quota_manager: Arc::new(enterprise::QuotaManager::new()),
+                embed_widget_config: std::sync::Mutex::new(widget::WidgetConfig::default()),
+                smart_terminal: Arc::new(tokio::sync::Mutex::new(
+                    terminal::SmartTerminal::new(),
+                )),
+                extension_api_v2: Arc::new(tokio::sync::Mutex::new(
+                    plugins::ExtensionAPIv2::new(app_dir.join("plugin_storage.db")),
+                )),
             });
 
             // ── R35: Deferred startup — plugin discovery in background ────
@@ -5515,6 +5645,19 @@ pub fn run() {
             cmd_analytics_retention,
             cmd_analytics_cost_forecast,
             cmd_analytics_model_comparison,
+            // R77: Embeddable Agent Widget commands
+            cmd_generate_widget_snippet,
+            cmd_generate_widget_iframe,
+            // R78: CLI Power Mode commands
+            cmd_terminal_execute,
+            cmd_terminal_explain_error,
+            cmd_terminal_nl_to_command,
+            cmd_terminal_history,
+            // R79: Extension API V2 commands
+            cmd_plugin_get_ui,
+            cmd_plugin_invoke_method,
+            cmd_plugin_storage_get,
+            cmd_plugin_storage_set,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");
