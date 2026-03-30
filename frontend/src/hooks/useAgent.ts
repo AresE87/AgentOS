@@ -587,6 +587,71 @@ export function useAgent() {
         callInvoke<any>('swarm_results', { task_id: taskId });
     const swarmList = () => callInvoke<any[]>('swarm_list');
 
+    // R96: Agent Debugger
+    const debuggerStartTrace = (taskId: string) =>
+        callInvoke<{ trace_id: string; task_id: string }>('debugger_start_trace', { task_id: taskId });
+    const debuggerGetTrace = (traceId: string) =>
+        callInvoke<any>('debugger_get_trace', { trace_id: traceId });
+    const debuggerListTraces = (limit?: number) =>
+        callInvoke<any>('debugger_list_traces', { limit });
+
+    // R97: Revenue Optimization
+    const getRevenueMetrics = () => callInvoke<any>('revenue_metrics');
+    const getChurnPredictions = () => callInvoke<any>('churn_predictions');
+    const getUpsellCandidates = () => callInvoke<any>('upsell_candidates');
+
+    // R98: Global Infrastructure
+    const getInfraStatus = () => callInvoke<any>('infra_status');
+    const infraCheckRegions = () => callInvoke<any>('infra_check_regions');
+
+    // R99: IPO Readiness
+    const getInvestorMetrics = () => callInvoke<any>('investor_metrics');
+    const getDataRoom = () => callInvoke<any>('data_room');
+    const getFinancialProjections = (years?: number) =>
+        callInvoke<any>('financial_projections', { years });
+
+    // R91: OS Integration
+    const getFileActions = () => callInvoke<any[]>('get_file_actions');
+    const getTextActions = () => callInvoke<any[]>('get_text_actions');
+    const processFileAction = (filePath: string, actionId: string) =>
+        callInvoke<any>('process_file_action', { file_path: filePath, action_id: actionId });
+    const processTextAction = (text: string, actionId: string) =>
+        callInvoke<any>('process_text_action', { text, action_id: actionId });
+
+    // R92: Federated Learning
+    const federatedTrain = () => callInvoke<any>('federated_train');
+    const federatedSubmit = () => callInvoke<any>('federated_submit');
+    const federatedStatus = () => callInvoke<any>('federated_status');
+    const federatedConfig = (serverUrl?: string, modelName?: string, privacyBudget?: number, minSamples?: number) =>
+        callInvoke<any>('federated_config', { server_url: serverUrl, model_name: modelName, privacy_budget: privacyBudget, min_samples: minSamples });
+
+    // R93: Human Handoff
+    const listEscalations = () => callInvoke<any[]>('list_escalations');
+    const resolveEscalation = (id: string) =>
+        callInvoke<{ ok: boolean }>('resolve_escalation', { id });
+    const createEscalation = (confidence: number, retries: number, taskType: string, taskDescription: string, attempts: string[]) =>
+        callInvoke<any>('create_escalation', { confidence, retries, task_type: taskType, task_description: taskDescription, attempts });
+    const getEscalation = (id: string) =>
+        callInvoke<any>('get_escalation', { id });
+
+    // R94: Compliance Automation
+    const runComplianceCheck = (framework: string) =>
+        callInvoke<any>('run_compliance_check', { framework });
+    const getComplianceReports = () => callInvoke<any[]>('get_compliance_reports');
+    const getComplianceScore = () => callInvoke<any>('get_compliance_score');
+
+    // R95: White-Label Org Marketplace
+    const orgMarketplacePublish = (orgId: string, resourceType: string, resourceId: string, visibility: string) =>
+        callInvoke<any>('org_marketplace_publish', { org_id: orgId, resource_type: resourceType, resource_id: resourceId, visibility });
+    const orgMarketplaceList = (orgId: string) =>
+        callInvoke<any[]>('org_marketplace_list', { org_id: orgId });
+    const orgMarketplaceApprove = (listingId: string) =>
+        callInvoke<{ ok: boolean }>('org_marketplace_approve', { listing_id: listingId });
+    const orgMarketplaceRemove = (listingId: string) =>
+        callInvoke<{ ok: boolean }>('org_marketplace_remove', { listing_id: listingId });
+    const orgMarketplaceSearch = (query: string, orgId: string) =>
+        callInvoke<any[]>('org_marketplace_search', { query, org_id: orgId });
+
     return {
         getStatus, processMessage, getTasks, getPlaybooks, setActivePlaybook,
         getSettings, updateSettings, healthCheck, getActiveChain, getChainHistory,
@@ -713,6 +778,24 @@ export function useAgent() {
         crossappRegister, crossappList, crossappSend, crossappStatus,
         // R85: Agent Swarm
         swarmCreate, swarmExecute, swarmResults, swarmList,
+        // R96: Agent Debugger
+        debuggerStartTrace, debuggerGetTrace, debuggerListTraces,
+        // R97: Revenue Optimization
+        getRevenueMetrics, getChurnPredictions, getUpsellCandidates,
+        // R98: Global Infrastructure
+        getInfraStatus, infraCheckRegions,
+        // R99: IPO Readiness
+        getInvestorMetrics, getDataRoom, getFinancialProjections,
+        // R91: OS Integration
+        getFileActions, getTextActions, processFileAction, processTextAction,
+        // R92: Federated Learning
+        federatedTrain, federatedSubmit, federatedStatus, federatedConfig,
+        // R93: Human Handoff
+        listEscalations, resolveEscalation, createEscalation, getEscalation,
+        // R94: Compliance Automation
+        runComplianceCheck, getComplianceReports, getComplianceScore,
+        // R95: White-Label Org Marketplace
+        orgMarketplacePublish, orgMarketplaceList, orgMarketplaceApprove, orgMarketplaceRemove, orgMarketplaceSearch,
     };
 }
 

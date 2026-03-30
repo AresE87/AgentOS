@@ -57,6 +57,13 @@ pub mod multimodal;
 pub mod predictions;
 pub mod crossapp;
 pub mod swarm;
+pub mod debugger;
+pub mod revenue;
+pub mod infrastructure;
+pub mod ipo;
+pub mod os_integration;
+pub mod federated;
+pub mod escalation;
 
 use base64::Engine as _;
 use std::path::PathBuf;
@@ -152,6 +159,24 @@ pub struct AppState {
     pub crossapp_bridge: Arc<tokio::sync::Mutex<crossapp::CrossAppBridge>>,
     /// R85: Agent Swarm coordinator
     pub swarm_coordinator: Arc<tokio::sync::Mutex<swarm::SwarmCoordinator>>,
+    /// R96: Agent Debugger
+    pub agent_debugger: Arc<tokio::sync::Mutex<debugger::AgentDebugger>>,
+    /// R97: Revenue Optimizer
+    pub revenue_optimizer: Arc<revenue::RevenueOptimizer>,
+    /// R98: Infrastructure Monitor
+    pub infra_monitor: Arc<infrastructure::InfraMonitor>,
+    /// R99: IPO Dashboard
+    pub ipo_dashboard: Arc<ipo::IPODashboard>,
+    /// R91: OS Integration — shell integration
+    pub shell_integration: Arc<std::sync::Mutex<os_integration::ShellIntegration>>,
+    /// R92: Federated Learning client
+    pub federated_client: Arc<tokio::sync::Mutex<federated::FederatedClient>>,
+    /// R93: Human Handoff — escalation manager
+    pub escalation_manager: Arc<tokio::sync::Mutex<escalation::EscalationManager>>,
+    /// R94: Compliance Automation reporter
+    pub compliance_reporter: Arc<tokio::sync::Mutex<compliance::ComplianceReporter>>,
+    /// R95: White-Label Org Marketplace
+    pub org_marketplace: Arc<tokio::sync::Mutex<marketplace::OrgMarketplace>>,
 }
 
 // ── R44: Cloud Mesh Relay commands ──────────────────────────────────
@@ -5245,6 +5270,116 @@ async fn cmd_swarm_list(
     serde_json::to_value(&tasks).map_err(|e| e.to_string())
 }
 
+// ── R96: Agent Debugger commands ──────────────────────────────────
+
+#[tauri::command]
+async fn cmd_debugger_start_trace(
+    task_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut dbg = state.agent_debugger.lock().await;
+    let trace_id = dbg.start_trace(&task_id);
+    Ok(serde_json::json!({ "trace_id": trace_id, "task_id": task_id }))
+}
+
+#[tauri::command]
+async fn cmd_debugger_get_trace(
+    trace_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let dbg = state.agent_debugger.lock().await;
+    match dbg.get_trace(&trace_id) {
+        Some(trace) => serde_json::to_value(trace).map_err(|e| e.to_string()),
+        None => Err(format!("Trace not found: {}", trace_id)),
+    }
+}
+
+#[tauri::command]
+async fn cmd_debugger_list_traces(
+    limit: Option<usize>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let dbg = state.agent_debugger.lock().await;
+    let traces = dbg.list_traces(limit.unwrap_or(20));
+    serde_json::to_value(&traces).map_err(|e| e.to_string())
+}
+
+// ── R97: Revenue Optimization commands ──────────────────────────────
+
+#[tauri::command]
+fn cmd_revenue_metrics(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let metrics = state.revenue_optimizer.calculate_metrics(db.conn());
+    serde_json::to_value(&metrics).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn cmd_churn_predictions(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let risks = state.revenue_optimizer.predict_churn(db.conn());
+    serde_json::to_value(&risks).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn cmd_upsell_candidates(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let candidates = state.revenue_optimizer.get_upsell_candidates(db.conn());
+    serde_json::to_value(&candidates).map_err(|e| e.to_string())
+}
+
+// ── R98: Global Infrastructure commands ─────────────────────────────
+
+#[tauri::command]
+fn cmd_infra_status(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let status = state.infra_monitor.check_regions();
+    serde_json::to_value(&status).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn cmd_infra_check_regions(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let data = state.infra_monitor.get_status_page_data();
+    Ok(data)
+}
+
+// ── R99: IPO Readiness commands ─────────────────────────────────────
+
+#[tauri::command]
+fn cmd_investor_metrics(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let metrics = state.ipo_dashboard.calculate_metrics(db.conn());
+    serde_json::to_value(&metrics).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn cmd_data_room(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let docs = state.ipo_dashboard.generate_data_room_index();
+    serde_json::to_value(&docs).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn cmd_financial_projections(
+    years: Option<u32>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let projections = state.ipo_dashboard.get_projections(db.conn(), years.unwrap_or(5));
+    serde_json::to_value(&projections).map_err(|e| e.to_string())
+}
+
 /// Simple non-cryptographic hash for referral IDs (not security-sensitive).
 fn md5_simple(data: &[u8]) -> u64 {
     let mut hash: u64 = 0xcbf29ce484222325;
@@ -5253,6 +5388,253 @@ fn md5_simple(data: &[u8]) -> u64 {
         hash = hash.wrapping_mul(0x100000001b3);
     }
     hash
+}
+
+// ── R91: OS Integration commands ─────────────────────────────────
+
+#[tauri::command]
+fn cmd_get_file_actions(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let si = state.shell_integration.lock().map_err(|e| e.to_string())?;
+    serde_json::to_value(si.get_file_actions()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn cmd_get_text_actions(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let si = state.shell_integration.lock().map_err(|e| e.to_string())?;
+    serde_json::to_value(si.get_text_actions()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn cmd_process_file_action(
+    file_path: String,
+    action_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let si = state.shell_integration.lock().map_err(|e| e.to_string())?;
+    let result = si.process_file_action(&file_path, &action_id)?;
+    serde_json::to_value(&result).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn cmd_process_text_action(
+    text: String,
+    action_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let si = state.shell_integration.lock().map_err(|e| e.to_string())?;
+    let result = si.process_text_action(&text, &action_id)?;
+    serde_json::to_value(&result).map_err(|e| e.to_string())
+}
+
+// ── R92: Federated Learning commands ─────────────────────────────
+
+#[tauri::command]
+async fn cmd_federated_train(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut client = state.federated_client.lock().await;
+    let data: Vec<Vec<f64>> = vec![vec![1.0, 2.0], vec![3.0, 4.0]];
+    let deltas = client.train_local(&data);
+    let noisy = client.add_privacy_noise(deltas, client.get_config().privacy_budget);
+    serde_json::to_value(&noisy).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_federated_submit(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut client = state.federated_client.lock().await;
+    let data: Vec<Vec<f64>> = vec![vec![1.0, 2.0]];
+    let deltas = client.train_local(&data);
+    let noisy = client.add_privacy_noise(deltas, client.get_config().privacy_budget);
+    client.submit_deltas(&noisy)
+}
+
+#[tauri::command]
+async fn cmd_federated_status(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let client = state.federated_client.lock().await;
+    Ok(client.get_status())
+}
+
+#[tauri::command]
+async fn cmd_federated_config(
+    server_url: Option<String>,
+    model_name: Option<String>,
+    privacy_budget: Option<f64>,
+    min_samples: Option<u32>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut client = state.federated_client.lock().await;
+    let mut cfg = client.get_config().clone();
+    if let Some(url) = server_url { cfg.server_url = url; }
+    if let Some(name) = model_name { cfg.model_name = name; }
+    if let Some(budget) = privacy_budget { cfg.privacy_budget = budget; }
+    if let Some(min) = min_samples { cfg.min_samples = min; }
+    client.configure(cfg.clone());
+    serde_json::to_value(&cfg).map_err(|e| e.to_string())
+}
+
+// ── R93: Human Handoff / Escalation commands ─────────────────────
+
+#[tauri::command]
+async fn cmd_list_escalations(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.escalation_manager.lock().await;
+    let pending: Vec<_> = mgr.list_pending().into_iter().cloned().collect();
+    serde_json::to_value(&pending).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_resolve_escalation(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.escalation_manager.lock().await;
+    mgr.resolve(&id)?;
+    Ok(serde_json::json!({ "ok": true, "id": id }))
+}
+
+#[tauri::command]
+async fn cmd_create_escalation(
+    confidence: f64,
+    retries: u32,
+    task_type: String,
+    task_description: String,
+    attempts: Vec<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let reason = escalation::EscalationDetector::should_escalate(confidence, retries, &task_type)
+        .unwrap_or(escalation::EscalationReason::UserRequest);
+    let pkg = escalation::EscalationDetector::create_handoff(reason, &task_description, attempts);
+    let mut mgr = state.escalation_manager.lock().await;
+    let val = serde_json::to_value(&pkg).map_err(|e| e.to_string())?;
+    mgr.add(pkg);
+    Ok(val)
+}
+
+#[tauri::command]
+async fn cmd_get_escalation(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.escalation_manager.lock().await;
+    let esc = mgr.get(&id).ok_or_else(|| format!("Not found: {}", id))?;
+    serde_json::to_value(esc).map_err(|e| e.to_string())
+}
+
+// ── R94: Compliance Automation commands ──────────────────────────
+
+#[tauri::command]
+async fn cmd_run_compliance_check(
+    framework: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut reporter = state.compliance_reporter.lock().await;
+    let report = match framework.to_lowercase().as_str() {
+        "gdpr" => reporter.run_gdpr_checks(),
+        "sox" => reporter.run_sox_checks(),
+        "hipaa" => reporter.run_hipaa_checks(),
+        "iso27001" => reporter.run_iso27001_checks(),
+        _ => return Err(format!("Unknown framework: {}. Supported: gdpr, sox, hipaa, iso27001", framework)),
+    };
+    serde_json::to_value(&report).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_get_compliance_reports(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let reporter = state.compliance_reporter.lock().await;
+    serde_json::to_value(reporter.get_all_reports()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_get_compliance_score(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let reporter = state.compliance_reporter.lock().await;
+    let reports = reporter.get_all_reports();
+    let avg = if reports.is_empty() {
+        0.0
+    } else {
+        reports.iter().map(|r| r.score).sum::<f64>() / reports.len() as f64
+    };
+    Ok(serde_json::json!({
+        "overall_score": avg,
+        "frameworks_checked": reports.len(),
+    }))
+}
+
+// ── R95: White-Label Org Marketplace commands ────────────────────
+
+#[tauri::command]
+async fn cmd_org_marketplace_publish(
+    org_id: String,
+    resource_type: String,
+    resource_id: String,
+    visibility: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let listing = marketplace::OrgListing {
+        id: String::new(),
+        org_id,
+        resource_type,
+        resource_id,
+        visibility,
+        approved: false,
+        created_at: String::new(),
+    };
+    let mut mp = state.org_marketplace.lock().await;
+    let created = mp.publish(listing);
+    serde_json::to_value(&created).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_org_marketplace_list(
+    org_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mp = state.org_marketplace.lock().await;
+    let listings: Vec<_> = mp.list_for_org(&org_id).into_iter().cloned().collect();
+    serde_json::to_value(&listings).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_org_marketplace_approve(
+    listing_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mp = state.org_marketplace.lock().await;
+    mp.approve(&listing_id)?;
+    Ok(serde_json::json!({ "ok": true, "listing_id": listing_id }))
+}
+
+#[tauri::command]
+async fn cmd_org_marketplace_remove(
+    listing_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mp = state.org_marketplace.lock().await;
+    mp.remove(&listing_id)?;
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+#[tauri::command]
+async fn cmd_org_marketplace_search(
+    query: String,
+    org_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mp = state.org_marketplace.lock().await;
+    let results: Vec<_> = mp.search(&query, &org_id).into_iter().cloned().collect();
+    serde_json::to_value(&results).map_err(|e| e.to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -5435,6 +5817,27 @@ pub fn run() {
                 )),
                 swarm_coordinator: Arc::new(tokio::sync::Mutex::new(
                     swarm::SwarmCoordinator::new(),
+                )),
+                agent_debugger: Arc::new(tokio::sync::Mutex::new(
+                    debugger::AgentDebugger::new(),
+                )),
+                revenue_optimizer: Arc::new(revenue::RevenueOptimizer::new()),
+                infra_monitor: Arc::new(infrastructure::InfraMonitor::new()),
+                ipo_dashboard: Arc::new(ipo::IPODashboard::new()),
+                shell_integration: Arc::new(std::sync::Mutex::new(
+                    os_integration::ShellIntegration::new(),
+                )),
+                federated_client: Arc::new(tokio::sync::Mutex::new(
+                    federated::FederatedClient::new(),
+                )),
+                escalation_manager: Arc::new(tokio::sync::Mutex::new(
+                    escalation::EscalationManager::new(),
+                )),
+                compliance_reporter: Arc::new(tokio::sync::Mutex::new(
+                    compliance::ComplianceReporter::new(),
+                )),
+                org_marketplace: Arc::new(tokio::sync::Mutex::new(
+                    marketplace::OrgMarketplace::new(),
                 )),
             });
 
@@ -6138,6 +6541,46 @@ pub fn run() {
             cmd_swarm_execute,
             cmd_swarm_results,
             cmd_swarm_list,
+            // R96: Agent Debugger commands
+            cmd_debugger_start_trace,
+            cmd_debugger_get_trace,
+            cmd_debugger_list_traces,
+            // R97: Revenue Optimization commands
+            cmd_revenue_metrics,
+            cmd_churn_predictions,
+            cmd_upsell_candidates,
+            // R98: Global Infrastructure commands
+            cmd_infra_status,
+            cmd_infra_check_regions,
+            // R99: IPO Readiness commands
+            cmd_investor_metrics,
+            cmd_data_room,
+            cmd_financial_projections,
+            // R91: OS Integration commands
+            cmd_get_file_actions,
+            cmd_get_text_actions,
+            cmd_process_file_action,
+            cmd_process_text_action,
+            // R92: Federated Learning commands
+            cmd_federated_train,
+            cmd_federated_submit,
+            cmd_federated_status,
+            cmd_federated_config,
+            // R93: Human Handoff commands
+            cmd_list_escalations,
+            cmd_resolve_escalation,
+            cmd_create_escalation,
+            cmd_get_escalation,
+            // R94: Compliance Automation commands
+            cmd_run_compliance_check,
+            cmd_get_compliance_reports,
+            cmd_get_compliance_score,
+            // R95: White-Label Org Marketplace commands
+            cmd_org_marketplace_publish,
+            cmd_org_marketplace_list,
+            cmd_org_marketplace_approve,
+            cmd_org_marketplace_remove,
+            cmd_org_marketplace_search,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");
