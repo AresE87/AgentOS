@@ -1,5 +1,43 @@
 # Changelog
 
+## [4.2.0] - 2026-03-29 — The Agent Economy
+
+### Added
+- R141: Agent Hiring — post jobs, apply, hire agents with per-task/hour/month pricing
+- R142: Reputation System — agent scores, reviews, leaderboard, badge system
+- R143: Cross-User Collaboration — shared project rooms, participant agents, result sharing
+- R144: Microtasks Marketplace — post/claim/complete micro-services with reward tracking
+- R145: Escrow — held payments, release/refund/dispute workflow for high-value tasks
+- R146: Agent Insurance — Basic/Standard/Premium/Enterprise coverage, claim filing
+- R147: Creator Studio — create/publish/unpublish projects (playbooks, personas, plugins, templates)
+- R148: Creator Analytics — revenue history, download trends, creator metrics dashboard
+- R149: Affiliate Program — referral links, click/conversion tracking, tiered commissions (10-25%)
+- R150: v4.2 Economy Release
+
+### Changed
+- Version bump to 4.2.0 across Cargo.toml, frontend, and mobile packages
+- New `economy` module with 9 sub-engines for agent marketplace economy
+- Full creator-to-consumer pipeline: build, publish, hire, pay, insure, review
+
+## [4.1.0] - 2026-03-29 -- Industry Verticals Pro
+
+### Added
+- R131: Legal Suite -- case management, document analysis, search across legal cases
+- R132: Medical Assistant -- patient records, drug interaction checks, history summaries
+- R133: Accounting Engine -- transaction tracking, balance reports, auto-categorization
+- R134: Real Estate Agent -- property listings, ROI calculations, listing generation
+- R135: Education Assistant -- course creation, quiz generation, grading, progress tracking
+- R136: HR Manager -- employee records, offer letter generation, benefits calculation
+- R137: Supply Chain Manager -- shipment tracking, route optimization, demand forecasting
+- R138: Construction Manager -- project milestones, budget tracking, safety checklists
+- R139: Agriculture Assistant -- crop planning, weather impact, irrigation scheduling, yield forecasting
+- R140: v4.1 Industry Verticals Pro Release
+
+### Changed
+- Nine new vertical sub-modules under `verticals/` with 36 IPC commands total
+- Full industry-specific domain logic: legal, medical, accounting, real estate, education, HR, supply chain, construction, agriculture
+- Frontend hooks for all vertical modules in useAgent.ts
+
 ## [4.0.0] - 2026-03-29
 
 ### Added

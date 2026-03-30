@@ -71,6 +71,7 @@ pub mod partnerships;
 pub mod autonomous;
 pub mod reasoning;
 pub mod knowledge;
+pub mod economy;
 
 use base64::Engine as _;
 use std::path::PathBuf;
@@ -238,6 +239,42 @@ pub struct AppState {
     pub transfer_engine: Arc<tokio::sync::Mutex<reasoning::TransferEngine>>,
     /// R129: Meta-Learning engine
     pub meta_learner: Arc<reasoning::MetaLearner>,
+    /// R131: Legal Suite
+    pub legal_suite: Arc<tokio::sync::Mutex<verticals::LegalSuite>>,
+    /// R132: Medical Assistant
+    pub medical_assistant: Arc<tokio::sync::Mutex<verticals::MedicalAssistant>>,
+    /// R133: Accounting Engine
+    pub accounting_engine: Arc<tokio::sync::Mutex<verticals::AccountingEngine>>,
+    /// R134: Real Estate Agent
+    pub real_estate_agent: Arc<tokio::sync::Mutex<verticals::RealEstateAgent>>,
+    /// R135: Education Assistant
+    pub education_assistant: Arc<tokio::sync::Mutex<verticals::EducationAssistant>>,
+    /// R136: HR Manager
+    pub hr_manager: Arc<tokio::sync::Mutex<verticals::HRManager>>,
+    /// R137: Supply Chain Manager
+    pub supply_chain_manager: Arc<tokio::sync::Mutex<verticals::SupplyChainManager>>,
+    /// R138: Construction Manager
+    pub construction_manager: Arc<tokio::sync::Mutex<verticals::ConstructionManager>>,
+    /// R139: Agriculture Assistant
+    pub agriculture_assistant: Arc<tokio::sync::Mutex<verticals::AgricultureAssistant>>,
+    /// R141: Agent Hiring
+    pub hiring_manager: Arc<tokio::sync::Mutex<economy::hiring::HiringManager>>,
+    /// R142: Reputation System
+    pub reputation_engine: Arc<tokio::sync::Mutex<economy::reputation::ReputationEngine>>,
+    /// R143: Cross-User Collaboration
+    pub collab_manager: Arc<tokio::sync::Mutex<economy::collaboration::CollabManager>>,
+    /// R144: Microtasks Marketplace
+    pub microtask_market: Arc<tokio::sync::Mutex<economy::microtasks::MicrotaskMarket>>,
+    /// R145: Escrow System
+    pub escrow_manager: Arc<tokio::sync::Mutex<economy::escrow::EscrowManager>>,
+    /// R146: Agent Insurance
+    pub insurance_manager: Arc<tokio::sync::Mutex<economy::insurance::InsuranceManager>>,
+    /// R147: Creator Studio
+    pub creator_studio: Arc<tokio::sync::Mutex<economy::creator_studio::CreatorStudio>>,
+    /// R148: Creator Analytics
+    pub creator_analytics: Arc<tokio::sync::Mutex<economy::creator_analytics::CreatorAnalyticsEngine>>,
+    /// R149: Affiliate Program
+    pub affiliate_program: Arc<tokio::sync::Mutex<economy::affiliate::AffiliateProgram>>,
 }
 
 // ── R44: Cloud Mesh Relay commands ──────────────────────────────────
@@ -6980,6 +7017,792 @@ async fn cmd_meta_predict(
     }))
 }
 
+// ── R131: Legal Suite commands ──────────────────────────────────────
+
+#[tauri::command]
+async fn cmd_legal_create_case(
+    case_number: String,
+    title: String,
+    client: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut suite = state.legal_suite.lock().await;
+    let case = suite.create_case(case_number, title, client);
+    serde_json::to_value(&case).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_legal_list_cases(
+    status: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let suite = state.legal_suite.lock().await;
+    let cases = suite.list_cases(status.as_deref());
+    serde_json::to_value(&cases).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_legal_search(
+    query: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let suite = state.legal_suite.lock().await;
+    let results = suite.search_cases(&query);
+    serde_json::to_value(&results).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_legal_analyze(
+    case_id: String,
+    doc_path: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let suite = state.legal_suite.lock().await;
+    let analysis = suite.analyze_document(&case_id, &doc_path)?;
+    serde_json::to_value(&analysis).map_err(|e| e.to_string())
+}
+
+// ── R132: Medical commands ─────────────────────────────────────────
+
+#[tauri::command]
+async fn cmd_medical_add(
+    name: String,
+    date_of_birth: String,
+    conditions: Vec<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut assistant = state.medical_assistant.lock().await;
+    let record = assistant.add_record(name, date_of_birth, conditions, Vec::new());
+    serde_json::to_value(&record).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_medical_search(
+    query: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let assistant = state.medical_assistant.lock().await;
+    let results = assistant.search_records(&query);
+    serde_json::to_value(&results).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_medical_interactions(
+    medications: Vec<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let assistant = state.medical_assistant.lock().await;
+    let interactions = assistant.drug_interaction_check(&medications);
+    serde_json::to_value(&interactions).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_medical_summary(
+    patient_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let assistant = state.medical_assistant.lock().await;
+    assistant.summarize_history(&patient_id)
+}
+
+// ── R133: Accounting commands ──────────────────────────────────────
+
+#[tauri::command]
+async fn cmd_accounting_add(
+    date: String,
+    description: String,
+    amount: f64,
+    category: String,
+    account: String,
+    tx_type: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let tt = match tx_type.as_str() {
+        "income" => verticals::accounting::TransactionType::Income,
+        "expense" => verticals::accounting::TransactionType::Expense,
+        "transfer" => verticals::accounting::TransactionType::Transfer,
+        _ => return Err("Invalid tx_type: use income, expense, or transfer".into()),
+    };
+    let mut engine = state.accounting_engine.lock().await;
+    let tx = engine.add_transaction(date, description, amount, category, account, tt);
+    serde_json::to_value(&tx).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_accounting_balance(
+    account: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let engine = state.accounting_engine.lock().await;
+    Ok(engine.get_balance(account.as_deref()))
+}
+
+#[tauri::command]
+async fn cmd_accounting_report(
+    period: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let engine = state.accounting_engine.lock().await;
+    Ok(engine.generate_report(&period))
+}
+
+#[tauri::command]
+async fn cmd_accounting_categorize(
+    description: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let engine = state.accounting_engine.lock().await;
+    Ok(engine.categorize_transaction(&description))
+}
+
+// ── R134: Real Estate commands ─────────────────────────────────────
+
+#[tauri::command]
+async fn cmd_realestate_add(
+    address: String,
+    price: f64,
+    bedrooms: u32,
+    bathrooms: f64,
+    sqft: u32,
+    property_type: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut agent = state.real_estate_agent.lock().await;
+    let prop = agent.add_property(address, price, bedrooms, bathrooms, sqft, property_type);
+    serde_json::to_value(&prop).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_realestate_search(
+    min_price: Option<f64>,
+    max_price: Option<f64>,
+    min_bedrooms: Option<u32>,
+    min_sqft: Option<u32>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let agent = state.real_estate_agent.lock().await;
+    let results = agent.search_properties(min_price, max_price, min_bedrooms, min_sqft);
+    serde_json::to_value(&results).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_realestate_roi(
+    property_id: String,
+    monthly_rent: f64,
+    annual_expenses: f64,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let agent = state.real_estate_agent.lock().await;
+    agent.calculate_roi(&property_id, monthly_rent, annual_expenses)
+}
+
+#[tauri::command]
+async fn cmd_realestate_listing(
+    property_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let agent = state.real_estate_agent.lock().await;
+    agent.generate_listing(&property_id)
+}
+
+// ── R135: Education commands ───────────────────────────────────────
+
+#[tauri::command]
+async fn cmd_edu_create_course(
+    title: String,
+    subject: String,
+    level: String,
+    lesson_titles: Vec<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut assistant = state.education_assistant.lock().await;
+    let course = assistant.create_course(title, subject, level, lesson_titles);
+    serde_json::to_value(&course).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_edu_quiz(
+    course_id: String,
+    num_questions: u32,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let assistant = state.education_assistant.lock().await;
+    assistant.generate_quiz(&course_id, num_questions)
+}
+
+#[tauri::command]
+async fn cmd_edu_grade(
+    student_id: String,
+    course_id: String,
+    score: f64,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut assistant = state.education_assistant.lock().await;
+    Ok(assistant.grade_answer(&student_id, &course_id, score))
+}
+
+#[tauri::command]
+async fn cmd_edu_progress(
+    student_id: String,
+    course_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let assistant = state.education_assistant.lock().await;
+    Ok(assistant.track_progress(&student_id, &course_id))
+}
+
+// ── R136: HR commands ──────────────────────────────────────────────
+
+#[tauri::command]
+async fn cmd_hr_add(
+    name: String,
+    department: String,
+    role: String,
+    hire_date: String,
+    salary: Option<f64>,
+    email: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.hr_manager.lock().await;
+    let emp = mgr.add_employee(name, department, role, hire_date, salary, email);
+    serde_json::to_value(&emp).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_hr_list(
+    department: Option<String>,
+    status: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.hr_manager.lock().await;
+    let employees = mgr.list_employees(department.as_deref(), status.as_deref());
+    serde_json::to_value(&employees).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_hr_offer_letter(
+    candidate_name: String,
+    role: String,
+    department: String,
+    salary: f64,
+    start_date: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.hr_manager.lock().await;
+    Ok(mgr.generate_offer_letter(&candidate_name, &role, &department, salary, &start_date))
+}
+
+#[tauri::command]
+async fn cmd_hr_benefits(
+    employee_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.hr_manager.lock().await;
+    mgr.calculate_benefits(&employee_id)
+}
+
+// ── R137: Supply Chain commands ────────────────────────────────────
+
+#[tauri::command]
+async fn cmd_supply_track(
+    shipment_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.supply_chain_manager.lock().await;
+    mgr.track_shipment(&shipment_id)
+}
+
+#[tauri::command]
+async fn cmd_supply_optimize(
+    origin: String,
+    destination: String,
+    weight_kg: f64,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.supply_chain_manager.lock().await;
+    Ok(mgr.optimize_route(&origin, &destination, weight_kg))
+}
+
+#[tauri::command]
+async fn cmd_supply_forecast(
+    product: String,
+    period_months: u32,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.supply_chain_manager.lock().await;
+    Ok(mgr.forecast_demand(&product, period_months))
+}
+
+#[tauri::command]
+async fn cmd_supply_list(
+    status: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.supply_chain_manager.lock().await;
+    let shipments = mgr.list_shipments(status.as_deref());
+    serde_json::to_value(&shipments).map_err(|e| e.to_string())
+}
+
+// ── R138: Construction commands ────────────────────────────────────
+
+#[tauri::command]
+async fn cmd_construction_create(
+    name: String,
+    site: String,
+    budget: f64,
+    timeline: String,
+    milestone_names: Vec<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.construction_manager.lock().await;
+    let project = mgr.create_project(name, site, budget, timeline, milestone_names);
+    serde_json::to_value(&project).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_construction_milestone(
+    project_id: String,
+    milestone_id: String,
+    completed: bool,
+    notes: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.construction_manager.lock().await;
+    mgr.update_milestone(&project_id, &milestone_id, completed, notes.unwrap_or_default())
+}
+
+#[tauri::command]
+async fn cmd_construction_budget(
+    project_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.construction_manager.lock().await;
+    mgr.calculate_budget(&project_id)
+}
+
+#[tauri::command]
+async fn cmd_construction_safety(
+    project_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.construction_manager.lock().await;
+    mgr.safety_checklist(&project_id)
+}
+
+// ── R139: Agriculture commands ─────────────────────────────────────
+
+#[tauri::command]
+async fn cmd_agri_create_plan(
+    crop: String,
+    field: String,
+    field_acres: f64,
+    planted_date: String,
+    expected_harvest: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut assistant = state.agriculture_assistant.lock().await;
+    let plan = assistant.create_plan(crop, field, field_acres, planted_date, expected_harvest);
+    serde_json::to_value(&plan).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_agri_weather(
+    crop_id: String,
+    temperature_c: f64,
+    rainfall_mm: f64,
+    humidity_pct: f64,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let assistant = state.agriculture_assistant.lock().await;
+    assistant.weather_impact(&crop_id, temperature_c, rainfall_mm, humidity_pct)
+}
+
+#[tauri::command]
+async fn cmd_agri_irrigation(
+    crop_id: String,
+    soil_moisture_pct: f64,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let assistant = state.agriculture_assistant.lock().await;
+    assistant.irrigation_schedule(&crop_id, soil_moisture_pct)
+}
+
+#[tauri::command]
+async fn cmd_agri_yield(
+    crop_id: String,
+    soil_quality: f64,
+    pest_pressure: f64,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let assistant = state.agriculture_assistant.lock().await;
+    assistant.yield_forecast(&crop_id, soil_quality, pest_pressure)
+}
+
+// ── R141: Agent Hiring IPC commands ──────────────────────────────
+#[tauri::command]
+async fn cmd_hiring_post(
+    title: String, description: String, requirements: Vec<String>,
+    budget: f64, poster_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.hiring_manager.lock().await;
+    let job = mgr.post_job(title, description, requirements, budget,
+        economy::hiring::PricingModel::Monthly(budget), poster_id);
+    serde_json::to_value(&job).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_hiring_list(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.hiring_manager.lock().await;
+    let jobs: Vec<_> = mgr.list_jobs(None);
+    serde_json::to_value(&jobs).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_hiring_apply(
+    job_id: String, agent_id: String, cover_note: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.hiring_manager.lock().await;
+    mgr.apply_to_job(&job_id, agent_id, cover_note)?;
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+#[tauri::command]
+async fn cmd_hiring_hire(
+    job_id: String, agent_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.hiring_manager.lock().await;
+    let job = mgr.hire_agent(&job_id, &agent_id)?;
+    serde_json::to_value(&job).map_err(|e| e.to_string())
+}
+
+// ── R142: Reputation System IPC commands ─────────────────────────
+#[tauri::command]
+async fn cmd_reputation_get(
+    agent_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let engine = state.reputation_engine.lock().await;
+    let score = engine.get_score(&agent_id);
+    serde_json::to_value(&score).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_reputation_review(
+    agent_id: String, rating: f64, comment: String, reviewer_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut engine = state.reputation_engine.lock().await;
+    let review = engine.add_review(&agent_id, rating, comment, reviewer_id);
+    serde_json::to_value(&review).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_reputation_leaderboard(
+    limit: Option<usize>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let engine = state.reputation_engine.lock().await;
+    let board = engine.get_leaderboard(limit.unwrap_or(10));
+    serde_json::to_value(&board).map_err(|e| e.to_string())
+}
+
+// ── R143: Cross-User Collaboration IPC commands ──────────────────
+#[tauri::command]
+async fn cmd_collab_create(
+    name: String, creator: String, task: String, shared_context: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.collab_manager.lock().await;
+    let session = mgr.create_session(name, creator, task, shared_context);
+    serde_json::to_value(&session).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_collab_join(
+    session_id: String, user_id: String, agents: Vec<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.collab_manager.lock().await;
+    let session = mgr.join_session(&session_id, user_id, agents)?;
+    serde_json::to_value(&session).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_collab_list(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.collab_manager.lock().await;
+    let sessions: Vec<_> = mgr.list_sessions();
+    serde_json::to_value(&sessions).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_collab_share(
+    session_id: String, from_user: String, agent_id: String, content: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.collab_manager.lock().await;
+    let result = mgr.share_result(&session_id, from_user, agent_id, content)?;
+    serde_json::to_value(&result).map_err(|e| e.to_string())
+}
+
+// ── R144: Microtasks IPC commands ────────────────────────────────
+#[tauri::command]
+async fn cmd_microtask_post(
+    title: String, description: String, reward_amount: f64,
+    deadline: Option<String>, poster_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut market = state.microtask_market.lock().await;
+    let task = market.post_task(title, description, reward_amount, deadline, poster_id);
+    serde_json::to_value(&task).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_microtask_claim(
+    task_id: String, agent_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut market = state.microtask_market.lock().await;
+    let task = market.claim_task(&task_id, agent_id)?;
+    serde_json::to_value(&task).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_microtask_complete(
+    task_id: String, result: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut market = state.microtask_market.lock().await;
+    let task = market.complete_task(&task_id, result)?;
+    serde_json::to_value(&task).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_microtask_list(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let market = state.microtask_market.lock().await;
+    let tasks: Vec<_> = market.list_available();
+    serde_json::to_value(&tasks).map_err(|e| e.to_string())
+}
+
+// ── R145: Escrow IPC commands ────────────────────────────────────
+#[tauri::command]
+async fn cmd_escrow_create(
+    payer: String, payee: String, amount: f64, task_description: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.escrow_manager.lock().await;
+    let tx = mgr.create_escrow(payer, payee, amount, task_description);
+    serde_json::to_value(&tx).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_escrow_release(
+    tx_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.escrow_manager.lock().await;
+    let tx = mgr.release(&tx_id)?;
+    serde_json::to_value(&tx).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_escrow_refund(
+    tx_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.escrow_manager.lock().await;
+    let tx = mgr.refund(&tx_id)?;
+    serde_json::to_value(&tx).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_escrow_list(
+    user_id: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.escrow_manager.lock().await;
+    let txs: Vec<_> = mgr.list_transactions(user_id.as_deref());
+    serde_json::to_value(&txs).map_err(|e| e.to_string())
+}
+
+// ── R146: Agent Insurance IPC commands ───────────────────────────
+#[tauri::command]
+async fn cmd_insurance_create(
+    agent_id: String, coverage_type: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let ct = match coverage_type.as_str() {
+        "basic" => economy::insurance::CoverageType::Basic,
+        "standard" => economy::insurance::CoverageType::Standard,
+        "premium" => economy::insurance::CoverageType::Premium,
+        "enterprise" => economy::insurance::CoverageType::Enterprise,
+        _ => return Err("Invalid coverage type".to_string()),
+    };
+    let mut mgr = state.insurance_manager.lock().await;
+    let policy = mgr.create_policy(agent_id, ct);
+    serde_json::to_value(&policy).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_insurance_list(
+    agent_id: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.insurance_manager.lock().await;
+    let policies: Vec<_> = mgr.list_policies(agent_id.as_deref());
+    serde_json::to_value(&policies).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_insurance_claim(
+    policy_id: String, description: String, amount: f64, evidence: Vec<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.insurance_manager.lock().await;
+    let claim = mgr.file_claim(&policy_id, description, amount, evidence)?;
+    serde_json::to_value(&claim).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_insurance_status(
+    policy_id: String, claim_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.insurance_manager.lock().await;
+    let status = mgr.get_claim_status(&policy_id, &claim_id)?;
+    serde_json::to_value(&status).map_err(|e| e.to_string())
+}
+
+// ── R147: Creator Studio IPC commands ────────────────────────────
+#[tauri::command]
+async fn cmd_creator_create(
+    name: String, description: String, project_type: String, creator_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let pt = match project_type.as_str() {
+        "playbook" => economy::creator_studio::ProjectType::Playbook,
+        "persona" => economy::creator_studio::ProjectType::Persona,
+        "plugin" => economy::creator_studio::ProjectType::Plugin,
+        "template" => economy::creator_studio::ProjectType::Template,
+        _ => return Err("Invalid project type".to_string()),
+    };
+    let mut studio = state.creator_studio.lock().await;
+    let project = studio.create_project(name, description, pt, creator_id);
+    serde_json::to_value(&project).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_creator_publish(
+    project_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut studio = state.creator_studio.lock().await;
+    let project = studio.publish(&project_id)?;
+    serde_json::to_value(&project).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_creator_list(
+    creator_id: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let studio = state.creator_studio.lock().await;
+    let projects: Vec<_> = studio.list_projects(creator_id.as_deref());
+    serde_json::to_value(&projects).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_creator_analytics(
+    project_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let studio = state.creator_studio.lock().await;
+    let analytics = studio.get_analytics(&project_id)?;
+    serde_json::to_value(&analytics).map_err(|e| e.to_string())
+}
+
+// ── R148: Creator Analytics IPC commands ─────────────────────────
+#[tauri::command]
+async fn cmd_creator_metrics(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let engine = state.creator_analytics.lock().await;
+    let metrics = engine.get_metrics();
+    serde_json::to_value(&metrics).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_creator_revenue(
+    limit: Option<usize>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let engine = state.creator_analytics.lock().await;
+    let history = engine.get_revenue_history(limit.unwrap_or(30));
+    serde_json::to_value(&history).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_creator_trends(
+    limit: Option<usize>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let engine = state.creator_analytics.lock().await;
+    let trends = engine.get_download_trend(limit.unwrap_or(30));
+    serde_json::to_value(&trends).map_err(|e| e.to_string())
+}
+
+// ── R149: Affiliate Program IPC commands ─────────────────────────
+#[tauri::command]
+async fn cmd_affiliate_create(
+    creator_id: String, product_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut program = state.affiliate_program.lock().await;
+    let link = program.create_link(creator_id, product_id);
+    serde_json::to_value(&link).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_affiliate_earnings(
+    creator_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let program = state.affiliate_program.lock().await;
+    let earnings = program.get_earnings(&creator_id);
+    serde_json::to_value(&earnings).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_affiliate_list(
+    creator_id: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let program = state.affiliate_program.lock().await;
+    let links: Vec<_> = program.list_links(creator_id.as_deref());
+    serde_json::to_value(&links).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_affiliate_track(
+    link_code: String, conversion: bool, amount: Option<f64>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut program = state.affiliate_program.lock().await;
+    program.track_click(&link_code)?;
+    if conversion {
+        program.track_conversion(&link_code, amount.unwrap_or(0.0))?;
+    }
+    Ok(serde_json::json!({ "ok": true }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -7220,6 +8043,26 @@ pub fn run() {
                 transfer_engine: Arc::new(tokio::sync::Mutex::new(reasoning::TransferEngine::new())),
                 // R129: Meta-Learning (SQLite)
                 meta_learner: Arc::new(reasoning::MetaLearner::new(&db_path)),
+                // R131-R139: Industry Vertical Pro modules
+                legal_suite: Arc::new(tokio::sync::Mutex::new(verticals::LegalSuite::new())),
+                medical_assistant: Arc::new(tokio::sync::Mutex::new(verticals::MedicalAssistant::new())),
+                accounting_engine: Arc::new(tokio::sync::Mutex::new(verticals::AccountingEngine::new())),
+                real_estate_agent: Arc::new(tokio::sync::Mutex::new(verticals::RealEstateAgent::new())),
+                education_assistant: Arc::new(tokio::sync::Mutex::new(verticals::EducationAssistant::new())),
+                hr_manager: Arc::new(tokio::sync::Mutex::new(verticals::HRManager::new())),
+                supply_chain_manager: Arc::new(tokio::sync::Mutex::new(verticals::SupplyChainManager::new())),
+                construction_manager: Arc::new(tokio::sync::Mutex::new(verticals::ConstructionManager::new())),
+                agriculture_assistant: Arc::new(tokio::sync::Mutex::new(verticals::AgricultureAssistant::new())),
+                // R141-R149: Agent Economy modules
+                hiring_manager: Arc::new(tokio::sync::Mutex::new(economy::hiring::HiringManager::new())),
+                reputation_engine: Arc::new(tokio::sync::Mutex::new(economy::reputation::ReputationEngine::new())),
+                collab_manager: Arc::new(tokio::sync::Mutex::new(economy::collaboration::CollabManager::new())),
+                microtask_market: Arc::new(tokio::sync::Mutex::new(economy::microtasks::MicrotaskMarket::new())),
+                escrow_manager: Arc::new(tokio::sync::Mutex::new(economy::escrow::EscrowManager::new())),
+                insurance_manager: Arc::new(tokio::sync::Mutex::new(economy::insurance::InsuranceManager::new())),
+                creator_studio: Arc::new(tokio::sync::Mutex::new(economy::creator_studio::CreatorStudio::new())),
+                creator_analytics: Arc::new(tokio::sync::Mutex::new(economy::creator_analytics::CreatorAnalyticsEngine::new())),
+                affiliate_program: Arc::new(tokio::sync::Mutex::new(economy::affiliate::AffiliateProgram::new())),
             });
 
             // ── R35: Deferred startup — plugin discovery in background ────
@@ -8098,6 +8941,94 @@ pub fn run() {
             cmd_meta_curve,
             cmd_meta_all_curves,
             cmd_meta_predict,
+            // R131: Legal Suite commands
+            cmd_legal_create_case,
+            cmd_legal_list_cases,
+            cmd_legal_search,
+            cmd_legal_analyze,
+            // R132: Medical commands
+            cmd_medical_add,
+            cmd_medical_search,
+            cmd_medical_interactions,
+            cmd_medical_summary,
+            // R133: Accounting commands
+            cmd_accounting_add,
+            cmd_accounting_balance,
+            cmd_accounting_report,
+            cmd_accounting_categorize,
+            // R134: Real Estate commands
+            cmd_realestate_add,
+            cmd_realestate_search,
+            cmd_realestate_roi,
+            cmd_realestate_listing,
+            // R135: Education commands
+            cmd_edu_create_course,
+            cmd_edu_quiz,
+            cmd_edu_grade,
+            cmd_edu_progress,
+            // R136: HR commands
+            cmd_hr_add,
+            cmd_hr_list,
+            cmd_hr_offer_letter,
+            cmd_hr_benefits,
+            // R137: Supply Chain commands
+            cmd_supply_track,
+            cmd_supply_optimize,
+            cmd_supply_forecast,
+            cmd_supply_list,
+            // R138: Construction commands
+            cmd_construction_create,
+            cmd_construction_milestone,
+            cmd_construction_budget,
+            cmd_construction_safety,
+            // R139: Agriculture commands
+            cmd_agri_create_plan,
+            cmd_agri_weather,
+            cmd_agri_irrigation,
+            cmd_agri_yield,
+            // R141: Agent Hiring commands
+            cmd_hiring_post,
+            cmd_hiring_list,
+            cmd_hiring_apply,
+            cmd_hiring_hire,
+            // R142: Reputation System commands
+            cmd_reputation_get,
+            cmd_reputation_review,
+            cmd_reputation_leaderboard,
+            // R143: Cross-User Collaboration commands
+            cmd_collab_create,
+            cmd_collab_join,
+            cmd_collab_list,
+            cmd_collab_share,
+            // R144: Microtasks commands
+            cmd_microtask_post,
+            cmd_microtask_claim,
+            cmd_microtask_complete,
+            cmd_microtask_list,
+            // R145: Escrow commands
+            cmd_escrow_create,
+            cmd_escrow_release,
+            cmd_escrow_refund,
+            cmd_escrow_list,
+            // R146: Agent Insurance commands
+            cmd_insurance_create,
+            cmd_insurance_list,
+            cmd_insurance_claim,
+            cmd_insurance_status,
+            // R147: Creator Studio commands
+            cmd_creator_create,
+            cmd_creator_publish,
+            cmd_creator_list,
+            cmd_creator_analytics,
+            // R148: Creator Analytics commands
+            cmd_creator_metrics,
+            cmd_creator_revenue,
+            cmd_creator_trends,
+            // R149: Affiliate Program commands
+            cmd_affiliate_create,
+            cmd_affiliate_earnings,
+            cmd_affiliate_list,
+            cmd_affiliate_track,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");

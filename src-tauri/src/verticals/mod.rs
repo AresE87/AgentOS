@@ -1,3 +1,21 @@
 pub mod registry;
+pub mod legal;
+pub mod medical;
+pub mod accounting;
+pub mod real_estate;
+pub mod education;
+pub mod hr;
+pub mod supply_chain;
+pub mod construction;
+pub mod agriculture;
 
 pub use registry::{VerticalRegistry, IndustryVertical};
+pub use legal::LegalSuite;
+pub use medical::MedicalAssistant;
+pub use accounting::AccountingEngine;
+pub use real_estate::RealEstateAgent;
+pub use education::EducationAssistant;
+pub use hr::HRManager;
+pub use supply_chain::SupplyChainManager;
+pub use construction::ConstructionManager;
+pub use agriculture::AgricultureAssistant;

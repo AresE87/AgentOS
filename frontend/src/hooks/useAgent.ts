@@ -924,6 +924,165 @@ export function useAgent() {
     const metaPredict = (domain: string, nTasks: number) =>
         callInvoke<any>('meta_predict', { domain, n_tasks: nTasks });
 
+    // R131: Legal Suite
+    const legalCreateCase = (caseNumber: string, title: string, client: string) =>
+        callInvoke<any>('legal_create_case', { case_number: caseNumber, title, client });
+    const legalListCases = (status?: string) =>
+        callInvoke<any>('legal_list_cases', { status });
+    const legalSearch = (query: string) =>
+        callInvoke<any>('legal_search', { query });
+    const legalAnalyze = (caseId: string, docPath: string) =>
+        callInvoke<any>('legal_analyze', { case_id: caseId, doc_path: docPath });
+
+    // R132: Medical
+    const medicalAdd = (name: string, dateOfBirth: string, conditions: string[]) =>
+        callInvoke<any>('medical_add', { name, date_of_birth: dateOfBirth, conditions });
+    const medicalSearch = (query: string) =>
+        callInvoke<any>('medical_search', { query });
+    const medicalInteractions = (medications: string[]) =>
+        callInvoke<any>('medical_interactions', { medications });
+    const medicalSummary = (patientId: string) =>
+        callInvoke<any>('medical_summary', { patient_id: patientId });
+
+    // R133: Accounting
+    const accountingAdd = (date: string, description: string, amount: number, category: string, account: string, txType: string) =>
+        callInvoke<any>('accounting_add', { date, description, amount, category, account, tx_type: txType });
+    const accountingBalance = (account?: string) =>
+        callInvoke<any>('accounting_balance', { account });
+    const accountingReport = (period: string) =>
+        callInvoke<any>('accounting_report', { period });
+    const accountingCategorize = (description: string) =>
+        callInvoke<any>('accounting_categorize', { description });
+
+    // R134: Real Estate
+    const realestateAdd = (address: string, price: number, bedrooms: number, bathrooms: number, sqft: number, propertyType: string) =>
+        callInvoke<any>('realestate_add', { address, price, bedrooms, bathrooms, sqft, property_type: propertyType });
+    const realestateSearch = (minPrice?: number, maxPrice?: number, minBedrooms?: number, minSqft?: number) =>
+        callInvoke<any>('realestate_search', { min_price: minPrice, max_price: maxPrice, min_bedrooms: minBedrooms, min_sqft: minSqft });
+    const realestateRoi = (propertyId: string, monthlyRent: number, annualExpenses: number) =>
+        callInvoke<any>('realestate_roi', { property_id: propertyId, monthly_rent: monthlyRent, annual_expenses: annualExpenses });
+    const realestateListing = (propertyId: string) =>
+        callInvoke<any>('realestate_listing', { property_id: propertyId });
+
+    // R135: Education
+    const eduCreateCourse = (title: string, subject: string, level: string, lessonTitles: string[]) =>
+        callInvoke<any>('edu_create_course', { title, subject, level, lesson_titles: lessonTitles });
+    const eduQuiz = (courseId: string, numQuestions: number) =>
+        callInvoke<any>('edu_quiz', { course_id: courseId, num_questions: numQuestions });
+    const eduGrade = (studentId: string, courseId: string, score: number) =>
+        callInvoke<any>('edu_grade', { student_id: studentId, course_id: courseId, score });
+    const eduProgress = (studentId: string, courseId: string) =>
+        callInvoke<any>('edu_progress', { student_id: studentId, course_id: courseId });
+
+    // R136: HR
+    const hrAdd = (name: string, department: string, role: string, hireDate: string, salary: number | null, email: string) =>
+        callInvoke<any>('hr_add', { name, department, role, hire_date: hireDate, salary, email });
+    const hrList = (department?: string, status?: string) =>
+        callInvoke<any>('hr_list', { department, status });
+    const hrOfferLetter = (candidateName: string, role: string, department: string, salary: number, startDate: string) =>
+        callInvoke<any>('hr_offer_letter', { candidate_name: candidateName, role, department, salary, start_date: startDate });
+    const hrBenefits = (employeeId: string) =>
+        callInvoke<any>('hr_benefits', { employee_id: employeeId });
+
+    // R137: Supply Chain
+    const supplyTrack = (shipmentId: string) =>
+        callInvoke<any>('supply_track', { shipment_id: shipmentId });
+    const supplyOptimize = (origin: string, destination: string, weightKg: number) =>
+        callInvoke<any>('supply_optimize', { origin, destination, weight_kg: weightKg });
+    const supplyForecast = (product: string, periodMonths: number) =>
+        callInvoke<any>('supply_forecast', { product, period_months: periodMonths });
+    const supplyList = (status?: string) =>
+        callInvoke<any>('supply_list', { status });
+
+    // R138: Construction
+    const constructionCreate = (name: string, site: string, budget: number, timeline: string, milestoneNames: string[]) =>
+        callInvoke<any>('construction_create', { name, site, budget, timeline, milestone_names: milestoneNames });
+    const constructionMilestone = (projectId: string, milestoneId: string, completed: boolean, notes?: string) =>
+        callInvoke<any>('construction_milestone', { project_id: projectId, milestone_id: milestoneId, completed, notes });
+    const constructionBudget = (projectId: string) =>
+        callInvoke<any>('construction_budget', { project_id: projectId });
+    const constructionSafety = (projectId: string) =>
+        callInvoke<any>('construction_safety', { project_id: projectId });
+
+    // R139: Agriculture
+    const agriCreatePlan = (crop: string, field: string, fieldAcres: number, plantedDate: string, expectedHarvest: string) =>
+        callInvoke<any>('agri_create_plan', { crop, field, field_acres: fieldAcres, planted_date: plantedDate, expected_harvest: expectedHarvest });
+    const agriWeather = (cropId: string, temperatureC: number, rainfallMm: number, humidityPct: number) =>
+        callInvoke<any>('agri_weather', { crop_id: cropId, temperature_c: temperatureC, rainfall_mm: rainfallMm, humidity_pct: humidityPct });
+    const agriIrrigation = (cropId: string, soilMoisturePct: number) =>
+        callInvoke<any>('agri_irrigation', { crop_id: cropId, soil_moisture_pct: soilMoisturePct });
+    const agriYield = (cropId: string, soilQuality: number, pestPressure: number) =>
+        callInvoke<any>('agri_yield', { crop_id: cropId, soil_quality: soilQuality, pest_pressure: pestPressure });
+
+    // R141: Agent Hiring
+    const hiringPost = (title: string, description: string, requirements: string[], budget: number, posterId: string) =>
+        callInvoke<any>('hiring_post', { title, description, requirements, budget, poster_id: posterId });
+    const hiringList = () => callInvoke<any>('hiring_list');
+    const hiringApply = (jobId: string, agentId: string, coverNote: string) =>
+        callInvoke<any>('hiring_apply', { job_id: jobId, agent_id: agentId, cover_note: coverNote });
+    const hiringHire = (jobId: string, agentId: string) =>
+        callInvoke<any>('hiring_hire', { job_id: jobId, agent_id: agentId });
+
+    // R142: Reputation System
+    const reputationGet = (agentId: string) => callInvoke<any>('reputation_get', { agent_id: agentId });
+    const reputationReview = (agentId: string, rating: number, comment: string, reviewerId: string) =>
+        callInvoke<any>('reputation_review', { agent_id: agentId, rating, comment, reviewer_id: reviewerId });
+    const reputationLeaderboard = (limit?: number) => callInvoke<any>('reputation_leaderboard', { limit });
+
+    // R143: Cross-User Collaboration
+    const collabCreate = (name: string, creator: string, task: string, sharedContext: string) =>
+        callInvoke<any>('collab_create', { name, creator, task, shared_context: sharedContext });
+    const collabJoin = (sessionId: string, userId: string, agents: string[]) =>
+        callInvoke<any>('collab_join', { session_id: sessionId, user_id: userId, agents });
+    const collabList = () => callInvoke<any>('collab_list');
+    const collabShare = (sessionId: string, fromUser: string, agentId: string, content: string) =>
+        callInvoke<any>('collab_share', { session_id: sessionId, from_user: fromUser, agent_id: agentId, content });
+
+    // R144: Microtasks
+    const microtaskPost = (title: string, description: string, rewardAmount: number, deadline: string | null, posterId: string) =>
+        callInvoke<any>('microtask_post', { title, description, reward_amount: rewardAmount, deadline, poster_id: posterId });
+    const microtaskClaim = (taskId: string, agentId: string) =>
+        callInvoke<any>('microtask_claim', { task_id: taskId, agent_id: agentId });
+    const microtaskComplete = (taskId: string, result: string) =>
+        callInvoke<any>('microtask_complete', { task_id: taskId, result });
+    const microtaskList = () => callInvoke<any>('microtask_list');
+
+    // R145: Escrow
+    const escrowCreate = (payer: string, payee: string, amount: number, taskDescription: string) =>
+        callInvoke<any>('escrow_create', { payer, payee, amount, task_description: taskDescription });
+    const escrowRelease = (txId: string) => callInvoke<any>('escrow_release', { tx_id: txId });
+    const escrowRefund = (txId: string) => callInvoke<any>('escrow_refund', { tx_id: txId });
+    const escrowList = (userId?: string) => callInvoke<any>('escrow_list', { user_id: userId });
+
+    // R146: Agent Insurance
+    const insuranceCreate = (agentId: string, coverageType: string) =>
+        callInvoke<any>('insurance_create', { agent_id: agentId, coverage_type: coverageType });
+    const insuranceList = (agentId?: string) => callInvoke<any>('insurance_list', { agent_id: agentId });
+    const insuranceClaim = (policyId: string, description: string, amount: number, evidence: string[]) =>
+        callInvoke<any>('insurance_claim', { policy_id: policyId, description, amount, evidence });
+    const insuranceStatus = (policyId: string, claimId: string) =>
+        callInvoke<any>('insurance_status', { policy_id: policyId, claim_id: claimId });
+
+    // R147: Creator Studio
+    const creatorCreate = (name: string, description: string, projectType: string, creatorId: string) =>
+        callInvoke<any>('creator_create', { name, description, project_type: projectType, creator_id: creatorId });
+    const creatorPublish = (projectId: string) => callInvoke<any>('creator_publish', { project_id: projectId });
+    const creatorList = (creatorId?: string) => callInvoke<any>('creator_list', { creator_id: creatorId });
+    const creatorAnalytics = (projectId: string) => callInvoke<any>('creator_analytics', { project_id: projectId });
+
+    // R148: Creator Analytics
+    const creatorMetrics = () => callInvoke<any>('creator_metrics');
+    const creatorRevenue = (limit?: number) => callInvoke<any>('creator_revenue', { limit });
+    const creatorTrends = (limit?: number) => callInvoke<any>('creator_trends', { limit });
+
+    // R149: Affiliate Program
+    const affiliateCreate = (creatorId: string, productId: string) =>
+        callInvoke<any>('affiliate_create', { creator_id: creatorId, product_id: productId });
+    const affiliateEarnings = (creatorId: string) => callInvoke<any>('affiliate_earnings', { creator_id: creatorId });
+    const affiliateList = (creatorId?: string) => callInvoke<any>('affiliate_list', { creator_id: creatorId });
+    const affiliateTrack = (linkCode: string, conversion: boolean, amount?: number) =>
+        callInvoke<any>('affiliate_track', { link_code: linkCode, conversion, amount });
+
     return {
         getStatus, processMessage, getTasks, getPlaybooks, setActivePlaybook,
         getSettings, updateSettings, healthCheck, getActiveChain, getChainHistory,
@@ -1122,6 +1281,42 @@ export function useAgent() {
         transferRegister, transferFind, transferApply, transferList,
         // R129: Meta-Learning
         metaRecord, metaCurve, metaAllCurves, metaPredict,
+        // R131: Legal Suite
+        legalCreateCase, legalListCases, legalSearch, legalAnalyze,
+        // R132: Medical
+        medicalAdd, medicalSearch, medicalInteractions, medicalSummary,
+        // R133: Accounting
+        accountingAdd, accountingBalance, accountingReport, accountingCategorize,
+        // R134: Real Estate
+        realestateAdd, realestateSearch, realestateRoi, realestateListing,
+        // R135: Education
+        eduCreateCourse, eduQuiz, eduGrade, eduProgress,
+        // R136: HR
+        hrAdd, hrList, hrOfferLetter, hrBenefits,
+        // R137: Supply Chain
+        supplyTrack, supplyOptimize, supplyForecast, supplyList,
+        // R138: Construction
+        constructionCreate, constructionMilestone, constructionBudget, constructionSafety,
+        // R139: Agriculture
+        agriCreatePlan, agriWeather, agriIrrigation, agriYield,
+        // R141: Agent Hiring
+        hiringPost, hiringList, hiringApply, hiringHire,
+        // R142: Reputation System
+        reputationGet, reputationReview, reputationLeaderboard,
+        // R143: Cross-User Collaboration
+        collabCreate, collabJoin, collabList, collabShare,
+        // R144: Microtasks
+        microtaskPost, microtaskClaim, microtaskComplete, microtaskList,
+        // R145: Escrow
+        escrowCreate, escrowRelease, escrowRefund, escrowList,
+        // R146: Agent Insurance
+        insuranceCreate, insuranceList, insuranceClaim, insuranceStatus,
+        // R147: Creator Studio
+        creatorCreate, creatorPublish, creatorList, creatorAnalytics,
+        // R148: Creator Analytics
+        creatorMetrics, creatorRevenue, creatorTrends,
+        // R149: Affiliate Program
+        affiliateCreate, affiliateEarnings, affiliateList, affiliateTrack,
     };
 }
 
