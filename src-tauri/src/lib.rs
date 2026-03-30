@@ -4190,6 +4190,158 @@ async fn cmd_sandbox_kill(id: String) -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({ "ok": true }))
 }
 
+// ── R68: Agent Marketplace commands ──────────────────────────────────────
+
+#[tauri::command]
+async fn cmd_marketplace_list_agents(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let all = marketplace::AgentMarketplace::list_agents()?;
+    let packages: Vec<serde_json::Value> = all
+        .iter()
+        .map(|p| {
+            let installed = marketplace::AgentMarketplace::is_installed(db.conn(), &p.id);
+            let mut v = serde_json::to_value(p).unwrap_or_default();
+            v.as_object_mut().map(|o| o.insert("installed".into(), serde_json::json!(installed)));
+            v
+        })
+        .collect();
+    Ok(serde_json::json!({ "agents": packages }))
+}
+
+#[tauri::command]
+async fn cmd_marketplace_search_agents(
+    query: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let results = marketplace::AgentMarketplace::search_agents(&query)?;
+    let packages: Vec<serde_json::Value> = results
+        .iter()
+        .map(|p| {
+            let installed = marketplace::AgentMarketplace::is_installed(db.conn(), &p.id);
+            let mut v = serde_json::to_value(p).unwrap_or_default();
+            v.as_object_mut().map(|o| o.insert("installed".into(), serde_json::json!(installed)));
+            v
+        })
+        .collect();
+    Ok(serde_json::json!({ "agents": packages }))
+}
+
+#[tauri::command]
+async fn cmd_marketplace_install_agent(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    marketplace::AgentMarketplace::install_agent(db.conn(), &id)
+}
+
+#[tauri::command]
+async fn cmd_marketplace_uninstall_agent(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    marketplace::AgentMarketplace::uninstall_agent(db.conn(), &id)
+}
+
+#[tauri::command]
+async fn cmd_marketplace_create_agent_package(
+    persona_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let pkg = marketplace::AgentMarketplace::create_package(db.conn(), &persona_id)?;
+    serde_json::to_value(&pkg).map_err(|e| e.to_string())
+}
+
+// ── R69: Team Collaboration commands ──────────────────────────────────────
+
+#[tauri::command]
+async fn cmd_team_create(
+    name: String,
+    owner_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    teams::TeamManager::ensure_tables(&conn)?;
+    let team = teams::TeamManager::create_team(&conn, &name, &owner_id)?;
+    serde_json::to_value(&team).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_team_list(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    teams::TeamManager::ensure_tables(&conn)?;
+    let teams_list = teams::TeamManager::list_teams(&conn)?;
+    Ok(serde_json::json!({ "teams": teams_list }))
+}
+
+#[tauri::command]
+async fn cmd_team_members(
+    team_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    teams::TeamManager::ensure_tables(&conn)?;
+    let members = teams::TeamManager::list_members(&conn, &team_id)?;
+    Ok(serde_json::json!({ "members": members }))
+}
+
+#[tauri::command]
+async fn cmd_team_add_member(
+    team_id: String,
+    user_id: String,
+    email: String,
+    role: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    teams::TeamManager::ensure_tables(&conn)?;
+    let member = teams::TeamManager::add_member(&conn, &team_id, &user_id, &email, &role)?;
+    serde_json::to_value(&member).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_team_remove_member(
+    member_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    teams::TeamManager::ensure_tables(&conn)?;
+    teams::TeamManager::remove_member(&conn, &member_id)?;
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+#[tauri::command]
+async fn cmd_team_update_role(
+    member_id: String,
+    role: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    teams::TeamManager::ensure_tables(&conn)?;
+    teams::TeamManager::update_role(&conn, &member_id, &role)?;
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+#[tauri::command]
+async fn cmd_team_share_resource(
+    team_id: String,
+    resource_type: String,
+    resource_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    teams::TeamManager::ensure_tables(&conn)?;
+    let resource = teams::TeamManager::share_resource(&conn, &team_id, &resource_type, &resource_id)?;
+    serde_json::to_value(&resource).map_err(|e| e.to_string())
+}
+
 /// Simple non-cryptographic hash for referral IDs (not security-sensitive).
 fn md5_simple(data: &[u8]) -> u64 {
     let mut hash: u64 = 0xcbf29ce484222325;
@@ -4941,6 +5093,20 @@ pub fn run() {
             cmd_sandbox_run,
             cmd_sandbox_list,
             cmd_sandbox_kill,
+            // R68: Agent Marketplace commands
+            cmd_marketplace_list_agents,
+            cmd_marketplace_search_agents,
+            cmd_marketplace_install_agent,
+            cmd_marketplace_uninstall_agent,
+            cmd_marketplace_create_agent_package,
+            // R69: Team Collaboration commands
+            cmd_team_create,
+            cmd_team_list,
+            cmd_team_members,
+            cmd_team_add_member,
+            cmd_team_remove_member,
+            cmd_team_update_role,
+            cmd_team_share_resource,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");

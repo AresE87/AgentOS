@@ -395,6 +395,33 @@ export function useAgent() {
     const apiRegistryTemplates = () =>
         callInvoke<any[]>('api_registry_templates');
 
+    // R68: Agent Marketplace
+    const marketplaceListAgents = () =>
+        callInvoke<{ agents: any[] }>('marketplace_list_agents');
+    const marketplaceSearchAgents = (query: string) =>
+        callInvoke<{ agents: any[] }>('marketplace_search_agents', { query });
+    const marketplaceInstallAgent = (id: string) =>
+        callInvoke<{ ok: boolean; package_id: string; persona_id: string }>('marketplace_install_agent', { id });
+    const marketplaceUninstallAgent = (id: string) =>
+        callInvoke<{ ok: boolean; package_id: string }>('marketplace_uninstall_agent', { id });
+    const marketplaceCreateAgentPackage = (personaId: string) =>
+        callInvoke<any>('marketplace_create_agent_package', { persona_id: personaId });
+
+    // R69: Team Collaboration
+    const teamCreate = (name: string, ownerId: string) =>
+        callInvoke<any>('team_create', { name, owner_id: ownerId });
+    const teamList = () => callInvoke<{ teams: any[] }>('team_list');
+    const teamMembers = (teamId: string) =>
+        callInvoke<{ members: any[] }>('team_members', { team_id: teamId });
+    const teamAddMember = (teamId: string, userId: string, email: string, role: string) =>
+        callInvoke<any>('team_add_member', { team_id: teamId, user_id: userId, email, role });
+    const teamRemoveMember = (memberId: string) =>
+        callInvoke<{ ok: boolean }>('team_remove_member', { member_id: memberId });
+    const teamUpdateRole = (memberId: string, role: string) =>
+        callInvoke<{ ok: boolean }>('team_update_role', { member_id: memberId, role });
+    const teamShareResource = (teamId: string, resourceType: string, resourceId: string) =>
+        callInvoke<any>('team_share_resource', { team_id: teamId, resource_type: resourceType, resource_id: resourceId });
+
     return {
         getStatus, processMessage, getTasks, getPlaybooks, setActivePlaybook,
         getSettings, updateSettings, healthCheck, getActiveChain, getChainHistory,
@@ -479,6 +506,10 @@ export function useAgent() {
         apiRegistryAdd, apiRegistryRemove, apiRegistryList, apiRegistryCall, apiRegistryTemplates,
         // R67: Sandbox (Docker)
         sandboxAvailable, sandboxRun, sandboxList, sandboxKill,
+        // R68: Agent Marketplace
+        marketplaceListAgents, marketplaceSearchAgents, marketplaceInstallAgent, marketplaceUninstallAgent, marketplaceCreateAgentPackage,
+        // R69: Team Collaboration
+        teamCreate, teamList, teamMembers, teamAddMember, teamRemoveMember, teamUpdateRole, teamShareResource,
     };
 }
 
