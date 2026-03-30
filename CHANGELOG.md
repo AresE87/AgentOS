@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.2.0] - 2026-03-29
+
+### Added
+- R69: Team Collaboration — teams, members, roles (owner/admin/member/viewer), resource sharing
+- R70: v1.2 Enterprise — department quotas (budget, daily task limits, model allowlists), SCIM 2.0 user provisioning stubs
+
+### Changed
+- Version bump to 1.2.0 across Cargo.toml, frontend, and mobile packages
+
 ## [1.1.0] - 2026-03-29
 
 ### Added

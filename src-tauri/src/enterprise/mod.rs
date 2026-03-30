@@ -1,5 +1,9 @@
 pub mod audit;
 pub mod org;
+pub mod quotas;
+pub mod scim;
 pub mod sso;
 pub use audit::AuditLog;
 pub use org::OrgManager;
+pub use quotas::QuotaManager;
+pub use scim::SCIMProvider;
