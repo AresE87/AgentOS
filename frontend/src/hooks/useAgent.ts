@@ -373,6 +373,16 @@ export function useAgent() {
     const dbRawQuery = (connectionString: string, sql: string, readOnly?: boolean) =>
         callInvoke<{ columns: string[]; rows: string[][]; row_count: number; duration_ms: number }>('db_raw_query', { connection_string: connectionString, sql, read_only: readOnly });
 
+    // R67: Sandbox (Docker)
+    const sandboxAvailable = () =>
+        callInvoke<{ available: boolean }>('sandbox_available');
+    const sandboxRun = (config: { image: string; memory_limit_mb: number; cpu_limit: number; timeout_secs: number; network_enabled: boolean; working_dir?: string }, command: string) =>
+        callInvoke<{ exit_code: number; stdout: string; stderr: string; duration_ms: number; sandbox_id: string }>('sandbox_run', { config, command });
+    const sandboxList = () =>
+        callInvoke<{ id: string; image: string; status: string; name: string }[]>('sandbox_list');
+    const sandboxKill = (id: string) =>
+        callInvoke<{ ok: boolean }>('sandbox_kill', { id });
+
     // R66: API Orchestrator
     const apiRegistryAdd = (api: { name: string; base_url: string; auth_type: string; auth_token: string; headers?: Record<string, string>; endpoints?: { name: string; method: string; path: string; description: string; body_template?: string }[] }) =>
         callInvoke<{ ok: boolean; id: string }>('api_registry_add', { api: { id: '', ...api, headers: api.headers || {}, endpoints: api.endpoints || [] } });
@@ -467,6 +477,8 @@ export function useAgent() {
         dbAdd, dbRemove, dbList, dbTest, dbTables, dbQuery, dbRawQuery,
         // R66: API Orchestrator
         apiRegistryAdd, apiRegistryRemove, apiRegistryList, apiRegistryCall, apiRegistryTemplates,
+        // R67: Sandbox (Docker)
+        sandboxAvailable, sandboxRun, sandboxList, sandboxKill,
     };
 }
 

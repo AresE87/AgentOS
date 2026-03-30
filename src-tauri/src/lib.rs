@@ -41,6 +41,8 @@ pub mod growth;
 pub mod integrations;
 pub mod users;
 pub mod approvals;
+pub mod sandbox;
+pub mod teams;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -4157,6 +4159,37 @@ async fn cmd_api_registry_templates() -> Result<serde_json::Value, String> {
     serde_json::to_value(&templates).map_err(|e| e.to_string())
 }
 
+// ── R67: Sandbox (Docker) commands ──────────────────────────────────────
+
+#[tauri::command]
+async fn cmd_sandbox_available() -> Result<serde_json::Value, String> {
+    let available = sandbox::SandboxManager::is_docker_available().await;
+    Ok(serde_json::json!({ "available": available }))
+}
+
+#[tauri::command]
+async fn cmd_sandbox_run(
+    config: serde_json::Value,
+    command: String,
+) -> Result<serde_json::Value, String> {
+    let cfg: sandbox::SandboxConfig =
+        serde_json::from_value(config).map_err(|e| e.to_string())?;
+    let result = sandbox::SandboxManager::create_sandbox(&cfg, &command).await?;
+    serde_json::to_value(&result).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_sandbox_list() -> Result<serde_json::Value, String> {
+    let containers = sandbox::SandboxManager::list_running().await?;
+    serde_json::to_value(&containers).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_sandbox_kill(id: String) -> Result<serde_json::Value, String> {
+    sandbox::SandboxManager::kill_sandbox(&id).await?;
+    Ok(serde_json::json!({ "ok": true }))
+}
+
 /// Simple non-cryptographic hash for referral IDs (not security-sensitive).
 fn md5_simple(data: &[u8]) -> u64 {
     let mut hash: u64 = 0xcbf29ce484222325;
@@ -4903,6 +4936,11 @@ pub fn run() {
             cmd_api_registry_list,
             cmd_api_registry_call,
             cmd_api_registry_templates,
+            // R67: Sandbox (Docker) commands
+            cmd_sandbox_available,
+            cmd_sandbox_run,
+            cmd_sandbox_list,
+            cmd_sandbox_kill,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");
