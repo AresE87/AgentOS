@@ -37,6 +37,7 @@ pub mod monitors;
 pub mod files;
 pub mod personas;
 pub mod templates;
+pub mod growth;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -3704,6 +3705,47 @@ async fn cmd_delete_persona(
     Ok(serde_json::json!({ "ok": true }))
 }
 
+// ── R60: Growth — Adoption Metrics, Sharing, Referrals ──────────────
+
+#[tauri::command]
+async fn cmd_get_adoption_metrics(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let metrics = growth::AdoptionMetrics::collect(db.conn());
+    serde_json::to_value(&metrics).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_create_share_link(
+    content_type: String,
+    id: String,
+    title: String,
+) -> Result<serde_json::Value, String> {
+    let share = growth::ShareManager::create_share_link(&content_type, &id, &title);
+    serde_json::to_value(&share).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_get_referral_link(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    // Use a hash of the db path as a stable anonymous user identifier
+    let user_id = format!("{:x}", md5_simple(state.db_path.to_string_lossy().as_bytes()));
+    let link = growth::ShareManager::create_referral_link(&user_id);
+    Ok(serde_json::json!({ "referral_url": link }))
+}
+
+/// Simple non-cryptographic hash for referral IDs (not security-sensitive).
+fn md5_simple(data: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for &b in data {
+        hash ^= b as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -4380,6 +4422,10 @@ pub fn run() {
             cmd_create_persona,
             cmd_update_persona,
             cmd_delete_persona,
+            // R60: Growth — Adoption Metrics, Sharing, Referrals
+            cmd_get_adoption_metrics,
+            cmd_create_share_link,
+            cmd_get_referral_link,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");

@@ -302,6 +302,12 @@ export function useAgent() {
     const updatePersona = (persona: any) => callInvoke<any>('update_persona', { persona });
     const deletePersona = (id: string) => callInvoke<any>('delete_persona', { id });
 
+    // R60: Growth — Adoption Metrics, Sharing, Referrals
+    const getAdoptionMetrics = () => callInvoke<any>('get_adoption_metrics');
+    const createShareLink = (contentType: string, id: string, title: string) =>
+        callInvoke<any>('create_share_link', { content_type: contentType, id, title });
+    const getReferralLink = () => callInvoke<any>('get_referral_link');
+
     return {
         getStatus, processMessage, getTasks, getPlaybooks, setActivePlaybook,
         getSettings, updateSettings, healthCheck, getActiveChain, getChainHistory,
@@ -370,6 +376,8 @@ export function useAgent() {
         getTemplates, getTemplate, saveTemplate, renderTemplate, deleteTemplate,
         // R59: Agent Personas
         listPersonas, getPersona, createPersona, updatePersona, deletePersona,
+        // R60: Growth — Adoption Metrics, Sharing, Referrals
+        getAdoptionMetrics, createShareLink, getReferralLink,
     };
 }
 

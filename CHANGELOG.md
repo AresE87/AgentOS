@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.1.0] - 2026-03-29
+
+### Added
+- R51: Multi-Agent Conversations — conversation chains, agent messaging, review patterns
+- R52: Screen Recording & Replay — frame capture, recording manager, replay metadata
+- R53: Natural Language Triggers — NL parser, file watch, condition triggers
+- R54: Agent Memory (RAG Local) — local memory store, keyword search, context injection
+- R55: File Understanding — read/process files, temp file management
+- R56: Smart Notifications — notification center, monitor checks, read/unread tracking
+- R57: Collaborative Chains — user intervention, subtask actions, context injection
+- R58: Template Engine — template CRUD, variable rendering, reusable templates
+- R59: Agent Personas — persona profiles, default personas, custom persona management
+- R60: v1.1 Growth Release — adoption metrics, sharing/referral links, version bump
+
+### Changed
+- Version bump to 1.1.0 across Cargo.toml, frontend, and mobile packages
+
 ## [1.0.0] - 2026-03-29
 
 ### Added
