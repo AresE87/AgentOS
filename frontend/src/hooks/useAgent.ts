@@ -752,6 +752,92 @@ export function useAgent() {
     const certifyPartner = (id: string) =>
         callInvoke<any>('certify_partner', { id });
 
+    // R111: Autonomous Inbox
+    const autoInboxAddRule = (name: string, condition: string, action: string, priority: number) =>
+        callInvoke<any>('auto_inbox_add_rule', { name, condition, action, priority });
+    const autoInboxListRules = () =>
+        callInvoke<any>('auto_inbox_list_rules');
+    const autoInboxProcess = (from: string, subject: string, body: string, labels: string[]) =>
+        callInvoke<any>('auto_inbox_process', { from, subject, body, labels });
+    const autoInboxRemoveRule = (id: string) =>
+        callInvoke<any>('auto_inbox_remove_rule', { id });
+
+    // R112: Autonomous Scheduling
+    const autoScheduleOptimize = (events: any[]) =>
+        callInvoke<any>('auto_schedule_optimize', { events });
+    const autoScheduleFindSlot = (durationMinutes: number, attendees: string[], events: any[]) =>
+        callInvoke<any>('auto_schedule_find_slot', { duration_minutes: durationMinutes, attendees, events });
+    const autoSchedulePreferences = (preferredStart?: number, preferredEnd?: number, bufferMinutes?: number, maxMeetings?: number) =>
+        callInvoke<any>('auto_schedule_preferences', { preferred_start: preferredStart, preferred_end: preferredEnd, buffer_minutes: bufferMinutes, max_meetings: maxMeetings });
+
+    // R113: Autonomous Reporting
+    const autoReportCreate = (name: string, schedule: string, dataSources: string[], template: string, recipients: string[]) =>
+        callInvoke<any>('auto_report_create', { name, schedule, data_sources: dataSources, template, recipients });
+    const autoReportList = () =>
+        callInvoke<any>('auto_report_list');
+    const autoReportGenerate = (configId: string) =>
+        callInvoke<any>('auto_report_generate', { config_id: configId });
+    const autoReportSchedule = () =>
+        callInvoke<any>('auto_report_schedule');
+
+    // R114: Autonomous Data Entry
+    const dataEntryCreate = (sourceType: string, sourcePath: string, targetSystem: string, mapping: Record<string, string>) =>
+        callInvoke<any>('data_entry_create', { source_type: sourceType, source_path: sourcePath, target_system: targetSystem, mapping });
+    const dataEntryProcess = (id: string) =>
+        callInvoke<any>('data_entry_process', { id });
+    const dataEntryList = () =>
+        callInvoke<any>('data_entry_list');
+    const dataEntryValidate = (sourceType: string, sourcePath: string, targetSystem: string, mapping: Record<string, string>) =>
+        callInvoke<any>('data_entry_validate', { source_type: sourceType, source_path: sourcePath, target_system: targetSystem, mapping });
+
+    // R115: Autonomous QA
+    const qaRunChecks = (target: string) =>
+        callInvoke<any>('qa_run_checks', { target });
+    const qaGeneratePlan = (description: string) =>
+        callInvoke<any>('qa_generate_plan', { description });
+    const qaCoverage = () =>
+        callInvoke<any>('qa_coverage');
+
+    // R116: Autonomous Support
+    const supportProcess = (customer: string, issue: string, priority: string) =>
+        callInvoke<any>('support_process', { customer, issue, priority });
+    const supportList = () =>
+        callInvoke<any>('support_list');
+    const supportResolve = (id: string) =>
+        callInvoke<any>('support_resolve', { id });
+    const supportStats = () =>
+        callInvoke<any>('support_stats');
+
+    // R117: Autonomous Procurement
+    const procurementSubmit = (item: string, vendor: string, amount: number, currency: string, justification: string, requester: string) =>
+        callInvoke<any>('procurement_submit', { item, vendor, amount, currency, justification, requester });
+    const procurementList = () =>
+        callInvoke<any>('procurement_list');
+    const procurementApprove = (id: string) =>
+        callInvoke<any>('procurement_approve', { id });
+    const procurementSpend = () =>
+        callInvoke<any>('procurement_spend');
+
+    // R118: Autonomous Compliance
+    const autoComplianceRegister = (regulation: string, requirement: string, checkCommand: string) =>
+        callInvoke<any>('auto_compliance_register', { regulation, requirement, check_command: checkCommand });
+    const autoComplianceRun = () =>
+        callInvoke<any>('auto_compliance_run');
+    const autoComplianceIssues = () =>
+        callInvoke<any>('auto_compliance_issues');
+    const autoComplianceRemediate = (id: string) =>
+        callInvoke<any>('auto_compliance_remediate', { id });
+
+    // R119: Autonomous Reconciliation
+    const reconcileCreate = (sourceA: string, sourceB: string) =>
+        callInvoke<any>('reconcile_create', { source_a: sourceA, source_b: sourceB });
+    const reconcileRun = (jobId: string) =>
+        callInvoke<any>('reconcile_run', { job_id: jobId });
+    const reconcileResolve = (jobId: string) =>
+        callInvoke<any>('reconcile_resolve', { job_id: jobId });
+    const reconcileList = () =>
+        callInvoke<any>('reconcile_list');
+
     return {
         getStatus, processMessage, getTasks, getPlaybooks, setActivePlaybook,
         getSettings, updateSettings, healthCheck, getActiveChain, getChainHistory,
@@ -914,6 +1000,24 @@ export function useAgent() {
         emailClientAdd, emailClientList, emailClientConnect, emailClientFetch, emailClientSend,
         // R109: Hardware Partnerships
         listPartners, getPartner, registerPartner, certifyPartner,
+        // R111: Autonomous Inbox
+        autoInboxAddRule, autoInboxListRules, autoInboxProcess, autoInboxRemoveRule,
+        // R112: Autonomous Scheduling
+        autoScheduleOptimize, autoScheduleFindSlot, autoSchedulePreferences,
+        // R113: Autonomous Reporting
+        autoReportCreate, autoReportList, autoReportGenerate, autoReportSchedule,
+        // R114: Autonomous Data Entry
+        dataEntryCreate, dataEntryProcess, dataEntryList, dataEntryValidate,
+        // R115: Autonomous QA
+        qaRunChecks, qaGeneratePlan, qaCoverage,
+        // R116: Autonomous Support
+        supportProcess, supportList, supportResolve, supportStats,
+        // R117: Autonomous Procurement
+        procurementSubmit, procurementList, procurementApprove, procurementSpend,
+        // R118: Autonomous Compliance
+        autoComplianceRegister, autoComplianceRun, autoComplianceIssues, autoComplianceRemediate,
+        // R119: Autonomous Reconciliation
+        reconcileCreate, reconcileRun, reconcileResolve, reconcileList,
     };
 }
 

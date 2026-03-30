@@ -68,6 +68,7 @@ pub mod devices;
 pub mod browser_ext;
 pub mod email_client;
 pub mod partnerships;
+pub mod autonomous;
 
 use base64::Engine as _;
 use std::path::PathBuf;
@@ -199,6 +200,24 @@ pub struct AppState {
     pub email_client_mgr: Arc<tokio::sync::Mutex<email_client::EmailClient>>,
     /// R109: Hardware Partnerships registry
     pub partner_registry: Arc<tokio::sync::Mutex<partnerships::PartnerRegistry>>,
+    /// R111: Autonomous Inbox
+    pub auto_inbox: Arc<tokio::sync::Mutex<autonomous::AutoInbox>>,
+    /// R112: Autonomous Scheduling
+    pub auto_scheduler: Arc<tokio::sync::Mutex<autonomous::AutoScheduler>>,
+    /// R113: Autonomous Reporting
+    pub auto_reporter: Arc<tokio::sync::Mutex<autonomous::AutoReporter>>,
+    /// R114: Autonomous Data Entry
+    pub auto_data_entry: Arc<tokio::sync::Mutex<autonomous::AutoDataEntry>>,
+    /// R115: Autonomous QA
+    pub auto_qa: Arc<tokio::sync::Mutex<autonomous::AutoQA>>,
+    /// R116: Autonomous Support engine
+    pub auto_support: Arc<tokio::sync::Mutex<autonomous::AutoSupport>>,
+    /// R117: Autonomous Procurement engine
+    pub auto_procurement: Arc<tokio::sync::Mutex<autonomous::AutoProcurement>>,
+    /// R118: Autonomous Compliance monitoring
+    pub auto_compliance: Arc<tokio::sync::Mutex<autonomous::AutoCompliance>>,
+    /// R119: Autonomous Reconciliation engine
+    pub auto_reconciliation: Arc<tokio::sync::Mutex<autonomous::AutoReconciliation>>,
 }
 
 // ── R44: Cloud Mesh Relay commands ──────────────────────────────────
@@ -6083,6 +6102,447 @@ async fn cmd_certify_partner(
     serde_json::to_value(&partner).map_err(|e| e.to_string())
 }
 
+// ── R111: Autonomous Inbox commands ──────────────────────────────────
+
+#[tauri::command]
+async fn cmd_auto_inbox_add_rule(
+    name: String,
+    condition: String,
+    action: String,
+    priority: u32,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let rule = autonomous::InboxRule {
+        id: String::new(),
+        name,
+        condition,
+        action,
+        enabled: true,
+        priority,
+    };
+    let mut inbox = state.auto_inbox.lock().await;
+    let id = inbox.add_rule(rule);
+    Ok(serde_json::json!({ "id": id }))
+}
+
+#[tauri::command]
+async fn cmd_auto_inbox_list_rules(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let inbox = state.auto_inbox.lock().await;
+    serde_json::to_value(inbox.list_rules()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_auto_inbox_process(
+    from: String,
+    subject: String,
+    body: String,
+    labels: Vec<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let msg = autonomous::inbox::InboxMessage { from, subject, body, labels };
+    let inbox = state.auto_inbox.lock().await;
+    let result = inbox.process_message(&msg);
+    serde_json::to_value(&result).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_auto_inbox_remove_rule(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut inbox = state.auto_inbox.lock().await;
+    let removed = inbox.remove_rule(&id);
+    Ok(serde_json::json!({ "removed": removed }))
+}
+
+// ── R112: Autonomous Scheduling commands ─────────────────────────────
+
+#[tauri::command]
+async fn cmd_auto_schedule_optimize(
+    events: Vec<serde_json::Value>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let parsed: Vec<autonomous::scheduling::CalendarEvent> =
+        serde_json::from_value(serde_json::Value::Array(events)).map_err(|e| e.to_string())?;
+    let scheduler = state.auto_scheduler.lock().await;
+    let prefs = scheduler.get_preferences();
+    let suggestions = scheduler.optimize_calendar(&parsed, &prefs);
+    serde_json::to_value(&suggestions).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_auto_schedule_find_slot(
+    duration_minutes: u32,
+    attendees: Vec<String>,
+    events: Vec<serde_json::Value>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let parsed: Vec<autonomous::scheduling::CalendarEvent> =
+        serde_json::from_value(serde_json::Value::Array(events)).map_err(|e| e.to_string())?;
+    let scheduler = state.auto_scheduler.lock().await;
+    let prefs = scheduler.get_preferences();
+    let slot = scheduler.find_best_slot(duration_minutes, &attendees, &parsed, &prefs);
+    serde_json::to_value(&slot).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_auto_schedule_preferences(
+    preferred_start: Option<u8>,
+    preferred_end: Option<u8>,
+    buffer_minutes: Option<u32>,
+    max_meetings: Option<u32>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut scheduler = state.auto_scheduler.lock().await;
+    if preferred_start.is_some() || preferred_end.is_some() || buffer_minutes.is_some() || max_meetings.is_some() {
+        let mut prefs = scheduler.get_preferences();
+        if let Some(s) = preferred_start { prefs.preferred_hours.0 = s; }
+        if let Some(e) = preferred_end { prefs.preferred_hours.1 = e; }
+        if let Some(b) = buffer_minutes { prefs.buffer_minutes = b; }
+        if let Some(m) = max_meetings { prefs.max_meetings_per_day = m; }
+        scheduler.set_preferences(prefs);
+    }
+    serde_json::to_value(scheduler.get_preferences()).map_err(|e| e.to_string())
+}
+
+// ── R113: Autonomous Reporting commands ──────────────────────────────
+
+#[tauri::command]
+async fn cmd_auto_report_create(
+    name: String,
+    schedule: String,
+    data_sources: Vec<String>,
+    template: String,
+    recipients: Vec<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let config = autonomous::ReportConfig {
+        id: String::new(),
+        name,
+        schedule,
+        data_sources,
+        template,
+        recipients,
+    };
+    let mut reporter = state.auto_reporter.lock().await;
+    let id = reporter.create_report_config(config);
+    Ok(serde_json::json!({ "id": id }))
+}
+
+#[tauri::command]
+async fn cmd_auto_report_list(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let reporter = state.auto_reporter.lock().await;
+    serde_json::to_value(reporter.list_configs()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_auto_report_generate(
+    config_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut reporter = state.auto_reporter.lock().await;
+    let content = reporter.generate_report(&config_id)?;
+    Ok(serde_json::json!({ "content": content }))
+}
+
+#[tauri::command]
+async fn cmd_auto_report_schedule(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let reporter = state.auto_reporter.lock().await;
+    serde_json::to_value(reporter.get_scheduled_reports()).map_err(|e| e.to_string())
+}
+
+// ── R114: Autonomous Data Entry commands ─────────────────────────────
+
+#[tauri::command]
+async fn cmd_data_entry_create(
+    source_type: String,
+    source_path: String,
+    target_system: String,
+    mapping: std::collections::HashMap<String, String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let task = autonomous::DataEntryTask {
+        id: String::new(),
+        source_type,
+        source_path,
+        target_system,
+        mapping,
+        status: autonomous::data_entry::DataEntryStatus::Pending,
+    };
+    let mut de = state.auto_data_entry.lock().await;
+    let id = de.create_task(task);
+    Ok(serde_json::json!({ "id": id }))
+}
+
+#[tauri::command]
+async fn cmd_data_entry_process(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut de = state.auto_data_entry.lock().await;
+    let result = de.process_task(&id)?;
+    serde_json::to_value(&result).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_data_entry_list(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let de = state.auto_data_entry.lock().await;
+    serde_json::to_value(de.list_tasks()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_data_entry_validate(
+    source_type: String,
+    source_path: String,
+    target_system: String,
+    mapping: std::collections::HashMap<String, String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let task = autonomous::DataEntryTask {
+        id: "validate-temp".into(),
+        source_type,
+        source_path,
+        target_system,
+        mapping,
+        status: autonomous::data_entry::DataEntryStatus::Pending,
+    };
+    let de = state.auto_data_entry.lock().await;
+    let errors = de.validate_mapping(&task);
+    serde_json::to_value(&errors).map_err(|e| e.to_string())
+}
+
+// ── R115: Autonomous QA commands ─────────────────────────────────────
+
+#[tauri::command]
+async fn cmd_qa_run_checks(
+    target: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut qa = state.auto_qa.lock().await;
+    let checks = qa.run_checks(&target);
+    serde_json::to_value(&checks).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_qa_generate_plan(
+    description: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut qa = state.auto_qa.lock().await;
+    let plan = qa.generate_test_plan(&description);
+    serde_json::to_value(&plan).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_qa_coverage(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let qa = state.auto_qa.lock().await;
+    serde_json::to_value(qa.get_coverage_report()).map_err(|e| e.to_string())
+}
+
+// ── R116: Autonomous Support commands ─────────────────────────────
+
+#[tauri::command]
+async fn cmd_support_process(
+    customer: String,
+    issue: String,
+    priority: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut support = state.auto_support.lock().await;
+    let ticket = autonomous::SupportTicket {
+        id: String::new(),
+        customer,
+        issue,
+        priority,
+        status: "open".to_string(),
+        auto_response: None,
+        created_at: String::new(),
+    };
+    let action = support.process_ticket(ticket);
+    serde_json::to_value(&action).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_support_list(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let support = state.auto_support.lock().await;
+    serde_json::to_value(support.list_tickets()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_support_resolve(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut support = state.auto_support.lock().await;
+    let ticket = support.resolve_ticket(&id)?;
+    serde_json::to_value(&ticket).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_support_stats(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let support = state.auto_support.lock().await;
+    Ok(support.stats())
+}
+
+// ── R117: Autonomous Procurement commands ─────────────────────────
+
+#[tauri::command]
+async fn cmd_procurement_submit(
+    item: String,
+    vendor: String,
+    amount: f64,
+    currency: String,
+    justification: String,
+    requester: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut proc = state.auto_procurement.lock().await;
+    let req = autonomous::PurchaseRequest {
+        id: String::new(),
+        item,
+        vendor,
+        amount,
+        currency,
+        justification,
+        status: String::new(),
+        requester,
+        created_at: String::new(),
+    };
+    let result = proc.submit_request(req);
+    serde_json::to_value(&result).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_procurement_list(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let proc = state.auto_procurement.lock().await;
+    serde_json::to_value(proc.list_requests()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_procurement_approve(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut proc = state.auto_procurement.lock().await;
+    let approved = proc.auto_approve(&id)?;
+    Ok(serde_json::json!({ "id": id, "auto_approved": approved }))
+}
+
+#[tauri::command]
+async fn cmd_procurement_spend(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let proc = state.auto_procurement.lock().await;
+    serde_json::to_value(proc.get_spend_summary()).map_err(|e| e.to_string())
+}
+
+// ── R118: Autonomous Compliance commands ──────────────────────────
+
+#[tauri::command]
+async fn cmd_auto_compliance_register(
+    regulation: String,
+    requirement: String,
+    check_command: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut comp = state.auto_compliance.lock().await;
+    let task = autonomous::ComplianceTask {
+        id: String::new(),
+        regulation,
+        requirement,
+        check_command,
+        last_checked: None,
+        status: String::new(),
+        remediation: None,
+    };
+    let result = comp.register_requirement(task);
+    serde_json::to_value(&result).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_auto_compliance_run(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut comp = state.auto_compliance.lock().await;
+    let results = comp.run_all_checks();
+    serde_json::to_value(&results).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_auto_compliance_issues(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let comp = state.auto_compliance.lock().await;
+    serde_json::to_value(comp.get_non_compliant()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_auto_compliance_remediate(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut comp = state.auto_compliance.lock().await;
+    let task = comp.auto_remediate(&id)?;
+    serde_json::to_value(&task).map_err(|e| e.to_string())
+}
+
+// ── R119: Autonomous Reconciliation commands ──────────────────────
+
+#[tauri::command]
+async fn cmd_reconcile_create(
+    source_a: String,
+    source_b: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut recon = state.auto_reconciliation.lock().await;
+    let job = recon.create_job(source_a, source_b);
+    serde_json::to_value(&job).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_reconcile_run(
+    job_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut recon = state.auto_reconciliation.lock().await;
+    let mismatches = recon.run_reconciliation(&job_id)?;
+    serde_json::to_value(&mismatches).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_reconcile_resolve(
+    job_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut recon = state.auto_reconciliation.lock().await;
+    let count = recon.auto_resolve(&job_id)?;
+    Ok(serde_json::json!({ "job_id": job_id, "resolved_count": count }))
+}
+
+#[tauri::command]
+async fn cmd_reconcile_list(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let recon = state.auto_reconciliation.lock().await;
+    serde_json::to_value(recon.list_jobs()).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -6295,6 +6755,16 @@ pub fn run() {
                 browser_bridge: Arc::new(tokio::sync::Mutex::new(browser_ext::BrowserBridge::new())),
                 email_client_mgr: Arc::new(tokio::sync::Mutex::new(email_client::EmailClient::new())),
                 partner_registry: Arc::new(tokio::sync::Mutex::new(partnerships::PartnerRegistry::new())),
+                // R111-R115: Autonomous Operations
+                auto_inbox: Arc::new(tokio::sync::Mutex::new(autonomous::AutoInbox::new())),
+                auto_scheduler: Arc::new(tokio::sync::Mutex::new(autonomous::AutoScheduler::new())),
+                auto_reporter: Arc::new(tokio::sync::Mutex::new(autonomous::AutoReporter::new())),
+                auto_data_entry: Arc::new(tokio::sync::Mutex::new(autonomous::AutoDataEntry::new())),
+                auto_qa: Arc::new(tokio::sync::Mutex::new(autonomous::AutoQA::new())),
+                auto_support: Arc::new(tokio::sync::Mutex::new(autonomous::AutoSupport::new())),
+                auto_procurement: Arc::new(tokio::sync::Mutex::new(autonomous::AutoProcurement::new())),
+                auto_compliance: Arc::new(tokio::sync::Mutex::new(autonomous::AutoCompliance::new())),
+                auto_reconciliation: Arc::new(tokio::sync::Mutex::new(autonomous::AutoReconciliation::new())),
             });
 
             // ── R35: Deferred startup — plugin discovery in background ────
@@ -7087,6 +7557,49 @@ pub fn run() {
             cmd_get_partner,
             cmd_register_partner,
             cmd_certify_partner,
+            // R111: Autonomous Inbox commands
+            cmd_auto_inbox_add_rule,
+            cmd_auto_inbox_list_rules,
+            cmd_auto_inbox_process,
+            cmd_auto_inbox_remove_rule,
+            // R112: Autonomous Scheduling commands
+            cmd_auto_schedule_optimize,
+            cmd_auto_schedule_find_slot,
+            cmd_auto_schedule_preferences,
+            // R113: Autonomous Reporting commands
+            cmd_auto_report_create,
+            cmd_auto_report_list,
+            cmd_auto_report_generate,
+            cmd_auto_report_schedule,
+            // R114: Autonomous Data Entry commands
+            cmd_data_entry_create,
+            cmd_data_entry_process,
+            cmd_data_entry_list,
+            cmd_data_entry_validate,
+            // R115: Autonomous QA commands
+            cmd_qa_run_checks,
+            cmd_qa_generate_plan,
+            cmd_qa_coverage,
+            // R116: Autonomous Support commands
+            cmd_support_process,
+            cmd_support_list,
+            cmd_support_resolve,
+            cmd_support_stats,
+            // R117: Autonomous Procurement commands
+            cmd_procurement_submit,
+            cmd_procurement_list,
+            cmd_procurement_approve,
+            cmd_procurement_spend,
+            // R118: Autonomous Compliance commands
+            cmd_auto_compliance_register,
+            cmd_auto_compliance_run,
+            cmd_auto_compliance_issues,
+            cmd_auto_compliance_remediate,
+            // R119: Autonomous Reconciliation commands
+            cmd_reconcile_create,
+            cmd_reconcile_run,
+            cmd_reconcile_resolve,
+            cmd_reconcile_list,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");
