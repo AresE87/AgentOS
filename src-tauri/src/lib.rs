@@ -38,6 +38,9 @@ pub mod files;
 pub mod personas;
 pub mod templates;
 pub mod growth;
+pub mod integrations;
+pub mod users;
+pub mod approvals;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -96,6 +99,10 @@ pub struct AppState {
     pub intervention_manager: Arc<tokio::sync::Mutex<chains::intervention::InterventionManager>>,
     /// R58: Template Engine
     pub template_engine: Arc<templates::TemplateEngine>,
+    /// R62: Approval Workflows
+    pub approval_manager: Arc<approvals::ApprovalManager>,
+    /// R63: Calendar Integration
+    pub calendar_manager: Arc<tokio::sync::Mutex<integrations::CalendarManager>>,
 }
 
 // ── R44: Cloud Mesh Relay commands ──────────────────────────────────
@@ -3736,6 +3743,125 @@ async fn cmd_get_referral_link(
     Ok(serde_json::json!({ "referral_url": link }))
 }
 
+// ── R61: Multi-User — user profiles, session management ───────────
+
+#[tauri::command]
+async fn cmd_list_users(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let list = users::UserManager::list_users(db.conn())?;
+    Ok(serde_json::json!({ "users": list }))
+}
+
+#[tauri::command]
+async fn cmd_create_user(
+    name: String,
+    email: Option<String>,
+    avatar: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let user = users::UserProfile {
+        id: uuid::Uuid::new_v4().to_string(),
+        name,
+        email: email.unwrap_or_default(),
+        avatar: avatar.unwrap_or_default(),
+        created_at: chrono::Utc::now().to_rfc3339(),
+    };
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    users::UserManager::create_user(db.conn(), &user)?;
+    serde_json::to_value(&user).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_get_current_user(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let session = users::UserManager::get_current_user(db.conn())?;
+    match session {
+        Some(s) => {
+            let profile = users::UserManager::get_user(db.conn(), &s.user_id)?;
+            Ok(serde_json::json!({ "user": profile, "session": s }))
+        }
+        None => Ok(serde_json::json!({ "user": null, "session": null })),
+    }
+}
+
+#[tauri::command]
+async fn cmd_switch_user(
+    user_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    users::UserManager::set_current_user(db.conn(), &user_id)?;
+    let profile = users::UserManager::get_user(db.conn(), &user_id)?;
+    Ok(serde_json::json!({ "ok": true, "user": profile }))
+}
+
+#[tauri::command]
+async fn cmd_login_user(
+    user_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    users::UserManager::set_current_user(db.conn(), &user_id)?;
+    let profile = users::UserManager::get_user(db.conn(), &user_id)?;
+    Ok(serde_json::json!({ "ok": true, "user": profile }))
+}
+
+#[tauri::command]
+async fn cmd_logout_user(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    users::UserManager::logout(db.conn())?;
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+// ── R62: Approval Workflow commands ────────────────────────────────
+
+#[tauri::command]
+async fn cmd_get_pending_approvals(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let pending = state.approval_manager.get_pending();
+    Ok(serde_json::json!({ "approvals": pending }))
+}
+
+#[tauri::command]
+async fn cmd_respond_approval(
+    id: String,
+    status: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let approval_status = match status.to_lowercase().as_str() {
+        "approved" => approvals::ApprovalStatus::Approved,
+        "rejected" => approvals::ApprovalStatus::Rejected,
+        "modified" => approvals::ApprovalStatus::Modified,
+        "timeout" => approvals::ApprovalStatus::Timeout,
+        other => return Err(format!("Invalid approval status: {}", other)),
+    };
+    let updated = state.approval_manager.respond(&id, approval_status, None)?;
+    serde_json::to_value(&updated).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_classify_risk(
+    command: String,
+) -> Result<serde_json::Value, String> {
+    let risk = approvals::ApprovalManager::classify_risk(&command);
+    Ok(serde_json::json!({ "command": command, "risk": risk }))
+}
+
+#[tauri::command]
+async fn cmd_list_approval_history(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let history = state.approval_manager.get_all();
+    Ok(serde_json::json!({ "approvals": history }))
+}
+
 /// Simple non-cryptographic hash for referral IDs (not security-sensitive).
 fn md5_simple(data: &[u8]) -> u64 {
     let mut hash: u64 = 0xcbf29ce484222325;
@@ -3881,6 +4007,7 @@ pub fn run() {
                     engine.seed_defaults();
                     engine
                 },
+                approval_manager: Arc::new(approvals::ApprovalManager::new()),
             });
 
             // ── R35: Deferred startup — plugin discovery in background ────
@@ -4426,6 +4553,18 @@ pub fn run() {
             cmd_get_adoption_metrics,
             cmd_create_share_link,
             cmd_get_referral_link,
+            // R61: Multi-User commands
+            cmd_list_users,
+            cmd_create_user,
+            cmd_get_current_user,
+            cmd_switch_user,
+            cmd_login_user,
+            cmd_logout_user,
+            // R62: Approval Workflow commands
+            cmd_get_pending_approvals,
+            cmd_respond_approval,
+            cmd_classify_risk,
+            cmd_list_approval_history,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");

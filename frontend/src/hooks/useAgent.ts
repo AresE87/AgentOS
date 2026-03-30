@@ -308,6 +308,25 @@ export function useAgent() {
         callInvoke<any>('create_share_link', { content_type: contentType, id, title });
     const getReferralLink = () => callInvoke<any>('get_referral_link');
 
+    // R61: Multi-User
+    const listUsers = () => callInvoke<{ users: any[] }>('list_users');
+    const createUser = (name: string, email?: string, avatar?: string) =>
+        callInvoke<any>('create_user', { name, email, avatar });
+    const getCurrentUser = () => callInvoke<{ user: any; session: any }>('get_current_user');
+    const switchUser = (userId: string) =>
+        callInvoke<{ ok: boolean; user: any }>('switch_user', { user_id: userId });
+    const loginUser = (userId: string) =>
+        callInvoke<{ ok: boolean; user: any }>('login_user', { user_id: userId });
+    const logoutUser = () => callInvoke<{ ok: boolean }>('logout_user');
+
+    // R62: Approval Workflows
+    const getPendingApprovals = () => callInvoke<{ approvals: any[] }>('get_pending_approvals');
+    const respondApproval = (id: string, status: string) =>
+        callInvoke<any>('respond_approval', { id, status });
+    const classifyRisk = (command: string) =>
+        callInvoke<{ command: string; risk: string }>('classify_risk', { command });
+    const listApprovalHistory = () => callInvoke<{ approvals: any[] }>('list_approval_history');
+
     return {
         getStatus, processMessage, getTasks, getPlaybooks, setActivePlaybook,
         getSettings, updateSettings, healthCheck, getActiveChain, getChainHistory,
@@ -378,6 +397,8 @@ export function useAgent() {
         listPersonas, getPersona, createPersona, updatePersona, deletePersona,
         // R60: Growth — Adoption Metrics, Sharing, Referrals
         getAdoptionMetrics, createShareLink, getReferralLink,
+        // R61: Multi-User
+        listUsers, createUser, getCurrentUser, switchUser, loginUser, logoutUser,
     };
 }
 
