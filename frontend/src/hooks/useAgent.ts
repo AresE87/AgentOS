@@ -327,6 +327,20 @@ export function useAgent() {
         callInvoke<{ command: string; risk: string }>('classify_risk', { command });
     const listApprovalHistory = () => callInvoke<{ approvals: any[] }>('list_approval_history');
 
+    // R63: Calendar Integration
+    const calendarListEvents = (from: string, to: string) =>
+        callInvoke<{ events: any[] }>('calendar_list_events', { from, to });
+    const calendarCreateEvent = (event: { title: string; start_time: string; end_time: string; description?: string; location?: string; attendees?: string[]; all_day?: boolean }) =>
+        callInvoke<any>('calendar_create_event', { event });
+    const calendarUpdateEvent = (id: string, update: { title?: string; description?: string; start_time?: string; end_time?: string; location?: string; attendees?: string[]; all_day?: boolean }) =>
+        callInvoke<any>('calendar_update_event', { id, update });
+    const calendarDeleteEvent = (id: string) =>
+        callInvoke<{ ok: boolean; deleted: boolean }>('calendar_delete_event', { id });
+    const calendarFreeSlots = (date: string, durationMinutes: number) =>
+        callInvoke<{ slots: any[] }>('calendar_free_slots', { date, duration_minutes: durationMinutes });
+    const calendarGetEvent = (id: string) =>
+        callInvoke<any>('calendar_get_event', { id });
+
     return {
         getStatus, processMessage, getTasks, getPlaybooks, setActivePlaybook,
         getSettings, updateSettings, healthCheck, getActiveChain, getChainHistory,
@@ -399,6 +413,10 @@ export function useAgent() {
         getAdoptionMetrics, createShareLink, getReferralLink,
         // R61: Multi-User
         listUsers, createUser, getCurrentUser, switchUser, loginUser, logoutUser,
+        // R62: Approval Workflows
+        getPendingApprovals, respondApproval, classifyRisk, listApprovalHistory,
+        // R63: Calendar Integration
+        calendarListEvents, calendarCreateEvent, calendarUpdateEvent, calendarDeleteEvent, calendarFreeSlots, calendarGetEvent,
     };
 }
 

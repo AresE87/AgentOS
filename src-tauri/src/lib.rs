@@ -3862,6 +3862,83 @@ async fn cmd_list_approval_history(
     Ok(serde_json::json!({ "approvals": history }))
 }
 
+// ── R63: Calendar Integration commands ────────────────────────────────
+
+#[tauri::command]
+async fn cmd_calendar_list_events(
+    from: String,
+    to: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let from_dt = chrono::NaiveDateTime::parse_from_str(&from, "%Y-%m-%dT%H:%M:%S")
+        .or_else(|_| chrono::NaiveDateTime::parse_from_str(&from, "%Y-%m-%d %H:%M:%S"))
+        .map_err(|e| format!("Invalid 'from' datetime: {}", e))?;
+    let to_dt = chrono::NaiveDateTime::parse_from_str(&to, "%Y-%m-%dT%H:%M:%S")
+        .or_else(|_| chrono::NaiveDateTime::parse_from_str(&to, "%Y-%m-%d %H:%M:%S"))
+        .map_err(|e| format!("Invalid 'to' datetime: {}", e))?;
+    let mgr = state.calendar_manager.lock().await;
+    let events = integrations::CalendarProvider::list_events(&*mgr, from_dt, to_dt)?;
+    Ok(serde_json::json!({ "events": events }))
+}
+
+#[tauri::command]
+async fn cmd_calendar_create_event(
+    event: serde_json::Value,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let new_event: integrations::calendar::NewCalendarEvent =
+        serde_json::from_value(event).map_err(|e| e.to_string())?;
+    let mut mgr = state.calendar_manager.lock().await;
+    let created = integrations::CalendarProvider::create_event(&mut *mgr, new_event)?;
+    serde_json::to_value(&created).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_calendar_update_event(
+    id: String,
+    update: serde_json::Value,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let upd: integrations::calendar::UpdateCalendarEvent =
+        serde_json::from_value(update).map_err(|e| e.to_string())?;
+    let mut mgr = state.calendar_manager.lock().await;
+    let updated = integrations::CalendarProvider::update_event(&mut *mgr, &id, upd)?;
+    serde_json::to_value(&updated).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_calendar_delete_event(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.calendar_manager.lock().await;
+    let deleted = integrations::CalendarProvider::delete_event(&mut *mgr, &id)?;
+    Ok(serde_json::json!({ "ok": true, "deleted": deleted }))
+}
+
+#[tauri::command]
+async fn cmd_calendar_free_slots(
+    date: String,
+    duration_minutes: u32,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let d = chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d")
+        .map_err(|e| format!("Invalid date '{}': {}", date, e))?;
+    let mgr = state.calendar_manager.lock().await;
+    let slots = integrations::CalendarProvider::free_slots(&*mgr, d, duration_minutes)?;
+    Ok(serde_json::json!({ "slots": slots }))
+}
+
+#[tauri::command]
+async fn cmd_calendar_get_event(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.calendar_manager.lock().await;
+    let event = mgr.get_event(&id)?;
+    serde_json::to_value(&event).map_err(|e| e.to_string())
+}
+
 /// Simple non-cryptographic hash for referral IDs (not security-sensitive).
 fn md5_simple(data: &[u8]) -> u64 {
     let mut hash: u64 = 0xcbf29ce484222325;
@@ -4008,6 +4085,9 @@ pub fn run() {
                     engine
                 },
                 approval_manager: Arc::new(approvals::ApprovalManager::new()),
+                calendar_manager: Arc::new(tokio::sync::Mutex::new(
+                    integrations::CalendarManager::new(),
+                )),
             });
 
             // ── R35: Deferred startup — plugin discovery in background ────
@@ -4565,6 +4645,13 @@ pub fn run() {
             cmd_respond_approval,
             cmd_classify_risk,
             cmd_list_approval_history,
+            // R63: Calendar Integration commands
+            cmd_calendar_list_events,
+            cmd_calendar_create_event,
+            cmd_calendar_update_event,
+            cmd_calendar_delete_event,
+            cmd_calendar_free_slots,
+            cmd_calendar_get_event,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");
