@@ -1,0 +1,16 @@
+{
+  "app_name": "AgentOS",
+  "tagline": "Your AI team, running on your PC",
+  "logo_path": null,
+  "primary_color": "#00ffff",
+  "background_color": "#0a0a0f",
+  "surface_color": "#0d0d1a",
+  "border_color": "#1a1a2e",
+  "text_color": "#e0e0e0",
+  "accent_color": "#00ffff",
+  "font_family": "Inter, system-ui, sans-serif",
+  "show_attribution": true,
+  "attribution_text": "Powered by AgentOS",
+  "custom_specialists": [],
+  "oem_license": null
+}

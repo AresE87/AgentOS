@@ -196,6 +196,12 @@ export function useAgent() {
         callInvoke<any>('relay_send_task', { target_node: targetNode, task });
     const getRelayStatus = () => callInvoke<any>('get_relay_status');
 
+    // R45: White-Label / OEM Branding
+    const getBranding = () => callInvoke<any>('get_branding');
+    const updateBranding = (config: any) => callInvoke<any>('update_branding', { config });
+    const getCssVariables = () => callInvoke<{ css: string }>('get_css_variables');
+    const resetBranding = () => callInvoke<any>('reset_branding');
+
     return {
         getStatus, processMessage, getTasks, getPlaybooks, setActivePlaybook,
         getSettings, updateSettings, healthCheck, getActiveChain, getChainHistory,
@@ -238,6 +244,8 @@ export function useAgent() {
         detectMonitors, ocrScreenshot, screenDiff,
         // R44: Cloud Mesh Relay
         relayConnect, relayDisconnect, relayListNodes, relaySendTask, getRelayStatus,
+        // R45: White-Label / OEM Branding
+        getBranding, updateBranding, getCssVariables, resetBranding,
     };
 }
 

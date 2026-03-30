@@ -26,6 +26,8 @@ pub mod compliance;
 pub mod voice;
 pub mod protocol;
 pub mod web;
+pub mod branding;
+pub mod observability;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -66,6 +68,12 @@ pub struct AppState {
     pub command_sandbox: Arc<security::sandbox::CommandSandbox>,
     /// R44: Cloud Mesh relay client
     pub relay_client: tokio::sync::Mutex<Option<mesh::relay::RelayClient>>,
+    /// R45: White-label branding config
+    pub branding: Arc<tokio::sync::RwLock<branding::BrandingConfig>>,
+    /// R46: Observability — structured logger
+    pub structured_logger: Arc<observability::logger::StructuredLogger>,
+    /// R46: Observability — alert manager
+    pub alert_manager: Arc<tokio::sync::Mutex<observability::alerts::AlertManager>>,
 }
 
 // ── R44: Cloud Mesh Relay commands ──────────────────────────────────
@@ -186,6 +194,51 @@ async fn cmd_get_relay_status(
             "nodes_count": 0,
         })),
     }
+}
+
+// ── R45: White-Label / OEM Branding commands ───────────────────────
+
+#[tauri::command]
+async fn cmd_get_branding(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let branding = state.branding.read().await;
+    serde_json::to_value(&*branding).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_update_branding(
+    config: serde_json::Value,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let new_config: branding::BrandingConfig =
+        serde_json::from_value(config).map_err(|e| format!("Invalid branding config: {}", e))?;
+    let mut branding = state.branding.write().await;
+    // Save to disk next to settings
+    let branding_path = state.db_path.parent().unwrap().join("branding.json");
+    new_config.save(&branding_path)?;
+    *branding = new_config;
+    serde_json::to_value(&*branding).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_get_css_variables(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let branding = state.branding.read().await;
+    Ok(serde_json::json!({ "css": branding.to_css_variables() }))
+}
+
+#[tauri::command]
+async fn cmd_reset_branding(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let default_config = branding::BrandingConfig::default();
+    let branding_path = state.db_path.parent().unwrap().join("branding.json");
+    default_config.save(&branding_path)?;
+    let mut branding = state.branding.write().await;
+    *branding = default_config;
+    serde_json::to_value(&*branding).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -2899,6 +2952,15 @@ pub fn run() {
                 }
             }
 
+            // ── R45: Load branding config ────────────────────────────
+            let branding_path = app_dir.join("branding.json");
+            let branding_config = branding::BrandingConfig::load(&branding_path)
+                .unwrap_or_else(|e| {
+                    tracing::warn!("Failed to load branding.json: {}, using defaults", e);
+                    branding::BrandingConfig::default()
+                });
+            tracing::info!("Branding: {} (OEM: {})", branding_config.app_name, branding_config.is_oem());
+
             let api_port: u16 = 8080;
 
             // ── R25: Local LLM provider ───────────────────────────────
@@ -2945,6 +3007,7 @@ pub fn run() {
                 ),
                 command_sandbox: Arc::new(security::sandbox::CommandSandbox::new()),
                 relay_client: tokio::sync::Mutex::new(None),
+                branding: Arc::new(tokio::sync::RwLock::new(branding_config)),
             });
 
             // ── R35: Deferred startup — plugin discovery in background ────
@@ -3361,6 +3424,11 @@ pub fn run() {
             cmd_relay_list_nodes,
             cmd_relay_send_task,
             cmd_get_relay_status,
+            // R45: White-Label / OEM Branding commands
+            cmd_get_branding,
+            cmd_update_branding,
+            cmd_get_css_variables,
+            cmd_reset_branding,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");
