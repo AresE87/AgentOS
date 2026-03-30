@@ -217,6 +217,12 @@ export function useAgent() {
     const previewAnonymized = () => callInvoke<any>('preview_anonymized');
     const setTrainingOptIn = (optIn: boolean) => callInvoke<any>('set_training_opt_in', { opt_in: optIn });
 
+    // R49: Desktop Widgets
+    const getWidgets = () => callInvoke<any>('get_widgets');
+    const toggleWidget = (id: string, enabled: boolean) => callInvoke<any>('toggle_widget', { id, enabled });
+    const updateWidgetPosition = (id: string, x: number, y: number) => callInvoke<any>('update_widget_position', { id, x, y });
+    const updateWidgetOpacity = (id: string, opacity: number) => callInvoke<any>('update_widget_opacity', { id, opacity });
+
     return {
         getStatus, processMessage, getTasks, getPlaybooks, setActivePlaybook,
         getSettings, updateSettings, healthCheck, getActiveChain, getChainHistory,
@@ -265,6 +271,8 @@ export function useAgent() {
         getLogs, exportLogs, getAlerts, acknowledgeAlert, getHealth,
         // R48: AI Training Pipeline
         getTrainingSummary, getTrainingRecords, previewAnonymized, setTrainingOptIn,
+        // R49: Desktop Widgets
+        getWidgets, toggleWidget, updateWidgetPosition, updateWidgetOpacity,
     };
 }
 

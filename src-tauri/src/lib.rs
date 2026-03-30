@@ -29,6 +29,7 @@ pub mod web;
 pub mod branding;
 pub mod observability;
 pub mod training;
+pub mod widgets;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -75,6 +76,8 @@ pub struct AppState {
     pub structured_logger: Arc<observability::logger::StructuredLogger>,
     /// R46: Observability — alert manager
     pub alert_manager: Arc<tokio::sync::Mutex<observability::alerts::AlertManager>>,
+    /// R49: Desktop Widgets manager
+    pub widget_manager: Arc<tokio::sync::Mutex<widgets::WidgetManager>>,
 }
 
 // ── R44: Cloud Mesh Relay commands ──────────────────────────────────
@@ -3013,6 +3016,54 @@ async fn cmd_set_training_opt_in(
     Ok(serde_json::json!({ "ok": true, "training_opt_in": opt_in }))
 }
 
+// ── R49: Desktop Widgets commands ─────────────────────────────────────
+
+#[tauri::command]
+async fn cmd_get_widgets(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.widget_manager.lock().await;
+    let widgets: Vec<_> = mgr.get_all().into_iter().cloned().collect();
+    Ok(serde_json::json!({ "widgets": widgets }))
+}
+
+#[tauri::command]
+async fn cmd_toggle_widget(
+    id: String,
+    enabled: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.widget_manager.lock().await;
+    mgr.set_enabled(&id, enabled)?;
+    let widget = mgr.get(&id).cloned();
+    Ok(serde_json::json!({ "ok": true, "widget": widget }))
+}
+
+#[tauri::command]
+async fn cmd_update_widget_position(
+    id: String,
+    x: i32,
+    y: i32,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.widget_manager.lock().await;
+    mgr.update_position(&id, x, y)?;
+    let widget = mgr.get(&id).cloned();
+    Ok(serde_json::json!({ "ok": true, "widget": widget }))
+}
+
+#[tauri::command]
+async fn cmd_update_widget_opacity(
+    id: String,
+    opacity: f64,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.widget_manager.lock().await;
+    mgr.set_opacity(&id, opacity)?;
+    let widget = mgr.get(&id).cloned();
+    Ok(serde_json::json!({ "ok": true, "widget": widget }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -3127,6 +3178,9 @@ pub fn run() {
                 )),
                 alert_manager: Arc::new(tokio::sync::Mutex::new(
                     observability::alerts::AlertManager::new(),
+                )),
+                widget_manager: Arc::new(tokio::sync::Mutex::new(
+                    widgets::WidgetManager::new(),
                 )),
             });
 
@@ -3560,6 +3614,11 @@ pub fn run() {
             cmd_get_training_records,
             cmd_preview_anonymized,
             cmd_set_training_opt_in,
+            // R49: Desktop Widgets commands
+            cmd_get_widgets,
+            cmd_toggle_widget,
+            cmd_update_widget_position,
+            cmd_update_widget_opacity,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");
