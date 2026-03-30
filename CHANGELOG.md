@@ -1,5 +1,25 @@
 # Changelog
 
+## [4.0.0] - 2026-03-29
+
+### Added
+- R121: Reasoning Chains -- step-by-step reasoning engine with chain-of-thought tracking
+- R122: Self-Correction -- automatic verification and correction of reasoning outputs
+- R123: Multimodal Reasoning -- cross-modal analysis combining text, image, and data evidence
+- R124: Causal Inference -- causal graph construction, counterfactual analysis
+- R125: Knowledge Graph -- SQLite-backed entity-relationship graph with search and traversal
+- R126: Hypothesis Generation -- generate and evaluate hypotheses with Bayesian-like probability updates
+- R127: Confidence Calibration -- track prediction confidence, calibration stats, auto-verify low-confidence tasks
+- R128: Transfer Learning -- register learned patterns, apply across domains, track helpfulness
+- R129: Meta-Learning -- domain learning curves, accuracy prediction, fastest-learning domain tracking
+- R130: v4.0 Intelligent Agent Release
+
+### Changed
+- Version bump to 4.0.0 across Cargo.toml, frontend, and mobile packages
+- New `reasoning` module with 8 sub-engines for intelligent decision-making
+- New `knowledge` module with persistent graph storage
+- Intelligence-first architecture: hypothesis-driven reasoning, confidence calibration, cross-domain transfer
+
 ## [3.2.0] - 2026-03-29
 
 ### Added
