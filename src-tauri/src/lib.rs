@@ -69,6 +69,8 @@ pub mod browser_ext;
 pub mod email_client;
 pub mod partnerships;
 pub mod autonomous;
+pub mod reasoning;
+pub mod knowledge;
 
 use base64::Engine as _;
 use std::path::PathBuf;
@@ -218,6 +220,24 @@ pub struct AppState {
     pub auto_compliance: Arc<tokio::sync::Mutex<autonomous::AutoCompliance>>,
     /// R119: Autonomous Reconciliation engine
     pub auto_reconciliation: Arc<tokio::sync::Mutex<autonomous::AutoReconciliation>>,
+    /// R121: Reasoning Chains engine
+    pub reasoning_engine: Arc<tokio::sync::Mutex<reasoning::ReasoningEngine>>,
+    /// R122: Self-Correction engine
+    pub self_corrector: Arc<tokio::sync::Mutex<reasoning::SelfCorrector>>,
+    /// R123: Multimodal Reasoning engine
+    pub multimodal_reasoner: Arc<tokio::sync::Mutex<reasoning::MultimodalReasoner>>,
+    /// R124: Causal Inference engine
+    pub causal_engine: Arc<tokio::sync::Mutex<reasoning::CausalEngine>>,
+    /// R125: Knowledge Graph (SQLite-backed)
+    pub knowledge_graph: Arc<std::sync::Mutex<knowledge::KnowledgeGraph>>,
+    /// R126: Hypothesis Generation engine
+    pub hypothesis_engine: Arc<tokio::sync::Mutex<reasoning::HypothesisEngine>>,
+    /// R127: Confidence Calibration
+    pub confidence_calibrator: Arc<reasoning::ConfidenceCalibrator>,
+    /// R128: Transfer Learning engine
+    pub transfer_engine: Arc<tokio::sync::Mutex<reasoning::TransferEngine>>,
+    /// R129: Meta-Learning engine
+    pub meta_learner: Arc<reasoning::MetaLearner>,
 }
 
 // ── R44: Cloud Mesh Relay commands ──────────────────────────────────
@@ -6543,6 +6563,423 @@ async fn cmd_reconcile_list(
     serde_json::to_value(recon.list_jobs()).map_err(|e| e.to_string())
 }
 
+// ── R121: Reasoning Chains IPC ────────────────────────────────────
+
+#[tauri::command]
+async fn cmd_reasoning_start(
+    task_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut engine = state.reasoning_engine.lock().await;
+    let chain = engine.create_chain(&task_id);
+    serde_json::to_value(&chain).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_reasoning_add_step(
+    chain_id: String,
+    thought: String,
+    conclusion: String,
+    confidence: f64,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut engine = state.reasoning_engine.lock().await;
+    let step = engine.add_step(&chain_id, &thought, &conclusion, confidence)?;
+    serde_json::to_value(&step).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_reasoning_finish(
+    chain_id: String,
+    answer: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut engine = state.reasoning_engine.lock().await;
+    let chain = engine.finish_chain(&chain_id, &answer)?;
+    serde_json::to_value(&chain).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_reasoning_get_chain(
+    chain_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let engine = state.reasoning_engine.lock().await;
+    match engine.get_chain(&chain_id) {
+        Some(chain) => serde_json::to_value(chain).map_err(|e| e.to_string()),
+        None => Err(format!("Chain {} not found", chain_id)),
+    }
+}
+
+#[tauri::command]
+async fn cmd_reasoning_list_chains(
+    limit: Option<usize>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let engine = state.reasoning_engine.lock().await;
+    let chains = engine.list_chains(limit.unwrap_or(20));
+    serde_json::to_value(&chains).map_err(|e| e.to_string())
+}
+
+// ── R122: Self-Correction IPC ─────────────────────────────────────
+
+#[tauri::command]
+async fn cmd_self_correct_verify(
+    output: String,
+    task: String,
+    task_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let corrector = state.self_corrector.lock().await;
+    let issue = corrector.verify_output(&output, &task);
+    Ok(serde_json::json!({
+        "task_id": task_id,
+        "has_issue": issue.is_some(),
+        "issue": issue,
+    }))
+}
+
+#[tauri::command]
+async fn cmd_self_correct_apply(
+    task_id: String,
+    output: String,
+    issue: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut corrector = state.self_corrector.lock().await;
+    let corrected = corrector.correct(&task_id, &output, &issue);
+    Ok(serde_json::json!({
+        "task_id": task_id,
+        "corrected": corrected,
+    }))
+}
+
+#[tauri::command]
+async fn cmd_self_correct_history(
+    task_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let corrector = state.self_corrector.lock().await;
+    let history = corrector.get_correction_history(&task_id);
+    serde_json::to_value(&history).map_err(|e| e.to_string())
+}
+
+// ── R123: Multimodal Reasoning IPC ────────────────────────────────
+
+#[tauri::command]
+async fn cmd_multimodal_analyze(
+    sources: Vec<reasoning::ModalitySource>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut reasoner = state.multimodal_reasoner.lock().await;
+    let analysis = reasoner.analyze(sources);
+    serde_json::to_value(&analysis).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_multimodal_get_analysis(
+    analysis_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let reasoner = state.multimodal_reasoner.lock().await;
+    match reasoner.get_analysis(&analysis_id) {
+        Some(a) => serde_json::to_value(a).map_err(|e| e.to_string()),
+        None => Err(format!("Analysis {} not found", analysis_id)),
+    }
+}
+
+// ── R124: Causal Inference IPC ────────────────────────────────────
+
+#[tauri::command]
+async fn cmd_causal_analyze(
+    events: Vec<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut engine = state.causal_engine.lock().await;
+    let graph = engine.analyze_causality(events);
+    serde_json::to_value(&graph).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_causal_counterfactual(
+    claim_id: String,
+    scenario: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut engine = state.causal_engine.lock().await;
+    let cf = engine.generate_counterfactual(&claim_id, &scenario)?;
+    Ok(serde_json::json!({ "claim_id": claim_id, "counterfactual": cf }))
+}
+
+#[tauri::command]
+async fn cmd_causal_get_graph(
+    graph_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let engine = state.causal_engine.lock().await;
+    match engine.get_graph(&graph_id) {
+        Some(g) => serde_json::to_value(g).map_err(|e| e.to_string()),
+        None => Err(format!("Graph {} not found", graph_id)),
+    }
+}
+
+// ── R125: Knowledge Graph IPC ─────────────────────────────────────
+
+#[tauri::command]
+fn cmd_kg_add_entity(
+    id: String,
+    name: String,
+    entity_type: String,
+    properties: std::collections::HashMap<String, String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let kg = state.knowledge_graph.lock().map_err(|e| e.to_string())?;
+    let entity = knowledge::Entity { id: id.clone(), name, entity_type, properties };
+    kg.add_entity(&entity)?;
+    Ok(serde_json::json!({ "ok": true, "id": id }))
+}
+
+#[tauri::command]
+fn cmd_kg_add_relationship(
+    id: String,
+    from_entity: String,
+    to_entity: String,
+    relation_type: String,
+    weight: f64,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let kg = state.knowledge_graph.lock().map_err(|e| e.to_string())?;
+    let rel = knowledge::Relationship { id: id.clone(), from_entity, to_entity, relation_type, weight };
+    kg.add_relationship(&rel)?;
+    Ok(serde_json::json!({ "ok": true, "id": id }))
+}
+
+#[tauri::command]
+fn cmd_kg_search(
+    query: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let kg = state.knowledge_graph.lock().map_err(|e| e.to_string())?;
+    let entities = kg.search_entities(&query)?;
+    serde_json::to_value(&entities).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn cmd_kg_get_entity(
+    entity_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let kg = state.knowledge_graph.lock().map_err(|e| e.to_string())?;
+    match kg.get_entity(&entity_id)? {
+        Some(e) => serde_json::to_value(&e).map_err(|e| e.to_string()),
+        None => Err(format!("Entity {} not found", entity_id)),
+    }
+}
+
+#[tauri::command]
+fn cmd_kg_relationships(
+    entity_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let kg = state.knowledge_graph.lock().map_err(|e| e.to_string())?;
+    let rels = kg.find_relationships(&entity_id)?;
+    serde_json::to_value(&rels).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn cmd_kg_stats(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let kg = state.knowledge_graph.lock().map_err(|e| e.to_string())?;
+    let stats = kg.get_graph_stats()?;
+    serde_json::to_value(&stats).map_err(|e| e.to_string())
+}
+
+// ── R126: Hypothesis Generation commands ─────────────────────────────
+
+#[tauri::command]
+async fn cmd_hypothesis_generate(
+    question: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut engine = state.hypothesis_engine.lock().await;
+    let hypotheses = engine.generate_hypotheses(&question);
+    serde_json::to_value(&hypotheses).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_hypothesis_update(
+    id: String,
+    evidence: String,
+    supports: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut engine = state.hypothesis_engine.lock().await;
+    match engine.update_probability(&id, &evidence, supports) {
+        Some(h) => serde_json::to_value(&h).map_err(|e| e.to_string()),
+        None => Err(format!("Hypothesis {} not found", id)),
+    }
+}
+
+#[tauri::command]
+async fn cmd_hypothesis_get(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let engine = state.hypothesis_engine.lock().await;
+    match engine.get_hypothesis(&id) {
+        Some(h) => serde_json::to_value(h).map_err(|e| e.to_string()),
+        None => Err(format!("Hypothesis {} not found", id)),
+    }
+}
+
+#[tauri::command]
+async fn cmd_hypothesis_list(
+    limit: Option<usize>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let engine = state.hypothesis_engine.lock().await;
+    let list = engine.list_hypotheses(limit.unwrap_or(20));
+    serde_json::to_value(&list).map_err(|e| e.to_string())
+}
+
+// ── R127: Confidence Calibration commands ────────────────────────────
+
+#[tauri::command]
+async fn cmd_confidence_record(
+    task_id: String,
+    score: f64,
+    correct: Option<bool>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    state.confidence_calibrator.record_confidence(&task_id, score)?;
+    if let Some(c) = correct {
+        state.confidence_calibrator.record_outcome(&task_id, c)?;
+    }
+    let should_verify = state.confidence_calibrator.should_auto_verify(score);
+    Ok(serde_json::json!({ "ok": true, "should_verify": should_verify }))
+}
+
+#[tauri::command]
+async fn cmd_confidence_calibration(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let stats = state.confidence_calibrator.get_calibration()?;
+    serde_json::to_value(&stats).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_confidence_stats(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let avg = state.confidence_calibrator.get_average_confidence()?;
+    let calibration = state.confidence_calibrator.get_calibration()?;
+    Ok(serde_json::json!({
+        "average_confidence": avg,
+        "calibration": calibration,
+    }))
+}
+
+// ── R128: Transfer Learning commands ─────────────────────────────────
+
+#[tauri::command]
+async fn cmd_transfer_register(
+    pattern_name: String,
+    source_domain: String,
+    applicable_domains: Vec<String>,
+    confidence: f64,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let pattern = reasoning::LearnedPattern {
+        id: String::new(),
+        pattern_name,
+        source_domain,
+        applicable_domains,
+        confidence,
+        times_applied: 0,
+        helpful_rate: 0.0,
+    };
+    let mut engine = state.transfer_engine.lock().await;
+    let id = engine.register_pattern(pattern);
+    Ok(serde_json::json!({ "id": id }))
+}
+
+#[tauri::command]
+async fn cmd_transfer_find(
+    domain: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let engine = state.transfer_engine.lock().await;
+    let patterns = engine.find_applicable(&domain);
+    serde_json::to_value(&patterns).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_transfer_apply(
+    pattern_id: String,
+    new_domain: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut engine = state.transfer_engine.lock().await;
+    let result = engine.apply_pattern(&pattern_id, &new_domain)?;
+    serde_json::to_value(&result).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_transfer_list(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let engine = state.transfer_engine.lock().await;
+    let patterns = engine.list_patterns();
+    serde_json::to_value(&patterns).map_err(|e| e.to_string())
+}
+
+// ── R129: Meta-Learning commands ─────────────────────────────────────
+
+#[tauri::command]
+async fn cmd_meta_record(
+    domain: String,
+    success: bool,
+    corrected: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let curve = state.meta_learner.record_task(&domain, success, corrected)?;
+    serde_json::to_value(&curve).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_meta_curve(
+    domain: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let curve = state.meta_learner.get_domain_curve(&domain)?;
+    serde_json::to_value(&curve).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_meta_all_curves(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let curves = state.meta_learner.get_all_curves()?;
+    serde_json::to_value(&curves).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_meta_predict(
+    domain: String,
+    n_tasks: u32,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let accuracy = state.meta_learner.predict_accuracy(&domain, n_tasks)?;
+    let fastest = state.meta_learner.get_fastest_learning_domains(5)?;
+    Ok(serde_json::json!({
+        "domain": domain,
+        "predicted_accuracy": accuracy,
+        "n_additional_tasks": n_tasks,
+        "fastest_learning_domains": fastest,
+    }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -6765,6 +7202,24 @@ pub fn run() {
                 auto_procurement: Arc::new(tokio::sync::Mutex::new(autonomous::AutoProcurement::new())),
                 auto_compliance: Arc::new(tokio::sync::Mutex::new(autonomous::AutoCompliance::new())),
                 auto_reconciliation: Arc::new(tokio::sync::Mutex::new(autonomous::AutoReconciliation::new())),
+                // R121-R124: Intelligence — reasoning modules (in-memory)
+                reasoning_engine: Arc::new(tokio::sync::Mutex::new(reasoning::ReasoningEngine::new())),
+                self_corrector: Arc::new(tokio::sync::Mutex::new(reasoning::SelfCorrector::new())),
+                multimodal_reasoner: Arc::new(tokio::sync::Mutex::new(reasoning::MultimodalReasoner::new())),
+                causal_engine: Arc::new(tokio::sync::Mutex::new(reasoning::CausalEngine::new())),
+                // R125: Knowledge Graph (SQLite)
+                knowledge_graph: Arc::new(std::sync::Mutex::new(
+                    knowledge::KnowledgeGraph::new(&app_dir.join("knowledge_graph.db"))
+                        .expect("failed to init knowledge graph"),
+                )),
+                // R126: Hypothesis Generation (in-memory)
+                hypothesis_engine: Arc::new(tokio::sync::Mutex::new(reasoning::HypothesisEngine::new())),
+                // R127: Confidence Calibration (SQLite)
+                confidence_calibrator: Arc::new(reasoning::ConfidenceCalibrator::new(&db_path)),
+                // R128: Transfer Learning (in-memory)
+                transfer_engine: Arc::new(tokio::sync::Mutex::new(reasoning::TransferEngine::new())),
+                // R129: Meta-Learning (SQLite)
+                meta_learner: Arc::new(reasoning::MetaLearner::new(&db_path)),
             });
 
             // ── R35: Deferred startup — plugin discovery in background ────
@@ -7600,6 +8055,49 @@ pub fn run() {
             cmd_reconcile_run,
             cmd_reconcile_resolve,
             cmd_reconcile_list,
+            // R121: Reasoning Chains commands
+            cmd_reasoning_start,
+            cmd_reasoning_add_step,
+            cmd_reasoning_finish,
+            cmd_reasoning_get_chain,
+            cmd_reasoning_list_chains,
+            // R122: Self-Correction commands
+            cmd_self_correct_verify,
+            cmd_self_correct_apply,
+            cmd_self_correct_history,
+            // R123: Multimodal Reasoning commands
+            cmd_multimodal_analyze,
+            cmd_multimodal_get_analysis,
+            // R124: Causal Inference commands
+            cmd_causal_analyze,
+            cmd_causal_counterfactual,
+            cmd_causal_get_graph,
+            // R125: Knowledge Graph commands
+            cmd_kg_add_entity,
+            cmd_kg_add_relationship,
+            cmd_kg_search,
+            cmd_kg_get_entity,
+            cmd_kg_relationships,
+            cmd_kg_stats,
+            // R126: Hypothesis Generation commands
+            cmd_hypothesis_generate,
+            cmd_hypothesis_update,
+            cmd_hypothesis_get,
+            cmd_hypothesis_list,
+            // R127: Confidence Calibration commands
+            cmd_confidence_record,
+            cmd_confidence_calibration,
+            cmd_confidence_stats,
+            // R128: Transfer Learning commands
+            cmd_transfer_register,
+            cmd_transfer_find,
+            cmd_transfer_apply,
+            cmd_transfer_list,
+            // R129: Meta-Learning commands
+            cmd_meta_record,
+            cmd_meta_curve,
+            cmd_meta_all_curves,
+            cmd_meta_predict,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");

@@ -838,6 +838,92 @@ export function useAgent() {
     const reconcileList = () =>
         callInvoke<any>('reconcile_list');
 
+    // R121: Reasoning Chains
+    const reasoningStart = (taskId: string) =>
+        callInvoke<any>('reasoning_start', { task_id: taskId });
+    const reasoningAddStep = (chainId: string, thought: string, conclusion: string, confidence: number) =>
+        callInvoke<any>('reasoning_add_step', { chain_id: chainId, thought, conclusion, confidence });
+    const reasoningFinish = (chainId: string, answer: string) =>
+        callInvoke<any>('reasoning_finish', { chain_id: chainId, answer });
+    const reasoningGetChain = (chainId: string) =>
+        callInvoke<any>('reasoning_get_chain', { chain_id: chainId });
+    const reasoningListChains = (limit?: number) =>
+        callInvoke<any>('reasoning_list_chains', { limit: limit || 20 });
+
+    // R122: Self-Correction
+    const selfCorrectVerify = (output: string, task: string, taskId: string) =>
+        callInvoke<any>('self_correct_verify', { output, task, task_id: taskId });
+    const selfCorrectApply = (taskId: string, output: string, issue: string) =>
+        callInvoke<any>('self_correct_apply', { task_id: taskId, output, issue });
+    const selfCorrectHistory = (taskId: string) =>
+        callInvoke<any>('self_correct_history', { task_id: taskId });
+
+    // R123: Multimodal Reasoning
+    const multimodalAnalyze = (sources: Array<{ modality_type: string; content_summary: string; confidence: number }>) =>
+        callInvoke<any>('multimodal_analyze', { sources });
+    const multimodalGetAnalysis = (analysisId: string) =>
+        callInvoke<any>('multimodal_get_analysis', { analysis_id: analysisId });
+
+    // R124: Causal Inference
+    const causalAnalyze = (events: string[]) =>
+        callInvoke<any>('causal_analyze', { events });
+    const causalCounterfactual = (claimId: string, scenario: string) =>
+        callInvoke<any>('causal_counterfactual', { claim_id: claimId, scenario });
+    const causalGetGraph = (graphId: string) =>
+        callInvoke<any>('causal_get_graph', { graph_id: graphId });
+
+    // R125: Knowledge Graph
+    const kgAddEntity = (id: string, name: string, entityType: string, properties: Record<string, string>) =>
+        callInvoke<any>('kg_add_entity', { id, name, entity_type: entityType, properties });
+    const kgAddRelationship = (id: string, fromEntity: string, toEntity: string, relationType: string, weight: number) =>
+        callInvoke<any>('kg_add_relationship', { id, from_entity: fromEntity, to_entity: toEntity, relation_type: relationType, weight });
+    const kgSearch = (query: string) =>
+        callInvoke<any>('kg_search', { query });
+    const kgGetEntity = (entityId: string) =>
+        callInvoke<any>('kg_get_entity', { entity_id: entityId });
+    const kgRelationships = (entityId: string) =>
+        callInvoke<any>('kg_relationships', { entity_id: entityId });
+    const kgStats = () =>
+        callInvoke<any>('kg_stats');
+
+    // R126: Hypothesis Generation
+    const hypothesisGenerate = (question: string) =>
+        callInvoke<any>('hypothesis_generate', { question });
+    const hypothesisUpdate = (id: string, evidence: string, supports: boolean) =>
+        callInvoke<any>('hypothesis_update', { id, evidence, supports });
+    const hypothesisGet = (id: string) =>
+        callInvoke<any>('hypothesis_get', { id });
+    const hypothesisList = (limit?: number) =>
+        callInvoke<any>('hypothesis_list', { limit });
+
+    // R127: Confidence Calibration
+    const confidenceRecord = (taskId: string, score: number, correct?: boolean) =>
+        callInvoke<any>('confidence_record', { task_id: taskId, score, correct });
+    const confidenceCalibration = () =>
+        callInvoke<any>('confidence_calibration');
+    const confidenceStats = () =>
+        callInvoke<any>('confidence_stats');
+
+    // R128: Transfer Learning
+    const transferRegister = (patternName: string, sourceDomain: string, applicableDomains: string[], confidence: number) =>
+        callInvoke<any>('transfer_register', { pattern_name: patternName, source_domain: sourceDomain, applicable_domains: applicableDomains, confidence });
+    const transferFind = (domain: string) =>
+        callInvoke<any>('transfer_find', { domain });
+    const transferApply = (patternId: string, newDomain: string) =>
+        callInvoke<any>('transfer_apply', { pattern_id: patternId, new_domain: newDomain });
+    const transferList = () =>
+        callInvoke<any>('transfer_list');
+
+    // R129: Meta-Learning
+    const metaRecord = (domain: string, success: boolean, corrected: boolean) =>
+        callInvoke<any>('meta_record', { domain, success, corrected });
+    const metaCurve = (domain: string) =>
+        callInvoke<any>('meta_curve', { domain });
+    const metaAllCurves = () =>
+        callInvoke<any>('meta_all_curves');
+    const metaPredict = (domain: string, nTasks: number) =>
+        callInvoke<any>('meta_predict', { domain, n_tasks: nTasks });
+
     return {
         getStatus, processMessage, getTasks, getPlaybooks, setActivePlaybook,
         getSettings, updateSettings, healthCheck, getActiveChain, getChainHistory,
@@ -1018,6 +1104,24 @@ export function useAgent() {
         autoComplianceRegister, autoComplianceRun, autoComplianceIssues, autoComplianceRemediate,
         // R119: Autonomous Reconciliation
         reconcileCreate, reconcileRun, reconcileResolve, reconcileList,
+        // R121: Reasoning Chains
+        reasoningStart, reasoningAddStep, reasoningFinish, reasoningGetChain, reasoningListChains,
+        // R122: Self-Correction
+        selfCorrectVerify, selfCorrectApply, selfCorrectHistory,
+        // R123: Multimodal Reasoning
+        multimodalAnalyze, multimodalGetAnalysis,
+        // R124: Causal Inference
+        causalAnalyze, causalCounterfactual, causalGetGraph,
+        // R125: Knowledge Graph
+        kgAddEntity, kgAddRelationship, kgSearch, kgGetEntity, kgRelationships, kgStats,
+        // R126: Hypothesis Generation
+        hypothesisGenerate, hypothesisUpdate, hypothesisGet, hypothesisList,
+        // R127: Confidence Calibration
+        confidenceRecord, confidenceCalibration, confidenceStats,
+        // R128: Transfer Learning
+        transferRegister, transferFind, transferApply, transferList,
+        // R129: Meta-Learning
+        metaRecord, metaCurve, metaAllCurves, metaPredict,
     };
 }
 
