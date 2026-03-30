@@ -43,6 +43,9 @@ pub mod users;
 pub mod approvals;
 pub mod sandbox;
 pub mod teams;
+pub mod workflows;
+pub mod webhooks;
+pub mod testing;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -4402,6 +4405,308 @@ async fn cmd_scim_sync() -> Result<serde_json::Value, String> {
     Ok(result)
 }
 
+// ── R71: Visual Workflow Builder commands ────────────────────────────
+
+#[tauri::command]
+async fn cmd_workflow_list(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    workflows::WorkflowEngine::ensure_tables(&conn)?;
+    let list = workflows::WorkflowEngine::list(&conn)?;
+    Ok(serde_json::json!({ "workflows": list }))
+}
+
+#[tauri::command]
+async fn cmd_workflow_get(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    workflows::WorkflowEngine::ensure_tables(&conn)?;
+    let wf = workflows::WorkflowEngine::get(&conn, &id)?;
+    serde_json::to_value(&wf).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_workflow_save(
+    workflow: workflows::Workflow,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    workflows::WorkflowEngine::ensure_tables(&conn)?;
+    let saved = workflows::WorkflowEngine::save(&conn, &workflow)?;
+    serde_json::to_value(&saved).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_workflow_execute(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    workflows::WorkflowEngine::ensure_tables(&conn)?;
+    let result = workflows::WorkflowEngine::execute(&conn, &id)?;
+    serde_json::to_value(&result).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_workflow_delete(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    workflows::WorkflowEngine::ensure_tables(&conn)?;
+    let deleted = workflows::WorkflowEngine::delete(&conn, &id)?;
+    Ok(serde_json::json!({ "ok": true, "deleted": deleted }))
+}
+
+#[tauri::command]
+async fn cmd_workflow_templates() -> Result<serde_json::Value, String> {
+    let templates = workflows::WorkflowEngine::templates();
+    serde_json::to_value(&templates).map_err(|e| e.to_string())
+}
+
+// ── R72: Webhook Actions commands ───────────────────────────────────
+
+#[tauri::command]
+async fn cmd_webhook_create(
+    name: String,
+    task_template: String,
+    filter: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    webhooks::WebhookManager::ensure_tables(&conn)?;
+    let trigger = webhooks::WebhookManager::create_trigger(
+        &conn,
+        &name,
+        &task_template,
+        filter.as_deref(),
+    )?;
+    serde_json::to_value(&trigger).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_webhook_list(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    webhooks::WebhookManager::ensure_tables(&conn)?;
+    let triggers = webhooks::WebhookManager::list_triggers(&conn)?;
+    Ok(serde_json::json!({ "triggers": triggers }))
+}
+
+#[tauri::command]
+async fn cmd_webhook_delete(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    webhooks::WebhookManager::ensure_tables(&conn)?;
+    let deleted = webhooks::WebhookManager::delete_trigger(&conn, &id)?;
+    Ok(serde_json::json!({ "ok": true, "deleted": deleted }))
+}
+
+#[tauri::command]
+async fn cmd_webhook_get(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    webhooks::WebhookManager::ensure_tables(&conn)?;
+    let trigger = webhooks::WebhookManager::get_trigger(&conn, &id)?;
+    serde_json::to_value(&trigger).map_err(|e| e.to_string())
+}
+
+// ── R73: Fine-Tuning Pipeline commands ──────────────────────────────
+
+#[tauri::command]
+async fn cmd_ft_export_data(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    training::TrainingCollector::ensure_table(&conn)?;
+    let pairs = training::FineTuneManager::export_training_data(&conn)?;
+    Ok(serde_json::json!({ "pairs": pairs, "count": pairs.len() }))
+}
+
+#[tauri::command]
+async fn cmd_ft_preview_data(
+    limit: Option<usize>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    training::TrainingCollector::ensure_table(&conn)?;
+    let pairs = training::FineTuneManager::preview_data(&conn, limit.unwrap_or(10))?;
+    Ok(serde_json::json!({ "pairs": pairs, "count": pairs.len() }))
+}
+
+#[tauri::command]
+async fn cmd_ft_start(
+    config: training::FineTuneConfig,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    let job = training::FineTuneManager::start_job(&conn, config)?;
+    serde_json::to_value(&job).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_ft_status(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    let job = training::FineTuneManager::get_job_status(&conn, &id)?;
+    serde_json::to_value(&job).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_ft_list_jobs(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    let jobs = training::FineTuneManager::list_jobs(&conn)?;
+    Ok(serde_json::json!({ "jobs": jobs }))
+}
+
+// ── R74: Agent Testing commands ────────────────────────────────────
+
+#[tauri::command]
+async fn cmd_test_list_suites() -> Result<serde_json::Value, String> {
+    let suites = testing::TestRunner::list_suites();
+    serde_json::to_value(&suites).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_test_run_suite(suite_json: String) -> Result<serde_json::Value, String> {
+    let suite: testing::TestSuite =
+        serde_json::from_str(&suite_json).map_err(|e| format!("Invalid suite JSON: {}", e))?;
+    let results = testing::TestRunner::run_suite(&suite);
+    serde_json::to_value(&results).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_test_run_single(test_json: String) -> Result<serde_json::Value, String> {
+    let test_case: testing::TestCase =
+        serde_json::from_str(&test_json).map_err(|e| format!("Invalid test JSON: {}", e))?;
+    let result = testing::TestRunner::run_single(&test_case);
+    serde_json::to_value(&result).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_test_create_template() -> Result<serde_json::Value, String> {
+    let template = testing::TestRunner::create_template();
+    serde_json::to_value(&template).map_err(|e| e.to_string())
+}
+
+// ── R75: Playbook Version Control commands ────────────────────────
+
+#[tauri::command]
+async fn cmd_playbook_versions(
+    playbook_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    let versions = playbooks::VersionStore::list_versions(&conn, &playbook_id)?;
+    serde_json::to_value(&versions).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_playbook_save_version(
+    playbook_id: String,
+    content: String,
+    message: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    let version = playbooks::VersionStore::save_version(&conn, &playbook_id, &content, &message, "user", "main")?;
+    serde_json::to_value(&version).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_playbook_rollback(
+    playbook_id: String,
+    version: u32,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    let new_version = playbooks::VersionStore::rollback(&conn, &playbook_id, version)?;
+    serde_json::to_value(&new_version).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_playbook_diff(
+    playbook_id: String,
+    v1: u32,
+    v2: u32,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    let diff = playbooks::VersionStore::diff(&conn, &playbook_id, v1, v2)?;
+    Ok(serde_json::json!({ "diff": diff }))
+}
+
+#[tauri::command]
+async fn cmd_playbook_branches(
+    playbook_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    let branches = playbooks::VersionStore::list_branches(&conn, &playbook_id)?;
+    serde_json::to_value(&branches).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_playbook_create_branch(
+    playbook_id: String,
+    name: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    let branch = playbooks::VersionStore::create_branch(&conn, &playbook_id, &name)?;
+    serde_json::to_value(&branch).map_err(|e| e.to_string())
+}
+
+// ── R76: Analytics Pro commands ───────────────────────────────────
+
+#[tauri::command]
+async fn cmd_analytics_funnel(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let funnel = analytics::AnalyticsPro::calculate_funnel(db.conn())?;
+    serde_json::to_value(&funnel).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_analytics_retention(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let retention = analytics::AnalyticsPro::calculate_retention(db.conn())?;
+    serde_json::to_value(&retention).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_analytics_cost_forecast(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let forecast = analytics::AnalyticsPro::forecast_costs(db.conn())?;
+    serde_json::to_value(&forecast).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_analytics_model_comparison(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let scores = analytics::AnalyticsPro::compare_models(db.conn())?;
+    serde_json::to_value(&scores).map_err(|e| e.to_string())
+}
+
 /// Simple non-cryptographic hash for referral IDs (not security-sensitive).
 fn md5_simple(data: &[u8]) -> u64 {
     let mut hash: u64 = 0xcbf29ce484222325;
@@ -5175,6 +5480,41 @@ pub fn run() {
             cmd_check_quota,
             cmd_scim_list_users,
             cmd_scim_sync,
+            // R71: Visual Workflow Builder commands
+            cmd_workflow_list,
+            cmd_workflow_get,
+            cmd_workflow_save,
+            cmd_workflow_execute,
+            cmd_workflow_delete,
+            cmd_workflow_templates,
+            // R72: Webhook Actions commands
+            cmd_webhook_create,
+            cmd_webhook_list,
+            cmd_webhook_delete,
+            cmd_webhook_get,
+            // R73: Fine-Tuning Pipeline commands
+            cmd_ft_export_data,
+            cmd_ft_preview_data,
+            cmd_ft_start,
+            cmd_ft_status,
+            cmd_ft_list_jobs,
+            // R74: Agent Testing commands
+            cmd_test_list_suites,
+            cmd_test_run_suite,
+            cmd_test_run_single,
+            cmd_test_create_template,
+            // R75: Playbook Version Control commands
+            cmd_playbook_versions,
+            cmd_playbook_save_version,
+            cmd_playbook_rollback,
+            cmd_playbook_diff,
+            cmd_playbook_branches,
+            cmd_playbook_create_branch,
+            // R76: Analytics Pro commands
+            cmd_analytics_funnel,
+            cmd_analytics_retention,
+            cmd_analytics_cost_forecast,
+            cmd_analytics_model_comparison,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");

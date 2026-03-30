@@ -434,6 +434,57 @@ export function useAgent() {
     const scimListUsers = () => callInvoke<any[]>('scim_list_users');
     const scimSync = () => callInvoke<any>('scim_sync');
 
+    // R71: Visual Workflow Builder
+    const workflowList = () => callInvoke<{ workflows: any[] }>('workflow_list');
+    const workflowGet = (id: string) => callInvoke<any>('workflow_get', { id });
+    const workflowSave = (workflow: any) => callInvoke<any>('workflow_save', { workflow });
+    const workflowExecute = (id: string) => callInvoke<any>('workflow_execute', { id });
+    const workflowDelete = (id: string) => callInvoke<{ ok: boolean; deleted: boolean }>('workflow_delete', { id });
+    const workflowTemplates = () => callInvoke<any[]>('workflow_templates');
+
+    // R72: Webhook Actions
+    const webhookCreate = (name: string, taskTemplate: string, filter?: string) =>
+        callInvoke<any>('webhook_create', { name, task_template: taskTemplate, filter });
+    const webhookList = () => callInvoke<{ triggers: any[] }>('webhook_list');
+    const webhookDelete = (id: string) => callInvoke<{ ok: boolean; deleted: boolean }>('webhook_delete', { id });
+    const webhookGet = (id: string) => callInvoke<any>('webhook_get', { id });
+
+    // R73: Fine-Tuning Pipeline
+    const ftExportData = () => callInvoke<{ pairs: any[]; count: number }>('ft_export_data');
+    const ftPreviewData = (limit?: number) => callInvoke<{ pairs: any[]; count: number }>('ft_preview_data', { limit });
+    const ftStart = (config: { base_model: string; epochs: number; learning_rate: number; method: string; dataset_path: string }) =>
+        callInvoke<any>('ft_start', { config });
+    const ftStatus = (id: string) => callInvoke<any>('ft_status', { id });
+    const ftListJobs = () => callInvoke<{ jobs: any[] }>('ft_list_jobs');
+
+    // R74: Agent Testing
+    const testListSuites = () => callInvoke<any>('test_list_suites');
+    const testRunSuite = (suiteJson: string) =>
+        callInvoke<any>('test_run_suite', { suite_json: suiteJson });
+    const testRunSingle = (testJson: string) =>
+        callInvoke<any>('test_run_single', { test_json: testJson });
+    const testCreateTemplate = () => callInvoke<any>('test_create_template');
+
+    // R75: Playbook Version Control
+    const playbookVersions = (playbookId: string) =>
+        callInvoke<any>('playbook_versions', { playbook_id: playbookId });
+    const playbookSaveVersion = (playbookId: string, content: string, message: string) =>
+        callInvoke<any>('playbook_save_version', { playbook_id: playbookId, content, message });
+    const playbookRollback = (playbookId: string, version: number) =>
+        callInvoke<any>('playbook_rollback', { playbook_id: playbookId, version });
+    const playbookDiff = (playbookId: string, v1: number, v2: number) =>
+        callInvoke<{ diff: string }>('playbook_diff', { playbook_id: playbookId, v1, v2 });
+    const playbookBranches = (playbookId: string) =>
+        callInvoke<any>('playbook_branches', { playbook_id: playbookId });
+    const playbookCreateBranch = (playbookId: string, name: string) =>
+        callInvoke<any>('playbook_create_branch', { playbook_id: playbookId, name });
+
+    // R76: Analytics Pro
+    const analyticsFunnel = () => callInvoke<any>('analytics_funnel');
+    const analyticsRetention = () => callInvoke<any>('analytics_retention');
+    const analyticsCostForecast = () => callInvoke<any>('analytics_cost_forecast');
+    const analyticsModelComparison = () => callInvoke<any>('analytics_model_comparison');
+
     return {
         getStatus, processMessage, getTasks, getPlaybooks, setActivePlaybook,
         getSettings, updateSettings, healthCheck, getActiveChain, getChainHistory,
@@ -524,6 +575,18 @@ export function useAgent() {
         teamCreate, teamList, teamMembers, teamAddMember, teamRemoveMember, teamUpdateRole, teamShareResource,
         // R70: v1.2 Enterprise — Department Quotas & SCIM
         setDepartmentQuota, getDepartmentQuota, listDepartmentQuotas, checkQuota, scimListUsers, scimSync,
+        // R71: Visual Workflow Builder
+        workflowList, workflowGet, workflowSave, workflowExecute, workflowDelete, workflowTemplates,
+        // R72: Webhook Actions
+        webhookCreate, webhookList, webhookDelete, webhookGet,
+        // R73: Fine-Tuning Pipeline
+        ftExportData, ftPreviewData, ftStart, ftStatus, ftListJobs,
+        // R74: Agent Testing
+        testListSuites, testRunSuite, testRunSingle, testCreateTemplate,
+        // R75: Playbook Version Control
+        playbookVersions, playbookSaveVersion, playbookRollback, playbookDiff, playbookBranches, playbookCreateBranch,
+        // R76: Analytics Pro
+        analyticsFunnel, analyticsRetention, analyticsCostForecast, analyticsModelComparison,
     };
 }
 
