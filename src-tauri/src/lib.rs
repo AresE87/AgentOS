@@ -64,6 +64,128 @@ pub struct AppState {
     pub rate_limiter: security::rate_limiter::RateLimiter,
     /// R36: Security — command sandbox
     pub command_sandbox: Arc<security::sandbox::CommandSandbox>,
+    /// R44: Cloud Mesh relay client
+    pub relay_client: tokio::sync::Mutex<Option<mesh::relay::RelayClient>>,
+}
+
+// ── R44: Cloud Mesh Relay commands ──────────────────────────────────
+
+#[tauri::command]
+async fn cmd_relay_connect(
+    server_url: String,
+    auth_token: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let node_id = {
+        let settings = state.settings.lock().map_err(|e| e.to_string())?;
+        format!("node-{}", uuid::Uuid::new_v4())
+    };
+
+    let config = mesh::relay::RelayConfig {
+        server_url: server_url.clone(),
+        auth_token: auth_token.clone(),
+        node_id: node_id.clone(),
+    };
+
+    let client = mesh::relay::RelayClient::new(config);
+
+    // Try to register with the relay server
+    let hostname = whoami::fallible::hostname().unwrap_or_else(|_| "unknown".to_string());
+    let display_name = format!("AgentOS-{}", &hostname);
+    match client.register(&display_name).await {
+        Ok(_) => tracing::info!("Registered with relay server: {}", server_url),
+        Err(e) => tracing::warn!("Relay registration failed (server may be offline): {}", e),
+    }
+
+    // Save settings
+    {
+        let mut settings = state.settings.lock().map_err(|e| e.to_string())?;
+        settings.set("relay_enabled", "true");
+        settings.set("relay_server_url", &server_url);
+        settings.set("relay_auth_token", &auth_token);
+        let _ = settings.save();
+    }
+
+    // Store the client
+    {
+        let mut relay = state.relay_client.lock().await;
+        *relay = Some(client);
+    }
+
+    Ok(serde_json::json!({ "ok": true, "node_id": node_id }))
+}
+
+#[tauri::command]
+async fn cmd_relay_disconnect(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    {
+        let mut relay = state.relay_client.lock().await;
+        *relay = None;
+    }
+
+    {
+        let mut settings = state.settings.lock().map_err(|e| e.to_string())?;
+        settings.set("relay_enabled", "false");
+        let _ = settings.save();
+    }
+
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+#[tauri::command]
+async fn cmd_relay_list_nodes(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let relay = state.relay_client.lock().await;
+    match relay.as_ref() {
+        Some(client) => {
+            let nodes = client.list_nodes().await.unwrap_or_default();
+            Ok(serde_json::json!({ "nodes": nodes }))
+        }
+        None => Ok(serde_json::json!({ "nodes": [], "error": "Relay not connected" })),
+    }
+}
+
+#[tauri::command]
+async fn cmd_relay_send_task(
+    target_node: String,
+    task: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let relay = state.relay_client.lock().await;
+    match relay.as_ref() {
+        Some(client) => {
+            let task_id = client.send_task(&target_node, &task).await?;
+            Ok(serde_json::json!({ "ok": true, "task_id": task_id }))
+        }
+        None => Err("Relay not connected".to_string()),
+    }
+}
+
+#[tauri::command]
+async fn cmd_get_relay_status(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let relay = state.relay_client.lock().await;
+    match relay.as_ref() {
+        Some(client) => {
+            let available = client.is_available().await;
+            let nodes = client.list_nodes().await.unwrap_or_default();
+            Ok(serde_json::json!({
+                "connected": true,
+                "server_url": client.config().server_url,
+                "server_reachable": available,
+                "nodes_count": nodes.len(),
+            }))
+        }
+        None => Ok(serde_json::json!({
+            "connected": false,
+            "server_url": "",
+            "server_reachable": false,
+            "nodes_count": 0,
+        })),
+    }
 }
 
 #[tauri::command]
@@ -2641,6 +2763,89 @@ async fn cmd_get_aap_status(
     }))
 }
 
+// ── R43: Advanced Vision commands ────────────────────────────────────────
+
+#[tauri::command]
+async fn cmd_detect_monitors() -> Result<serde_json::Value, String> {
+    let monitors = eyes::multi_monitor::detect_monitors();
+    Ok(serde_json::json!({
+        "monitors": monitors,
+        "count": monitors.len()
+    }))
+}
+
+#[tauri::command]
+async fn cmd_ocr_screenshot(
+    image_path: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let path = match image_path {
+        Some(p) => std::path::PathBuf::from(p),
+        None => {
+            // Capture a fresh screenshot and save it
+            let screenshots_dir = state.screenshots_dir.clone();
+            tokio::task::spawn_blocking(move || {
+                let shot = eyes::capture::capture_full_screen().map_err(|e| e.to_string())?;
+                eyes::capture::save_screenshot(&shot, &screenshots_dir).map_err(|e| e.to_string())
+            })
+            .await
+            .map_err(|e| e.to_string())??
+        }
+    };
+
+    let path_str = path.to_string_lossy().to_string();
+    let text = eyes::ocr::OCREngine::extract_text(&path_str).await;
+
+    Ok(serde_json::json!({
+        "text": text,
+        "image_path": path_str,
+        "source": if text.is_empty() { "none" } else { "windows_ocr" }
+    }))
+}
+
+#[tauri::command]
+async fn cmd_screen_diff(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    // Take first screenshot
+    let before = tokio::task::spawn_blocking(|| {
+        eyes::capture::capture_full_screen().map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    // Wait 1 second
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    // Take second screenshot
+    let after = tokio::task::spawn_blocking(|| {
+        eyes::capture::capture_full_screen().map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    let w = before.width;
+    let h = before.height;
+
+    let diff = eyes::diff::ScreenDiff::compare(&before.rgba, &after.rgba, w, h, 30);
+
+    // Save both screenshots for reference
+    let screenshots_dir = state.screenshots_dir.clone();
+    let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
+    let before_path = screenshots_dir.join(format!("diff_before_{}.png", ts));
+    let after_path = screenshots_dir.join(format!("diff_after_{}.png", ts));
+    let _ = eyes::capture::save_screenshot_to(&before, &before_path);
+    let _ = eyes::capture::save_screenshot_to(&after, &after_path);
+
+    Ok(serde_json::json!({
+        "changed": diff.changed,
+        "change_percentage": diff.change_percentage,
+        "changed_regions": diff.changed_regions,
+        "before_path": before_path.to_string_lossy(),
+        "after_path": after_path.to_string_lossy()
+    }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -2739,6 +2944,7 @@ pub fn run() {
                     security::rate_limiter::RateLimits::free(),
                 ),
                 command_sandbox: Arc::new(security::sandbox::CommandSandbox::new()),
+                relay_client: tokio::sync::Mutex::new(None),
             });
 
             // ── R35: Deferred startup — plugin discovery in background ────
@@ -3145,6 +3351,10 @@ pub fn run() {
             cmd_aap_query_capabilities,
             cmd_aap_health,
             cmd_get_aap_status,
+            // R43: Advanced Vision commands
+            cmd_detect_monitors,
+            cmd_ocr_screenshot,
+            cmd_screen_diff,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");

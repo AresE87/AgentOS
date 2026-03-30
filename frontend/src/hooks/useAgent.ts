@@ -180,6 +180,13 @@ export function useAgent() {
         callInvoke<any>('aap_health', { host, port });
     const getAAPStatus = () => callInvoke<any>('get_aap_status');
 
+    // R43: Advanced Vision
+    const detectMonitors = () => callInvoke<{ monitors: any[]; count: number }>('detect_monitors');
+    const ocrScreenshot = (imagePath?: string) =>
+        callInvoke<{ text: string; image_path: string; source: string }>('ocr_screenshot', { image_path: imagePath });
+    const screenDiff = () =>
+        callInvoke<{ changed: boolean; change_percentage: number; changed_regions: any[]; before_path: string; after_path: string }>('screen_diff');
+
     return {
         getStatus, processMessage, getTasks, getPlaybooks, setActivePlaybook,
         getSettings, updateSettings, healthCheck, getActiveChain, getChainHistory,
@@ -218,6 +225,8 @@ export function useAgent() {
         transcribeAudio, speakText, listVoices, saveSpeech,
         // R42: Agent-to-Agent Protocol
         aapSendTask, aapQueryCapabilities, aapHealth, getAAPStatus,
+        // R43: Advanced Vision
+        detectMonitors, ocrScreenshot, screenDiff,
     };
 }
 
