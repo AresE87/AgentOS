@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.0.0] - 2026-03-29
+
+### Added
+- R81: On-Device AI — local model management, ONNX runtime, model download/load/unload
+- R82: Predictive Actions — user behavior patterns, action predictions, smart suggestions
+- R83: Cross-App Automation — app bridge registry, deep linking, cross-app workflows
+- R84: Multi-Modal Input — image/audio/video processing pipeline, drag-and-drop support
+- R85: Agent Swarm — swarm orchestrator, task decomposition, parallel agent execution
+- R86: Real-time Translation — multi-language translation engine, auto-detect, LLM-powered (15+ languages)
+- R87: Accessibility — high contrast mode, font scaling, screen reader hints, reduce motion, keyboard nav
+- R88: Industry Verticals — 5 built-in verticals (healthcare, legal, finance, education, e-commerce)
+- R89: Offline First — connectivity detection, response caching, sync queue, SQLite persistence
+- R90: v2.0 Platform Release — version bump, migration guide, full changelog
+
+### Changed
+- Version bump to 2.0.0 across Cargo.toml, frontend, and mobile packages
+- Platform rebrand: "Your AI workforce. On your terms."
+
 ## [1.3.0] - 2026-03-29
 
 ### Added
