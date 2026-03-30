@@ -546,6 +546,47 @@ export function useAgent() {
     const getCachedResponse = (task: string) =>
         callInvoke<any>('get_cached_response', { task });
 
+    // R81: On-Device AI
+    const ondeviceList = () => callInvoke<any[]>('ondevice_list');
+    const ondeviceLoad = (name: string) => callInvoke<any>('ondevice_load', { name });
+    const ondeviceUnload = (name: string) => callInvoke<any>('ondevice_unload', { name });
+    const ondeviceInfer = (model: string, prompt: string) =>
+        callInvoke<{ model: string; result: string }>('ondevice_infer', { model, prompt });
+    const ondeviceStatus = () => callInvoke<any>('ondevice_status');
+
+    // R82: Multimodal Input
+    const processMultimodal = (inputType: string, data?: string) =>
+        callInvoke<any>('process_multimodal', { input_type: inputType, data });
+    const captureClipboardInput = () => callInvoke<any>('capture_clipboard');
+    const detectInputType = (dataBase64: string) =>
+        callInvoke<{ mime_type: string; size_bytes: number }>('detect_input_type', { data_base64: dataBase64 });
+
+    // R83: Predictive Actions
+    const getPredictions = (recentTasks: string[]) =>
+        callInvoke<any[]>('get_predictions', { recent_tasks: recentTasks });
+    const getPredictionSuggestions = (context: string) =>
+        callInvoke<any[]>('get_prediction_suggestions', { context });
+    const dismissPrediction = (id: string) =>
+        callInvoke<{ ok: boolean; dismissed: string }>('dismiss_prediction', { id });
+
+    // R84: Cross-App Automation
+    const crossappRegister = (appName: string, connectionType: string, config: any) =>
+        callInvoke<any>('crossapp_register', { app_name: appName, connection_type: connectionType, config });
+    const crossappList = () => callInvoke<any[]>('crossapp_list');
+    const crossappSend = (appId: string, action: string, data: any) =>
+        callInvoke<any>('crossapp_send', { app_id: appId, action, data });
+    const crossappStatus = (appId: string) =>
+        callInvoke<any>('crossapp_status', { app_id: appId });
+
+    // R85: Agent Swarm
+    const swarmCreate = (description: string, agents: string[], strategy: string) =>
+        callInvoke<any>('swarm_create', { description, agents, strategy });
+    const swarmExecute = (taskId: string) =>
+        callInvoke<any>('swarm_execute', { task_id: taskId });
+    const swarmResults = (taskId: string) =>
+        callInvoke<any>('swarm_results', { task_id: taskId });
+    const swarmList = () => callInvoke<any[]>('swarm_list');
+
     return {
         getStatus, processMessage, getTasks, getPlaybooks, setActivePlaybook,
         getSettings, updateSettings, healthCheck, getActiveChain, getChainHistory,
@@ -662,6 +703,16 @@ export function useAgent() {
         listVerticals, getVertical, activateVertical, getActiveVertical,
         // R89: Offline First
         checkConnectivity, getOfflineStatus, syncOffline, getCachedResponse,
+        // R81: On-Device AI
+        ondeviceList, ondeviceLoad, ondeviceUnload, ondeviceInfer, ondeviceStatus,
+        // R82: Multimodal Input
+        processMultimodal, captureClipboardInput, detectInputType,
+        // R83: Predictive Actions
+        getPredictions, getPredictionSuggestions, dismissPrediction,
+        // R84: Cross-App Automation
+        crossappRegister, crossappList, crossappSend, crossappStatus,
+        // R85: Agent Swarm
+        swarmCreate, swarmExecute, swarmResults, swarmList,
     };
 }
 

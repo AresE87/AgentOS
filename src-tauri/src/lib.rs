@@ -58,6 +58,7 @@ pub mod predictions;
 pub mod crossapp;
 pub mod swarm;
 
+use base64::Engine as _;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -5008,6 +5009,242 @@ async fn cmd_get_cached_response(
     }
 }
 
+// ── R81: On-Device AI commands ────────────────────────────────────
+
+#[tauri::command]
+async fn cmd_ondevice_list(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let engine = state.ondevice_engine.lock().await;
+    let models = engine.list_models();
+    serde_json::to_value(&models).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_ondevice_load(
+    name: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut engine = state.ondevice_engine.lock().await;
+    let model = engine.load_model(&name)?;
+    serde_json::to_value(&model).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_ondevice_unload(
+    name: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut engine = state.ondevice_engine.lock().await;
+    let model = engine.unload_model(&name)?;
+    serde_json::to_value(&model).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_ondevice_infer(
+    model: String,
+    prompt: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let engine = state.ondevice_engine.lock().await;
+    let result = engine.infer(&model, &prompt)?;
+    Ok(serde_json::json!({ "model": model, "result": result }))
+}
+
+#[tauri::command]
+async fn cmd_ondevice_status(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let engine = state.ondevice_engine.lock().await;
+    let status = engine.get_status();
+    serde_json::to_value(&status).map_err(|e| e.to_string())
+}
+
+// ── R82: Multimodal Input commands ───────────────────────────────
+
+#[tauri::command]
+async fn cmd_process_multimodal(
+    input_type: String,
+    data: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let processor = &state.input_processor;
+    let input = match input_type.as_str() {
+        "text" => multimodal::MultimodalInput::Text(data.unwrap_or_default()),
+        "clipboard" => multimodal::MultimodalInput::Clipboard,
+        "image" => {
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(data.unwrap_or_default().as_bytes())
+                .map_err(|e| format!("Invalid base64 image: {}", e))?;
+            multimodal::MultimodalInput::Image(bytes)
+        }
+        "audio" => {
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(data.unwrap_or_default().as_bytes())
+                .map_err(|e| format!("Invalid base64 audio: {}", e))?;
+            multimodal::MultimodalInput::Audio(bytes)
+        }
+        "file" => {
+            multimodal::MultimodalInput::File(std::path::PathBuf::from(data.unwrap_or_default()))
+        }
+        _ => return Err(format!("Unknown input type: {}", input_type)),
+    };
+    let processed = processor.process(&input)?;
+    serde_json::to_value(&processed).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_capture_clipboard(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let processor = &state.input_processor;
+    let input = processor.capture_clipboard();
+    let processed = processor.process(&input)?;
+    serde_json::to_value(&processed).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_detect_input_type(
+    data_base64: String,
+) -> Result<serde_json::Value, String> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data_base64.as_bytes())
+        .map_err(|e| format!("Invalid base64: {}", e))?;
+    let mime = multimodal::processor::InputProcessor::detect_input_type(&bytes);
+    Ok(serde_json::json!({ "mime_type": mime, "size_bytes": bytes.len() }))
+}
+
+// ── R83: Predictive Actions commands ─────────────────────────────
+
+#[tauri::command]
+async fn cmd_get_predictions(
+    recent_tasks: Vec<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut engine = state.prediction_engine.lock().await;
+    let predictions = engine.predict_next_actions(&recent_tasks);
+    serde_json::to_value(&predictions).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_get_prediction_suggestions(
+    context: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let engine = state.prediction_engine.lock().await;
+    let suggestions = engine.get_suggestions(&context);
+    serde_json::to_value(&suggestions).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_dismiss_prediction(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut engine = state.prediction_engine.lock().await;
+    engine.dismiss(&id);
+    Ok(serde_json::json!({ "ok": true, "dismissed": id }))
+}
+
+// ── R84: Cross-App Automation commands ───────────────────────────
+
+#[tauri::command]
+async fn cmd_crossapp_register(
+    app_name: String,
+    connection_type: String,
+    config: serde_json::Value,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut bridge = state.crossapp_bridge.lock().await;
+    let conn = crossapp::AppConnection {
+        id: format!("app-{}", uuid::Uuid::new_v4()),
+        app_name,
+        connection_type,
+        config,
+        status: "available".to_string(),
+    };
+    let result = bridge.register_app(conn)?;
+    serde_json::to_value(&result).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_crossapp_list(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let bridge = state.crossapp_bridge.lock().await;
+    let apps = bridge.list_apps();
+    serde_json::to_value(&apps).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_crossapp_send(
+    app_id: String,
+    action: String,
+    data: serde_json::Value,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let bridge = state.crossapp_bridge.lock().await;
+    let result = bridge.send_to_app(&app_id, &action, &data)?;
+    serde_json::to_value(&result).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_crossapp_status(
+    app_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let bridge = state.crossapp_bridge.lock().await;
+    let status = bridge.get_app_status(&app_id)?;
+    serde_json::to_value(&status).map_err(|e| e.to_string())
+}
+
+// ── R85: Agent Swarm commands ────────────────────────────────────
+
+#[tauri::command]
+async fn cmd_swarm_create(
+    description: String,
+    agents: Vec<String>,
+    strategy: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut coordinator = state.swarm_coordinator.lock().await;
+    let task = coordinator.create_swarm_task(&description, agents, &strategy);
+    serde_json::to_value(&task).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_swarm_execute(
+    task_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut coordinator = state.swarm_coordinator.lock().await;
+    let task = coordinator.execute(&task_id)?;
+    serde_json::to_value(&task).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_swarm_results(
+    task_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let coordinator = state.swarm_coordinator.lock().await;
+    let task = coordinator.get_results(&task_id)?;
+    let consensus = swarm::SwarmCoordinator::vote_consensus(&task.results);
+    Ok(serde_json::json!({
+        "task": task,
+        "consensus": consensus,
+    }))
+}
+
+#[tauri::command]
+async fn cmd_swarm_list(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let coordinator = state.swarm_coordinator.lock().await;
+    let tasks = coordinator.list_tasks();
+    serde_json::to_value(&tasks).map_err(|e| e.to_string())
+}
+
 /// Simple non-cryptographic hash for referral IDs (not security-sensitive).
 fn md5_simple(data: &[u8]) -> u64 {
     let mut hash: u64 = 0xcbf29ce484222325;
@@ -5877,6 +6114,30 @@ pub fn run() {
             cmd_get_offline_status,
             cmd_sync_offline,
             cmd_get_cached_response,
+            // R81: On-Device AI commands
+            cmd_ondevice_list,
+            cmd_ondevice_load,
+            cmd_ondevice_unload,
+            cmd_ondevice_infer,
+            cmd_ondevice_status,
+            // R82: Multimodal Input commands
+            cmd_process_multimodal,
+            cmd_capture_clipboard,
+            cmd_detect_input_type,
+            // R83: Predictive Actions commands
+            cmd_get_predictions,
+            cmd_get_prediction_suggestions,
+            cmd_dismiss_prediction,
+            // R84: Cross-App Automation commands
+            cmd_crossapp_register,
+            cmd_crossapp_list,
+            cmd_crossapp_send,
+            cmd_crossapp_status,
+            // R85: Agent Swarm commands
+            cmd_swarm_create,
+            cmd_swarm_execute,
+            cmd_swarm_results,
+            cmd_swarm_list,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");
