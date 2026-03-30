@@ -1,5 +1,24 @@
 # Changelog
 
+## [3.1.0] - 2026-03-29
+
+### Added
+- R101: AR/VR Agent -- WebXR app, passthrough camera analysis, spatial UI
+- R102: Wearable Integration -- Apple Watch + Wear OS: voice commands, haptic notifications
+- R103: IoT Controller -- Home Assistant, Philips Hue, Tuya: control devices by voice
+- R104: Tablet Mode -- Stylus annotation, touch workflow builder, document signing
+- R105: TV Display Mode -- Large display dashboard, ambient mode, team mission control
+- R106: Car Integration -- Android Auto + CarPlay: hands-free briefings and voice tasks
+- R107: Browser Extension -- Chrome/Firefox extension: right-click context menu, native messaging bridge
+- R108: Email Client -- Full IMAP/SMTP inbox with AI triage, smart compose, follow-ups
+- R109: Hardware Partnerships -- OEM installer, partner registry, certification program
+- R110: v3.1 Hardware & Surfaces Release
+
+### Changed
+- Version bump to 3.1.0 across Cargo.toml, frontend, and mobile packages
+- Browser extension manifest v3 stub with context menus and native messaging
+- Hardware partnership documentation with tiers (Basic/Premium/Exclusive)
+
 ## [3.0.0] - 2026-03-29
 
 ### Added

@@ -652,6 +652,106 @@ export function useAgent() {
     const orgMarketplaceSearch = (query: string, orgId: string) =>
         callInvoke<any[]>('org_marketplace_search', { query, org_id: orgId });
 
+    // R101: AR/VR Agent
+    const arvrConnect = (headsetType: string, connection: string, resolution: string, fov: number) =>
+        callInvoke<any>('arvr_connect', { headset_type: headsetType, connection, resolution, fov });
+    const arvrDisconnect = () =>
+        callInvoke<{ ok: boolean }>('arvr_disconnect');
+    const arvrStatus = () =>
+        callInvoke<any>('arvr_status');
+    const arvrOverlay = (text: string) =>
+        callInvoke<{ ok: boolean }>('arvr_overlay', { text });
+    const arvrCommand = (action: string, params: Record<string, unknown> = {}) =>
+        callInvoke<any>('arvr_command', { action, params });
+
+    // R102: Wearable Integration
+    const wearableScan = () =>
+        callInvoke<any[]>('wearable_scan');
+    const wearableConnect = (id: string) =>
+        callInvoke<any>('wearable_connect', { id });
+    const wearableDisconnect = (id: string) =>
+        callInvoke<{ ok: boolean }>('wearable_disconnect', { id });
+    const wearableList = () =>
+        callInvoke<any[]>('wearable_list');
+    const wearableNotify = (id: string, title: string, body: string) =>
+        callInvoke<{ ok: boolean }>('wearable_notify', { id, title, body });
+    const wearableHealth = (id: string) =>
+        callInvoke<any>('wearable_health', { id });
+
+    // R103: IoT Controller
+    const iotDiscover = () =>
+        callInvoke<any[]>('iot_discover');
+    const iotAdd = (device: Record<string, unknown>) =>
+        callInvoke<{ ok: boolean }>('iot_add', { device });
+    const iotControl = (id: string, action: string, value: unknown = null) =>
+        callInvoke<any>('iot_control', { id, action, value });
+    const iotState = (id: string) =>
+        callInvoke<any>('iot_state', { id });
+    const iotList = () =>
+        callInvoke<any[]>('iot_list');
+
+    // R104: Tablet Mode
+    const tabletEnable = (touchEnabled: boolean, gestureSupport: boolean, fontScale: number, layout: string) =>
+        callInvoke<any>('tablet_enable', { touch_enabled: touchEnabled, gesture_support: gestureSupport, font_scale: fontScale, layout });
+    const tabletDisable = () =>
+        callInvoke<{ ok: boolean }>('tablet_disable');
+    const tabletStatus = () =>
+        callInvoke<any>('tablet_status');
+    const tabletLayout = (layout: string) =>
+        callInvoke<any>('tablet_layout', { layout });
+
+    // R105: TV Display Mode
+    const tvEnable = (displayMode: string, autoRefreshSecs: number, contentType: string) =>
+        callInvoke<any>('tv_enable', { display_mode: displayMode, auto_refresh_secs: autoRefreshSecs, content_type: contentType });
+    const tvDisable = () =>
+        callInvoke<{ ok: boolean }>('tv_disable');
+    const tvStatus = () =>
+        callInvoke<any>('tv_status');
+    const tvContent = (contentType: string) =>
+        callInvoke<any>('tv_content', { content_type: contentType });
+
+    // R106: Car Integration
+    const carConnect = (config: { vehicle_name: string; protocol: string; endpoint?: string; api_key?: string }) =>
+        callInvoke<any>('car_connect', { config });
+    const carDisconnect = (id: string) =>
+        callInvoke<{ ok: boolean }>('car_disconnect', { id });
+    const carData = (id: string) =>
+        callInvoke<any>('car_data', { id });
+    const carDiagnostics = (id: string) =>
+        callInvoke<any>('car_diagnostics', { id });
+    const carCommand = (id: string, command: string) =>
+        callInvoke<any>('car_command', { id, command });
+
+    // R107: Browser Extension
+    const browserExtStart = (port: number) =>
+        callInvoke<any>('browser_ext_start', { port });
+    const browserExtStatus = () =>
+        callInvoke<any>('browser_ext_status');
+    const browserExtSend = (data: any) =>
+        callInvoke<any>('browser_ext_send', { data });
+
+    // R108: Email Client
+    const emailClientAdd = (name: string, host: string, port: number, username: string, password: string, useTls: boolean) =>
+        callInvoke<any>('email_client_add', { name, host, port, username, password, use_tls: useTls });
+    const emailClientList = () =>
+        callInvoke<any>('email_client_list');
+    const emailClientConnect = (accountId: string) =>
+        callInvoke<any>('email_client_connect', { account_id: accountId });
+    const emailClientFetch = (accountId: string, folder: string, limit: number) =>
+        callInvoke<any>('email_client_fetch', { account_id: accountId, folder, limit });
+    const emailClientSend = (accountId: string, to: string, subject: string, body: string) =>
+        callInvoke<any>('email_client_send', { account_id: accountId, to, subject, body });
+
+    // R109: Hardware Partnerships
+    const listPartners = () =>
+        callInvoke<any>('list_partners');
+    const getPartner = (id: string) =>
+        callInvoke<any>('get_partner', { id });
+    const registerPartner = (company: string, deviceType: string, integrationLevel: string) =>
+        callInvoke<any>('register_partner', { company, device_type: deviceType, integration_level: integrationLevel });
+    const certifyPartner = (id: string) =>
+        callInvoke<any>('certify_partner', { id });
+
     return {
         getStatus, processMessage, getTasks, getPlaybooks, setActivePlaybook,
         getSettings, updateSettings, healthCheck, getActiveChain, getChainHistory,
@@ -796,6 +896,24 @@ export function useAgent() {
         runComplianceCheck, getComplianceReports, getComplianceScore,
         // R95: White-Label Org Marketplace
         orgMarketplacePublish, orgMarketplaceList, orgMarketplaceApprove, orgMarketplaceRemove, orgMarketplaceSearch,
+        // R101: AR/VR Agent
+        arvrConnect, arvrDisconnect, arvrStatus, arvrOverlay, arvrCommand,
+        // R102: Wearable Integration
+        wearableScan, wearableConnect, wearableDisconnect, wearableList, wearableNotify, wearableHealth,
+        // R103: IoT Controller
+        iotDiscover, iotAdd, iotControl, iotState, iotList,
+        // R104: Tablet Mode
+        tabletEnable, tabletDisable, tabletStatus, tabletLayout,
+        // R105: TV Display Mode
+        tvEnable, tvDisable, tvStatus, tvContent,
+        // R106: Car Integration
+        carConnect, carDisconnect, carData, carDiagnostics, carCommand,
+        // R107: Browser Extension
+        browserExtStart, browserExtStatus, browserExtSend,
+        // R108: Email Client
+        emailClientAdd, emailClientList, emailClientConnect, emailClientFetch, emailClientSend,
+        // R109: Hardware Partnerships
+        listPartners, getPartner, registerPartner, certifyPartner,
     };
 }
 

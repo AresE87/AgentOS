@@ -64,6 +64,10 @@ pub mod ipo;
 pub mod os_integration;
 pub mod federated;
 pub mod escalation;
+pub mod devices;
+pub mod browser_ext;
+pub mod email_client;
+pub mod partnerships;
 
 use base64::Engine as _;
 use std::path::PathBuf;
@@ -177,6 +181,24 @@ pub struct AppState {
     pub compliance_reporter: Arc<tokio::sync::Mutex<compliance::ComplianceReporter>>,
     /// R95: White-Label Org Marketplace
     pub org_marketplace: Arc<tokio::sync::Mutex<marketplace::OrgMarketplace>>,
+    /// R101: AR/VR Agent
+    pub arvr_agent: Arc<tokio::sync::Mutex<devices::ARVRAgent>>,
+    /// R102: Wearable Integration
+    pub wearable_manager: Arc<tokio::sync::Mutex<devices::WearableManager>>,
+    /// R103: IoT Controller
+    pub iot_controller: Arc<tokio::sync::Mutex<devices::IoTController>>,
+    /// R104: Tablet Mode
+    pub tablet_mode: Arc<tokio::sync::Mutex<devices::TabletMode>>,
+    /// R105: TV Display Mode
+    pub tv_display: Arc<tokio::sync::Mutex<devices::TVDisplayMode>>,
+    /// R106: Car Integration
+    pub car_agent: Arc<tokio::sync::Mutex<devices::CarAgent>>,
+    /// R107: Browser Extension bridge
+    pub browser_bridge: Arc<tokio::sync::Mutex<browser_ext::BrowserBridge>>,
+    /// R108: Built-in Email Client
+    pub email_client_mgr: Arc<tokio::sync::Mutex<email_client::EmailClient>>,
+    /// R109: Hardware Partnerships registry
+    pub partner_registry: Arc<tokio::sync::Mutex<partnerships::PartnerRegistry>>,
 }
 
 // ── R44: Cloud Mesh Relay commands ──────────────────────────────────
@@ -5637,6 +5659,430 @@ async fn cmd_org_marketplace_search(
     serde_json::to_value(&results).map_err(|e| e.to_string())
 }
 
+// ── R101: AR/VR Agent commands ───────────────────────────────────
+
+#[tauri::command]
+async fn cmd_arvr_connect(
+    headset_type: String,
+    connection: String,
+    resolution: String,
+    fov: f64,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let config = devices::ARVRConfig { headset_type, connection, resolution, fov };
+    let mut agent = state.arvr_agent.lock().await;
+    let status = agent.connect(config)?;
+    serde_json::to_value(&status).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_arvr_disconnect(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let mut agent = state.arvr_agent.lock().await;
+    agent.disconnect()?;
+    Ok(serde_json::json!({"ok": true}))
+}
+
+#[tauri::command]
+async fn cmd_arvr_status(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let agent = state.arvr_agent.lock().await;
+    serde_json::to_value(&agent.get_status()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_arvr_overlay(
+    text: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut agent = state.arvr_agent.lock().await;
+    agent.send_overlay(text)?;
+    Ok(serde_json::json!({"ok": true}))
+}
+
+#[tauri::command]
+async fn cmd_arvr_command(
+    action: String,
+    params: serde_json::Value,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let agent = state.arvr_agent.lock().await;
+    agent.send_spatial_command(&action, params)
+}
+
+// ── R102: Wearable Integration commands ──────────────────────────
+
+#[tauri::command]
+async fn cmd_wearable_scan(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let mgr = state.wearable_manager.lock().await;
+    serde_json::to_value(&mgr.scan_devices()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_wearable_connect(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.wearable_manager.lock().await;
+    let device = mgr.connect(&id)?;
+    serde_json::to_value(&device).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_wearable_disconnect(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.wearable_manager.lock().await;
+    mgr.disconnect(&id)?;
+    Ok(serde_json::json!({"ok": true}))
+}
+
+#[tauri::command]
+async fn cmd_wearable_list(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let mgr = state.wearable_manager.lock().await;
+    serde_json::to_value(&mgr.list_connected()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_wearable_notify(
+    id: String,
+    title: String,
+    body: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.wearable_manager.lock().await;
+    mgr.send_notification(&id, &title, &body)?;
+    Ok(serde_json::json!({"ok": true}))
+}
+
+#[tauri::command]
+async fn cmd_wearable_health(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.wearable_manager.lock().await;
+    let data = mgr.get_health_data(&id)?;
+    serde_json::to_value(&data).map_err(|e| e.to_string())
+}
+
+// ── R103: IoT Controller commands ────────────────────────────────
+
+#[tauri::command]
+async fn cmd_iot_discover(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let ctrl = state.iot_controller.lock().await;
+    serde_json::to_value(&ctrl.discover_devices()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_iot_add(
+    device: devices::IoTDevice,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut ctrl = state.iot_controller.lock().await;
+    ctrl.add_device(device)?;
+    Ok(serde_json::json!({"ok": true}))
+}
+
+#[tauri::command]
+async fn cmd_iot_control(
+    id: String,
+    action: String,
+    value: serde_json::Value,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut ctrl = state.iot_controller.lock().await;
+    let result = ctrl.control(&id, &action, value)?;
+    serde_json::to_value(&result).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_iot_state(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let ctrl = state.iot_controller.lock().await;
+    ctrl.get_state(&id)
+}
+
+#[tauri::command]
+async fn cmd_iot_list(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let ctrl = state.iot_controller.lock().await;
+    serde_json::to_value(&ctrl.list_devices()).map_err(|e| e.to_string())
+}
+
+// ── R104: Tablet Mode commands ───────────────────────────────────
+
+#[tauri::command]
+async fn cmd_tablet_enable(
+    touch_enabled: bool,
+    gesture_support: bool,
+    font_scale: f64,
+    layout: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let config = devices::TabletConfig { touch_enabled, gesture_support, font_scale, layout };
+    let mut tm = state.tablet_mode.lock().await;
+    let status = tm.enable(config)?;
+    serde_json::to_value(&status).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_tablet_disable(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let mut tm = state.tablet_mode.lock().await;
+    tm.disable()?;
+    Ok(serde_json::json!({"ok": true}))
+}
+
+#[tauri::command]
+async fn cmd_tablet_status(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let tm = state.tablet_mode.lock().await;
+    serde_json::to_value(&tm.get_status()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_tablet_layout(
+    layout: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut tm = state.tablet_mode.lock().await;
+    let status = tm.adjust_layout(&layout)?;
+    serde_json::to_value(&status).map_err(|e| e.to_string())
+}
+
+// ── R105: TV Display Mode commands ───────────────────────────────
+
+#[tauri::command]
+async fn cmd_tv_enable(
+    display_mode: String,
+    auto_refresh_secs: u64,
+    content_type: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let config = devices::TVConfig { display_mode, auto_refresh_secs, content_type };
+    let mut tv = state.tv_display.lock().await;
+    let status = tv.enable(config)?;
+    serde_json::to_value(&status).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_tv_disable(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let mut tv = state.tv_display.lock().await;
+    tv.disable()?;
+    Ok(serde_json::json!({"ok": true}))
+}
+
+#[tauri::command]
+async fn cmd_tv_status(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let tv = state.tv_display.lock().await;
+    serde_json::to_value(&tv.get_status()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_tv_content(
+    content_type: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut tv = state.tv_display.lock().await;
+    let status = tv.set_content(&content_type)?;
+    serde_json::to_value(&status).map_err(|e| e.to_string())
+}
+
+// ── R106: Car Integration commands ────────────────────────────────
+
+#[tauri::command]
+async fn cmd_car_connect(
+    config: devices::car::CarConfig,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut agent = state.car_agent.lock().await;
+    let conn = agent.connect(config)?;
+    serde_json::to_value(&conn).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_car_disconnect(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut agent = state.car_agent.lock().await;
+    agent.disconnect(&id)?;
+    Ok(serde_json::json!({ "ok": true, "id": id }))
+}
+
+#[tauri::command]
+async fn cmd_car_data(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let agent = state.car_agent.lock().await;
+    agent.get_vehicle_data(&id)
+}
+
+#[tauri::command]
+async fn cmd_car_diagnostics(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let agent = state.car_agent.lock().await;
+    let report = agent.get_diagnostics(&id)?;
+    serde_json::to_value(&report).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_car_command(
+    id: String,
+    command: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let agent = state.car_agent.lock().await;
+    agent.send_command(&id, &command)
+}
+
+// ── R107: Browser Extension commands ─────────────────────────────
+
+#[tauri::command]
+async fn cmd_browser_ext_start(
+    port: u16,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut bridge = state.browser_bridge.lock().await;
+    bridge.start_native_messaging(port)
+}
+
+#[tauri::command]
+async fn cmd_browser_ext_status(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let bridge = state.browser_bridge.lock().await;
+    let status = bridge.get_status();
+    serde_json::to_value(&status).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_browser_ext_send(
+    data: serde_json::Value,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let bridge = state.browser_bridge.lock().await;
+    bridge.send_to_extension(data)
+}
+
+// ── R108: Email Client commands ──────────────────────────────────
+
+#[tauri::command]
+async fn cmd_email_client_add(
+    name: String,
+    host: String,
+    port: u16,
+    username: String,
+    password: String,
+    use_tls: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let config = email_client::IMAPConfig {
+        host,
+        port,
+        username,
+        password,
+        use_tls,
+    };
+    let mut client = state.email_client_mgr.lock().await;
+    let account = client.add_account(name, config)?;
+    serde_json::to_value(&account).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_email_client_list(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let client = state.email_client_mgr.lock().await;
+    let accounts = client.list_accounts();
+    serde_json::to_value(&accounts).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_email_client_connect(
+    account_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut client = state.email_client_mgr.lock().await;
+    client.connect(&account_id)
+}
+
+#[tauri::command]
+async fn cmd_email_client_fetch(
+    account_id: String,
+    folder: String,
+    limit: u32,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let client = state.email_client_mgr.lock().await;
+    let messages = client.fetch_messages(&account_id, &folder, limit)?;
+    serde_json::to_value(&messages).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_email_client_send(
+    account_id: String,
+    to: String,
+    subject: String,
+    body: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let client = state.email_client_mgr.lock().await;
+    client.send_via_smtp(&account_id, &to, &subject, &body)
+}
+
+// ── R109: Hardware Partnerships commands ─────────────────────────
+
+#[tauri::command]
+async fn cmd_list_partners(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let registry = state.partner_registry.lock().await;
+    let partners = registry.list_partners();
+    serde_json::to_value(&partners).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_get_partner(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let registry = state.partner_registry.lock().await;
+    match registry.get_partner(&id) {
+        Some(p) => serde_json::to_value(&p).map_err(|e| e.to_string()),
+        None => Err(format!("Partner not found: {}", id)),
+    }
+}
+
+#[tauri::command]
+async fn cmd_register_partner(
+    company: String,
+    device_type: String,
+    integration_level: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let level = match integration_level.as_str() {
+        "basic" => partnerships::registry::IntegrationLevel::Basic,
+        "premium" => partnerships::registry::IntegrationLevel::Premium,
+        "exclusive" => partnerships::registry::IntegrationLevel::Exclusive,
+        _ => return Err(format!("Invalid integration level: {}", integration_level)),
+    };
+    let mut registry = state.partner_registry.lock().await;
+    let partner = registry.register_partner(company, device_type, level);
+    serde_json::to_value(&partner).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_certify_partner(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut registry = state.partner_registry.lock().await;
+    let partner = registry.certify(&id)?;
+    serde_json::to_value(&partner).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -5839,6 +6285,16 @@ pub fn run() {
                 org_marketplace: Arc::new(tokio::sync::Mutex::new(
                     marketplace::OrgMarketplace::new(),
                 )),
+                // R101-R105: Device modules
+                arvr_agent: Arc::new(tokio::sync::Mutex::new(devices::ARVRAgent::new())),
+                wearable_manager: Arc::new(tokio::sync::Mutex::new(devices::WearableManager::new())),
+                iot_controller: Arc::new(tokio::sync::Mutex::new(devices::IoTController::new())),
+                tablet_mode: Arc::new(tokio::sync::Mutex::new(devices::TabletMode::new())),
+                tv_display: Arc::new(tokio::sync::Mutex::new(devices::TVDisplayMode::new())),
+                car_agent: Arc::new(tokio::sync::Mutex::new(devices::CarAgent::new())),
+                browser_bridge: Arc::new(tokio::sync::Mutex::new(browser_ext::BrowserBridge::new())),
+                email_client_mgr: Arc::new(tokio::sync::Mutex::new(email_client::EmailClient::new())),
+                partner_registry: Arc::new(tokio::sync::Mutex::new(partnerships::PartnerRegistry::new())),
             });
 
             // ── R35: Deferred startup — plugin discovery in background ────
@@ -6581,6 +7037,56 @@ pub fn run() {
             cmd_org_marketplace_approve,
             cmd_org_marketplace_remove,
             cmd_org_marketplace_search,
+            // R101: AR/VR Agent commands
+            cmd_arvr_connect,
+            cmd_arvr_disconnect,
+            cmd_arvr_status,
+            cmd_arvr_overlay,
+            cmd_arvr_command,
+            // R102: Wearable Integration commands
+            cmd_wearable_scan,
+            cmd_wearable_connect,
+            cmd_wearable_disconnect,
+            cmd_wearable_list,
+            cmd_wearable_notify,
+            cmd_wearable_health,
+            // R103: IoT Controller commands
+            cmd_iot_discover,
+            cmd_iot_add,
+            cmd_iot_control,
+            cmd_iot_state,
+            cmd_iot_list,
+            // R104: Tablet Mode commands
+            cmd_tablet_enable,
+            cmd_tablet_disable,
+            cmd_tablet_status,
+            cmd_tablet_layout,
+            // R105: TV Display Mode commands
+            cmd_tv_enable,
+            cmd_tv_disable,
+            cmd_tv_status,
+            cmd_tv_content,
+            // R106: Car Integration commands
+            cmd_car_connect,
+            cmd_car_disconnect,
+            cmd_car_data,
+            cmd_car_diagnostics,
+            cmd_car_command,
+            // R107: Browser Extension commands
+            cmd_browser_ext_start,
+            cmd_browser_ext_status,
+            cmd_browser_ext_send,
+            // R108: Email Client commands
+            cmd_email_client_add,
+            cmd_email_client_list,
+            cmd_email_client_connect,
+            cmd_email_client_fetch,
+            cmd_email_client_send,
+            // R109: Hardware Partnerships commands
+            cmd_list_partners,
+            cmd_get_partner,
+            cmd_register_partner,
+            cmd_certify_partner,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");
