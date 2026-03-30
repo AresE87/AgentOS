@@ -38,6 +38,14 @@ data/
 .DS_Store
 Thumbs.db
 
+# Claude Code local settings (may contain secrets)
+.claude/settings.local.json
+.claude/projects/
+.claude/scheduled-tasks/
+
+# Batch scripts with env vars
+START_AGENTOS.bat
+
 # Tauri
 src-tauri/target/
 
