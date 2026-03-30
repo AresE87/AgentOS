@@ -510,6 +510,42 @@ export function useAgent() {
     const pluginStorageSet = (name: string, key: string, value: string) =>
         callInvoke<{ ok: boolean }>('plugin_storage_set', { name, key, value });
 
+    // R86: Real-time Translation
+    const translate = (text: string, sourceLang: string, targetLang: string) =>
+        callInvoke<{ original: string; translated: string; source_lang: string; target_lang: string; confidence: number }>('translate', { text, source_lang: sourceLang, target_lang: targetLang });
+    const detectLanguage = (text: string) =>
+        callInvoke<{ detected_language: string; text: string }>('detect_language', { text });
+    const supportedLanguages = () =>
+        callInvoke<{ code: string; name: string }[]>('supported_languages');
+
+    // R87: Accessibility
+    const getAccessibility = () =>
+        callInvoke<{ high_contrast: boolean; font_scale: number; screen_reader_hints: boolean; reduce_motion: boolean; keyboard_nav: boolean }>('get_accessibility');
+    const setAccessibility = (config: { high_contrast: boolean; font_scale: number; screen_reader_hints: boolean; reduce_motion: boolean; keyboard_nav: boolean }) =>
+        callInvoke<any>('set_accessibility', { config });
+    const getAccessibilityCss = () =>
+        callInvoke<{ css: string }>('get_accessibility_css');
+
+    // R88: Industry Verticals
+    const listVerticals = () =>
+        callInvoke<any[]>('list_verticals');
+    const getVertical = (id: string) =>
+        callInvoke<any>('get_vertical', { id });
+    const activateVertical = (id: string) =>
+        callInvoke<any>('activate_vertical', { id });
+    const getActiveVertical = () =>
+        callInvoke<any>('get_active_vertical');
+
+    // R89: Offline First
+    const checkConnectivity = () =>
+        callInvoke<{ is_online: boolean }>('check_connectivity');
+    const getOfflineStatus = () =>
+        callInvoke<{ is_online: boolean; cached_responses: number; pending_sync: number; last_online: string | null }>('get_offline_status');
+    const syncOffline = () =>
+        callInvoke<{ synced: number; status: any }>('sync_offline');
+    const getCachedResponse = (task: string) =>
+        callInvoke<any>('get_cached_response', { task });
+
     return {
         getStatus, processMessage, getTasks, getPlaybooks, setActivePlaybook,
         getSettings, updateSettings, healthCheck, getActiveChain, getChainHistory,
@@ -618,6 +654,14 @@ export function useAgent() {
         terminalExecute, terminalExplainError, terminalNlToCommand, terminalHistory,
         // R79: Extension API V2
         pluginGetUI, pluginInvokeMethod, pluginStorageGet, pluginStorageSet,
+        // R86: Real-time Translation
+        translate, detectLanguage, supportedLanguages,
+        // R87: Accessibility
+        getAccessibility, setAccessibility, getAccessibilityCss,
+        // R88: Industry Verticals
+        listVerticals, getVertical, activateVertical, getActiveVertical,
+        // R89: Offline First
+        checkConnectivity, getOfflineStatus, syncOffline, getCachedResponse,
     };
 }
 

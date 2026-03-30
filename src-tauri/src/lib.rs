@@ -48,6 +48,15 @@ pub mod webhooks;
 pub mod testing;
 pub mod widget;
 pub mod terminal;
+pub mod translation;
+pub mod accessibility;
+pub mod verticals;
+pub mod offline;
+pub mod ondevice;
+pub mod multimodal;
+pub mod predictions;
+pub mod crossapp;
+pub mod swarm;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -124,6 +133,24 @@ pub struct AppState {
     pub smart_terminal: Arc<tokio::sync::Mutex<terminal::SmartTerminal>>,
     /// R79: Extension API V2 — plugin UI, scoped storage
     pub extension_api_v2: Arc<tokio::sync::Mutex<plugins::ExtensionAPIv2>>,
+    /// R86: Real-time Translation engine
+    pub translation_engine: Arc<translation::TranslationEngine>,
+    /// R87: Accessibility manager
+    pub accessibility_manager: Arc<std::sync::Mutex<accessibility::AccessibilityManager>>,
+    /// R88: Industry Verticals registry
+    pub vertical_registry: Arc<tokio::sync::Mutex<verticals::VerticalRegistry>>,
+    /// R89: Offline First manager
+    pub offline_manager: Arc<tokio::sync::Mutex<offline::OfflineManager>>,
+    /// R81: On-Device AI engine
+    pub ondevice_engine: Arc<tokio::sync::Mutex<ondevice::OnDeviceEngine>>,
+    /// R82: Multimodal Input processor
+    pub input_processor: Arc<multimodal::InputProcessor>,
+    /// R83: Predictive Actions engine
+    pub prediction_engine: Arc<tokio::sync::Mutex<predictions::PredictionEngine>>,
+    /// R84: Cross-App Automation bridge
+    pub crossapp_bridge: Arc<tokio::sync::Mutex<crossapp::CrossAppBridge>>,
+    /// R85: Agent Swarm coordinator
+    pub swarm_coordinator: Arc<tokio::sync::Mutex<swarm::SwarmCoordinator>>,
 }
 
 // ── R44: Cloud Mesh Relay commands ──────────────────────────────────
@@ -4830,6 +4857,157 @@ async fn cmd_plugin_storage_set(
     Ok(serde_json::json!({ "ok": true, "plugin": name, "key": key }))
 }
 
+// ── R86: Real-time Translation commands ──────────────────────────
+
+#[tauri::command]
+async fn cmd_translate(
+    text: String,
+    source_lang: String,
+    target_lang: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let req = translation::TranslationRequest {
+        text,
+        source_lang,
+        target_lang,
+    };
+    let result = state.translation_engine.translate(&req).await?;
+    serde_json::to_value(result).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_detect_language(
+    text: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let lang = state.translation_engine.detect_language(&text);
+    Ok(serde_json::json!({ "detected_language": lang, "text": text }))
+}
+
+#[tauri::command]
+async fn cmd_supported_languages(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let languages = state.translation_engine.get_supported_languages();
+    serde_json::to_value(&languages).map_err(|e| e.to_string())
+}
+
+// ── R87: Accessibility commands ──────────────────────────────────
+
+#[tauri::command]
+async fn cmd_get_accessibility(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.accessibility_manager.lock().map_err(|e| e.to_string())?;
+    let config = mgr.get_config();
+    serde_json::to_value(config).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_set_accessibility(
+    config: accessibility::AccessibilityConfig,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.accessibility_manager.lock().map_err(|e| e.to_string())?;
+    mgr.update_config(config);
+    let updated = mgr.get_config();
+    serde_json::to_value(updated).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_get_accessibility_css(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.accessibility_manager.lock().map_err(|e| e.to_string())?;
+    let css = mgr.get_css_overrides();
+    Ok(serde_json::json!({ "css": css }))
+}
+
+// ── R88: Industry Verticals commands ─────────────────────────────
+
+#[tauri::command]
+async fn cmd_list_verticals(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let registry = state.vertical_registry.lock().await;
+    let verticals = registry.list_verticals();
+    serde_json::to_value(&verticals).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_get_vertical(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let registry = state.vertical_registry.lock().await;
+    match registry.get_vertical(&id) {
+        Some(v) => serde_json::to_value(v).map_err(|e| e.to_string()),
+        None => Ok(serde_json::json!({ "error": "Vertical not found", "id": id })),
+    }
+}
+
+#[tauri::command]
+async fn cmd_activate_vertical(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut registry = state.vertical_registry.lock().await;
+    let vertical = registry.activate_vertical(&id)?;
+    serde_json::to_value(vertical).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_get_active_vertical(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let registry = state.vertical_registry.lock().await;
+    match registry.get_active() {
+        Some(v) => serde_json::to_value(v).map_err(|e| e.to_string()),
+        None => Ok(serde_json::json!({ "active": null })),
+    }
+}
+
+// ── R89: Offline First commands ──────────────────────────────────
+
+#[tauri::command]
+async fn cmd_check_connectivity(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.offline_manager.lock().await;
+    let online = mgr.check_connectivity().await;
+    Ok(serde_json::json!({ "is_online": online }))
+}
+
+#[tauri::command]
+async fn cmd_get_offline_status(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.offline_manager.lock().await;
+    let status = mgr.get_status();
+    serde_json::to_value(status).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_sync_offline(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.offline_manager.lock().await;
+    let synced = mgr.sync_when_online()?;
+    Ok(serde_json::json!({ "synced": synced, "status": mgr.get_status() }))
+}
+
+#[tauri::command]
+async fn cmd_get_cached_response(
+    task: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.offline_manager.lock().await;
+    match mgr.get_cached(&task) {
+        Some(cached) => serde_json::to_value(cached).map_err(|e| e.to_string()),
+        None => Ok(serde_json::json!({ "cached": null, "task": task })),
+    }
+}
+
 /// Simple non-cryptographic hash for referral IDs (not security-sensitive).
 fn md5_simple(data: &[u8]) -> u64 {
     let mut hash: u64 = 0xcbf29ce484222325;
@@ -4997,6 +5175,29 @@ pub fn run() {
                 )),
                 extension_api_v2: Arc::new(tokio::sync::Mutex::new(
                     plugins::ExtensionAPIv2::new(app_dir.join("plugin_storage.db")),
+                )),
+                translation_engine: Arc::new(translation::TranslationEngine::new()),
+                accessibility_manager: Arc::new(std::sync::Mutex::new(
+                    accessibility::AccessibilityManager::new(),
+                )),
+                vertical_registry: Arc::new(tokio::sync::Mutex::new(
+                    verticals::VerticalRegistry::new(),
+                )),
+                offline_manager: Arc::new(tokio::sync::Mutex::new(
+                    offline::OfflineManager::new(),
+                )),
+                ondevice_engine: Arc::new(tokio::sync::Mutex::new(
+                    ondevice::OnDeviceEngine::new(),
+                )),
+                input_processor: Arc::new(multimodal::InputProcessor::new()),
+                prediction_engine: Arc::new(tokio::sync::Mutex::new(
+                    predictions::PredictionEngine::new(),
+                )),
+                crossapp_bridge: Arc::new(tokio::sync::Mutex::new(
+                    crossapp::CrossAppBridge::new(),
+                )),
+                swarm_coordinator: Arc::new(tokio::sync::Mutex::new(
+                    swarm::SwarmCoordinator::new(),
                 )),
             });
 
@@ -5658,6 +5859,24 @@ pub fn run() {
             cmd_plugin_invoke_method,
             cmd_plugin_storage_get,
             cmd_plugin_storage_set,
+            // R86: Real-time Translation commands
+            cmd_translate,
+            cmd_detect_language,
+            cmd_supported_languages,
+            // R87: Accessibility commands
+            cmd_get_accessibility,
+            cmd_set_accessibility,
+            cmd_get_accessibility_css,
+            // R88: Industry Verticals commands
+            cmd_list_verticals,
+            cmd_get_vertical,
+            cmd_activate_vertical,
+            cmd_get_active_vertical,
+            // R89: Offline First commands
+            cmd_check_connectivity,
+            cmd_get_offline_status,
+            cmd_sync_offline,
+            cmd_get_cached_response,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");
