@@ -1,5 +1,24 @@
 # Changelog
 
+## [3.2.0] - 2026-03-29
+
+### Added
+- R111: Autonomous Inbox -- keyword-based rule engine, auto-reply/forward/archive/label/escalate
+- R112: Autonomous Scheduling -- calendar optimization, time-block analysis, smart slot finder
+- R113: Autonomous Reporting -- scheduled report generation with configurable data sources and templates
+- R114: Autonomous Data Entry -- structured data extraction from invoices, receipts, forms with validation
+- R115: Autonomous QA -- test plan generation, automated check execution, coverage reporting
+- R116: Autonomous Support -- L1/L2 ticket processing, knowledge-base auto-reply, SLA tracking
+- R117: Autonomous Procurement -- purchase requests, auto-approval under threshold, spend summary
+- R118: Autonomous Compliance -- regulatory requirement registration, automated checks, auto-remediation
+- R119: Autonomous Reconciliation -- multi-source comparison, mismatch detection, auto-resolution
+- R120: v3.2 Autonomous Operations Release
+
+### Changed
+- Version bump to 3.2.0 across Cargo.toml, frontend, and mobile packages
+- New `autonomous` module with 9 sub-engines for end-to-end business process automation
+- Estimated 120+ hours/month savings per company through autonomous operations
+
 ## [3.1.0] - 2026-03-29
 
 ### Added
