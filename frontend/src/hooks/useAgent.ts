@@ -187,6 +187,15 @@ export function useAgent() {
     const screenDiff = () =>
         callInvoke<{ changed: boolean; change_percentage: number; changed_regions: any[]; before_path: string; after_path: string }>('screen_diff');
 
+    // R44: Cloud Mesh Relay
+    const relayConnect = (serverUrl: string, authToken: string) =>
+        callInvoke<any>('relay_connect', { server_url: serverUrl, auth_token: authToken });
+    const relayDisconnect = () => callInvoke<any>('relay_disconnect');
+    const relayListNodes = () => callInvoke<any>('relay_list_nodes');
+    const relaySendTask = (targetNode: string, task: string) =>
+        callInvoke<any>('relay_send_task', { target_node: targetNode, task });
+    const getRelayStatus = () => callInvoke<any>('get_relay_status');
+
     return {
         getStatus, processMessage, getTasks, getPlaybooks, setActivePlaybook,
         getSettings, updateSettings, healthCheck, getActiveChain, getChainHistory,
@@ -227,6 +236,8 @@ export function useAgent() {
         aapSendTask, aapQueryCapabilities, aapHealth, getAAPStatus,
         // R43: Advanced Vision
         detectMonitors, ocrScreenshot, screenDiff,
+        // R44: Cloud Mesh Relay
+        relayConnect, relayDisconnect, relayListNodes, relaySendTask, getRelayStatus,
     };
 }
 

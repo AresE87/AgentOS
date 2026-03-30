@@ -3355,6 +3355,12 @@ pub fn run() {
             cmd_detect_monitors,
             cmd_ocr_screenshot,
             cmd_screen_diff,
+            // R44: Cloud Mesh Relay commands
+            cmd_relay_connect,
+            cmd_relay_disconnect,
+            cmd_relay_list_nodes,
+            cmd_relay_send_task,
+            cmd_get_relay_status,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");

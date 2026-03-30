@@ -74,6 +74,14 @@ pub struct Settings {
     #[serde(default = "default_aap_port")]
     pub aap_port: u16,
 
+    // R44: Cloud Mesh Relay
+    #[serde(default)]
+    pub relay_enabled: bool,
+    #[serde(default = "default_relay_server_url")]
+    pub relay_server_url: String,
+    #[serde(default)]
+    pub relay_auth_token: String,
+
     // R25: Local LLMs (Ollama)
     #[serde(default)]
     pub use_local_llm: bool,
@@ -134,6 +142,10 @@ fn default_aap_enabled() -> bool {
 }
 fn default_aap_port() -> u16 {
     9100
+}
+
+fn default_relay_server_url() -> String {
+    "https://relay.agentos.app".to_string()
 }
 
 fn default_local_llm_url() -> String {
@@ -276,6 +288,15 @@ impl Settings {
                     self.aap_port = v;
                 }
             }
+            "relay_enabled" => {
+                self.relay_enabled = value == "true" || value == "1";
+            }
+            "relay_server_url" => {
+                self.relay_server_url = value.to_string();
+            }
+            "relay_auth_token" => {
+                self.relay_auth_token = value.to_string();
+            }
             _ => {}
         }
     }
@@ -326,6 +347,9 @@ impl Settings {
             "voice_auto_listen": self.voice_auto_listen,
             "aap_enabled": self.aap_enabled,
             "aap_port": self.aap_port,
+            "relay_enabled": self.relay_enabled,
+            "relay_server_url": self.relay_server_url,
+            "has_relay_token": !self.relay_auth_token.is_empty(),
         })
     }
 }
@@ -470,6 +494,9 @@ impl Default for Settings {
             voice_auto_listen: false,
             aap_enabled: default_aap_enabled(),
             aap_port: default_aap_port(),
+            relay_enabled: false,
+            relay_server_url: default_relay_server_url(),
+            relay_auth_token: String::new(),
             use_local_llm: false,
             local_llm_url: default_local_llm_url(),
             local_model: default_local_model(),
