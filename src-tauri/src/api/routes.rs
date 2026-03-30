@@ -136,3 +136,89 @@ pub struct TaskEntry {
 }
 
 pub type TaskStore = Arc<RwLock<HashMap<String, TaskEntry>>>;
+
+// ── C1: Stripe Webhook ────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct WebhookQuery {
+    #[serde(default)]
+    pub secret: String,
+}
+
+/// POST /webhooks/stripe — receives Stripe webhook events.
+/// Updates plan_type in the database when checkout completes or subscription is canceled.
+pub async fn stripe_webhook(
+    headers: HeaderMap,
+    State(state): State<ApiState>,
+    body: String,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let signature = headers
+        .get("stripe-signature")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    // Read webhook secret from the db_path-adjacent config
+    // For now we rely on the secret being passed via the ApiState
+    let webhook_secret = state.stripe_webhook_secret.as_deref().unwrap_or("");
+
+    if !webhook_secret.is_empty() {
+        let valid = crate::billing::stripe::StripeClient::verify_webhook_signature(
+            &body,
+            signature,
+            webhook_secret,
+        );
+        if !valid {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "Invalid webhook signature".to_string(),
+            ));
+        }
+    }
+
+    // Parse the event and determine plan change
+    let plan_change = crate::billing::stripe::StripeClient::parse_webhook_event(&body)
+        .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+
+    if let Some(new_plan) = plan_change {
+        tracing::info!("Stripe webhook: updating plan to '{}'", new_plan);
+
+        // Update plan_type in the settings file via database
+        let conn = rusqlite::Connection::open(&state.db_path)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+        // Store the plan change in a simple key-value approach
+        conn.execute(
+            "INSERT OR REPLACE INTO daily_usage (date, tasks_count, tokens_used, plan_type) VALUES (date('now'), 0, 0, ?1)
+             ON CONFLICT(date) DO UPDATE SET plan_type = ?1",
+            rusqlite::params![new_plan],
+        )
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+        // Also update the settings config file if we have a settings_path
+        if let Some(ref settings_path) = state.settings_path {
+            if let Ok(content) = std::fs::read_to_string(settings_path) {
+                if let Ok(mut settings) = serde_json::from_str::<serde_json::Value>(&content) {
+                    if let Some(obj) = settings.as_object_mut() {
+                        obj.insert(
+                            "plan_type".to_string(),
+                            serde_json::Value::String(new_plan.clone()),
+                        );
+                        if let Ok(json) = serde_json::to_string_pretty(&settings) {
+                            let _ = std::fs::write(settings_path, json);
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(Json(serde_json::json!({
+            "received": true,
+            "plan_updated": new_plan,
+        })))
+    } else {
+        Ok(Json(serde_json::json!({
+            "received": true,
+            "plan_updated": null,
+        })))
+    }
+}

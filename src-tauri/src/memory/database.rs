@@ -120,8 +120,43 @@ impl Database {
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
             );
 
-            CREATE INDEX IF NOT EXISTS idx_triggers_enabled ON triggers(enabled);",
+            CREATE INDEX IF NOT EXISTS idx_triggers_enabled ON triggers(enabled);
+
+            -- C1: Daily usage tracking for billing enforcement
+            CREATE TABLE IF NOT EXISTS daily_usage (
+                date TEXT PRIMARY KEY,
+                tasks_count INTEGER NOT NULL DEFAULT 0,
+                tokens_used INTEGER NOT NULL DEFAULT 0,
+                plan_type TEXT NOT NULL DEFAULT 'free'
+            );",
         )
+    }
+
+    /// Increment the daily task and token counters. Called on each task execution.
+    pub fn increment_daily_usage(&self, tokens: i64) -> Result<(), rusqlite::Error> {
+        self.conn.execute(
+            "INSERT INTO daily_usage (date, tasks_count, tokens_used, plan_type)
+             VALUES (date('now'), 1, ?1, 'free')
+             ON CONFLICT(date) DO UPDATE SET
+                tasks_count = tasks_count + 1,
+                tokens_used = tokens_used + ?1",
+            params![tokens],
+        )?;
+        Ok(())
+    }
+
+    /// Get today's usage from the daily_usage table.
+    pub fn get_daily_usage(&self) -> Result<(i64, i64), rusqlite::Error> {
+        let result = self.conn.query_row(
+            "SELECT COALESCE(tasks_count, 0), COALESCE(tokens_used, 0) FROM daily_usage WHERE date = date('now')",
+            [],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+        );
+        match result {
+            Ok(r) => Ok(r),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok((0, 0)),
+            Err(e) => Err(e),
+        }
     }
 
     pub fn insert_task(&self, input: &str, response: &LLMResponse) -> Result<(), rusqlite::Error> {

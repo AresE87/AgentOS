@@ -72,6 +72,7 @@ pub mod autonomous;
 pub mod reasoning;
 pub mod knowledge;
 pub mod economy;
+pub mod updater;
 
 use base64::Engine as _;
 use std::path::PathBuf;
@@ -633,11 +634,14 @@ async fn cmd_process_message(
         .map_err(|e| e.to_string())?;
     drop(gateway);
 
-    // Store in DB
+    // Store in DB and increment daily usage counters
     {
         let db = state.db.lock().map_err(|e| e.to_string())?;
         db.insert_task(&text, &response)
             .map_err(|e| e.to_string())?;
+        // C1: Persist daily usage for billing enforcement
+        let total_tokens = response.tokens_in + response.tokens_out;
+        let _ = db.increment_daily_usage(total_tokens as i64);
     }
 
     // R29: Audit log
@@ -1920,20 +1924,71 @@ async fn cmd_get_checkout_url(
     plan: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    // Use a placeholder email; a real implementation would pull from account info
-    let _ = state;
-    let url = billing::stripe::get_checkout_url(&plan, "user@example.com");
-    Ok(serde_json::json!({ "url": url, "plan": plan }))
+    let settings = {
+        let s = state.settings.lock().map_err(|e| e.to_string())?;
+        s.clone()
+    };
+
+    // If Stripe secret key is configured, create a real checkout session
+    if !settings.stripe_secret_key.is_empty() {
+        let price_id = match plan.as_str() {
+            "pro" => {
+                if settings.stripe_price_id_pro.is_empty() {
+                    return Err("stripe_price_id_pro not configured in settings".into());
+                }
+                &settings.stripe_price_id_pro
+            }
+            "team" => {
+                if settings.stripe_price_id_team.is_empty() {
+                    return Err("stripe_price_id_team not configured in settings".into());
+                }
+                &settings.stripe_price_id_team
+            }
+            _ => return Err(format!("Invalid plan: {}. Use 'pro' or 'team'.", plan)),
+        };
+
+        let client = billing::stripe::StripeClient::new(&settings.stripe_secret_key);
+        let url = client
+            .create_checkout_session(
+                price_id,
+                "user@example.com",
+                "http://localhost:8080/billing/success?session_id={CHECKOUT_SESSION_ID}",
+                "http://localhost:8080/billing/cancel",
+            )
+            .await?;
+
+        Ok(serde_json::json!({ "url": url, "plan": plan, "real": true }))
+    } else {
+        // Fallback to placeholder URL when Stripe is not configured
+        let url = billing::stripe::get_checkout_url(&plan, "user@example.com");
+        Ok(serde_json::json!({ "url": url, "plan": plan, "real": false }))
+    }
 }
 
 #[tauri::command]
 async fn cmd_open_billing_portal(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let _ = state;
-    let url = billing::stripe::get_portal_url();
-    // Return the URL so the frontend can open it with window.open()
-    Ok(serde_json::json!({ "url": url }))
+    let settings = {
+        let s = state.settings.lock().map_err(|e| e.to_string())?;
+        s.clone()
+    };
+
+    // If Stripe is configured and we have a customer ID, create a real portal session
+    if !settings.stripe_secret_key.is_empty() && !settings.stripe_customer_id.is_empty() {
+        let client = billing::stripe::StripeClient::new(&settings.stripe_secret_key);
+        let url = client
+            .create_portal_session(
+                &settings.stripe_customer_id,
+                "http://localhost:8080/billing",
+            )
+            .await?;
+        Ok(serde_json::json!({ "url": url, "real": true }))
+    } else {
+        // Fallback to placeholder
+        let url = billing::stripe::get_portal_url();
+        Ok(serde_json::json!({ "url": url, "real": false }))
+    }
 }
 
 #[tauri::command]
@@ -4034,7 +4089,7 @@ async fn cmd_list_approval_history(
     Ok(serde_json::json!({ "approvals": history }))
 }
 
-// ── R63: Calendar Integration commands ────────────────────────────────
+// ── R63 / C3: Calendar Integration commands (Google Calendar + fallback) ──
 
 #[tauri::command]
 async fn cmd_calendar_list_events(
@@ -4049,7 +4104,7 @@ async fn cmd_calendar_list_events(
         .or_else(|_| chrono::NaiveDateTime::parse_from_str(&to, "%Y-%m-%d %H:%M:%S"))
         .map_err(|e| format!("Invalid 'to' datetime: {}", e))?;
     let mgr = state.calendar_manager.lock().await;
-    let events = integrations::CalendarProvider::list_events(&*mgr, from_dt, to_dt)?;
+    let events = mgr.list_events_async(from_dt, to_dt).await?;
     Ok(serde_json::json!({ "events": events }))
 }
 
@@ -4061,7 +4116,7 @@ async fn cmd_calendar_create_event(
     let new_event: integrations::calendar::NewCalendarEvent =
         serde_json::from_value(event).map_err(|e| e.to_string())?;
     let mut mgr = state.calendar_manager.lock().await;
-    let created = integrations::CalendarProvider::create_event(&mut *mgr, new_event)?;
+    let created = mgr.create_event_async(new_event).await?;
     serde_json::to_value(&created).map_err(|e| e.to_string())
 }
 
@@ -4074,7 +4129,7 @@ async fn cmd_calendar_update_event(
     let upd: integrations::calendar::UpdateCalendarEvent =
         serde_json::from_value(update).map_err(|e| e.to_string())?;
     let mut mgr = state.calendar_manager.lock().await;
-    let updated = integrations::CalendarProvider::update_event(&mut *mgr, &id, upd)?;
+    let updated = mgr.update_event_async(&id, upd).await?;
     serde_json::to_value(&updated).map_err(|e| e.to_string())
 }
 
@@ -4084,7 +4139,7 @@ async fn cmd_calendar_delete_event(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let mut mgr = state.calendar_manager.lock().await;
-    let deleted = integrations::CalendarProvider::delete_event(&mut *mgr, &id)?;
+    let deleted = mgr.delete_event_async(&id).await?;
     Ok(serde_json::json!({ "ok": true, "deleted": deleted }))
 }
 
@@ -4109,6 +4164,66 @@ async fn cmd_calendar_get_event(
     let mgr = state.calendar_manager.lock().await;
     let event = mgr.get_event(&id)?;
     serde_json::to_value(&event).map_err(|e| e.to_string())
+}
+
+/// C3: Get Google OAuth authorization URL for calendar consent
+#[tauri::command]
+async fn cmd_calendar_get_auth_url(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.calendar_manager.lock().await;
+    let redirect_uri = "http://localhost:8080/oauth/google/callback";
+    let url = mgr.google.get_auth_url(redirect_uri);
+    Ok(serde_json::json!({ "url": url, "redirect_uri": redirect_uri }))
+}
+
+/// C3: Exchange OAuth authorization code for tokens
+#[tauri::command]
+async fn cmd_calendar_exchange_code(
+    code: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let redirect_uri = "http://localhost:8080/oauth/google/callback";
+    let mut mgr = state.calendar_manager.lock().await;
+    mgr.google.exchange_code(&code, redirect_uri).await?;
+
+    // Persist refresh token to settings
+    if let Some(refresh) = mgr.google.get_refresh_token() {
+        let refresh_owned = refresh.to_string();
+        let mut settings = state.settings.lock().map_err(|e| e.to_string())?;
+        settings.set("google_refresh_token", &refresh_owned);
+        let _ = settings.save();
+    }
+
+    Ok(serde_json::json!({
+        "ok": true,
+        "authenticated": mgr.google.is_authenticated(),
+    }))
+}
+
+/// C3: Refresh Google Calendar access token
+#[tauri::command]
+async fn cmd_calendar_refresh_token(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.calendar_manager.lock().await;
+    mgr.google.refresh_access_token().await?;
+    Ok(serde_json::json!({
+        "ok": true,
+        "authenticated": mgr.google.is_authenticated(),
+    }))
+}
+
+/// C3: Check Google Calendar auth status
+#[tauri::command]
+async fn cmd_calendar_auth_status(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.calendar_manager.lock().await;
+    Ok(serde_json::json!({
+        "authenticated": mgr.google_authenticated(),
+        "has_refresh_token": mgr.google.get_refresh_token().is_some(),
+    }))
 }
 
 // ── R64: Email Integration commands ─────────────────────────────────
@@ -7803,6 +7918,22 @@ async fn cmd_affiliate_track(
     Ok(serde_json::json!({ "ok": true }))
 }
 
+// ── C2: Auto-Update commands ────────────────────────────────────────
+
+const AGENTOS_GITHUB_REPO: &str = "AresE87/AgentOS";
+
+#[tauri::command]
+async fn cmd_check_for_update() -> Result<serde_json::Value, String> {
+    let current = env!("CARGO_PKG_VERSION");
+    let info = updater::UpdateChecker::check_for_update(current, AGENTOS_GITHUB_REPO).await?;
+    serde_json::to_value(&info).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_get_current_version() -> Result<serde_json::Value, String> {
+    Ok(serde_json::json!({ "version": env!("CARGO_PKG_VERSION") }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -7939,9 +8070,14 @@ pub fn run() {
                     engine
                 },
                 approval_manager: Arc::new(approvals::ApprovalManager::new()),
-                calendar_manager: Arc::new(tokio::sync::Mutex::new(
-                    integrations::CalendarManager::new(),
-                )),
+                calendar_manager: {
+                    let mut cm = integrations::CalendarManager::with_google(
+                        &settings.google_client_id,
+                        &settings.google_client_secret,
+                    );
+                    cm.set_refresh_token(&settings.google_refresh_token);
+                    Arc::new(tokio::sync::Mutex::new(cm))
+                },
                 email_manager: {
                     let mut em = integrations::EmailManager::new();
                     em.seed_samples();
@@ -8179,7 +8315,17 @@ pub fn run() {
                 let api_db_path = db_path.to_string_lossy().to_string();
                 let api_settings = settings.clone();
                 tauri::async_runtime::spawn(async move {
-                    match api::server::start_api_server(api_db_path.clone(), api_port).await {
+                    let stripe_webhook_secret = if api_settings.stripe_webhook_secret.is_empty() {
+                        None
+                    } else {
+                        Some(api_settings.stripe_webhook_secret.clone())
+                    };
+                    match api::server::start_api_server_with_stripe(
+                        api_db_path.clone(),
+                        api_port,
+                        stripe_webhook_secret,
+                        None, // settings_path updated after config is available
+                    ).await {
                         Ok((mut rx, task_store)) => {
                             tracing::info!("Public API server started on port {}", api_port);
                             // Process incoming API tasks
@@ -8365,6 +8511,26 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
+
+            // ── C2: Background update check 60s after startup ───────
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(60)).await;
+                let current = env!("CARGO_PKG_VERSION");
+                match updater::UpdateChecker::check_for_update(current, AGENTOS_GITHUB_REPO).await {
+                    Ok(info) if info.update_available => {
+                        tracing::info!("Update available: v{} → v{}", current, info.latest_version.as_deref().unwrap_or("?"));
+                        let _ = handle.emit("update:available", serde_json::json!({
+                            "current_version": info.current_version,
+                            "latest_version": info.latest_version,
+                            "release_notes": info.release_notes,
+                            "download_url": info.download_url,
+                        }));
+                    }
+                    Ok(_) => tracing::info!("AgentOS is up to date (v{})", current),
+                    Err(e) => tracing::warn!("Auto-update check failed: {}", e),
+                }
+            });
 
             Ok(())
         })
@@ -8627,6 +8793,10 @@ pub fn run() {
             cmd_calendar_delete_event,
             cmd_calendar_free_slots,
             cmd_calendar_get_event,
+            cmd_calendar_get_auth_url,
+            cmd_calendar_exchange_code,
+            cmd_calendar_refresh_token,
+            cmd_calendar_auth_status,
             // R64: Email Integration commands
             cmd_email_list,
             cmd_email_get,
@@ -9029,6 +9199,9 @@ pub fn run() {
             cmd_affiliate_earnings,
             cmd_affiliate_list,
             cmd_affiliate_track,
+            // C2: Auto-Update commands
+            cmd_check_for_update,
+            cmd_get_current_version,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");

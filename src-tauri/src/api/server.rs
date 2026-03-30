@@ -24,11 +24,24 @@ pub struct ApiState {
     pub db_path: String,
     pub task_sender: tokio::sync::mpsc::Sender<ApiTask>,
     pub task_store: TaskStore,
+    /// Stripe webhook signing secret (from settings)
+    pub stripe_webhook_secret: Option<String>,
+    /// Path to settings config file so webhooks can update plan_type
+    pub settings_path: Option<String>,
 }
 
 pub async fn start_api_server(
     db_path: String,
     port: u16,
+) -> Result<(tokio::sync::mpsc::Receiver<ApiTask>, TaskStore), String> {
+    start_api_server_with_stripe(db_path, port, None, None).await
+}
+
+pub async fn start_api_server_with_stripe(
+    db_path: String,
+    port: u16,
+    stripe_webhook_secret: Option<String>,
+    settings_path: Option<String>,
 ) -> Result<(tokio::sync::mpsc::Receiver<ApiTask>, TaskStore), String> {
     let (tx, rx) = tokio::sync::mpsc::channel::<ApiTask>(128);
     let task_store: TaskStore = Arc::new(RwLock::new(HashMap::new()));
@@ -37,6 +50,8 @@ pub async fn start_api_server(
         db_path,
         task_sender: tx,
         task_store: task_store.clone(),
+        stripe_webhook_secret,
+        settings_path,
     };
 
     let cors = CorsLayer::new()
@@ -49,6 +64,7 @@ pub async fn start_api_server(
         .route("/v1/status", get(routes::get_status))
         .route("/v1/message", post(routes::post_message))
         .route("/v1/task/:id", get(routes::get_task))
+        .route("/webhooks/stripe", post(routes::stripe_webhook))
         .layer(cors)
         .with_state(state);
 

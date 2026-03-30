@@ -88,6 +88,26 @@ pub struct Settings {
     #[serde(default)]
     pub training_telemetry_url: String,
 
+    // C1: Stripe Billing
+    #[serde(default)]
+    pub stripe_secret_key: String,
+    #[serde(default)]
+    pub stripe_webhook_secret: String,
+    #[serde(default)]
+    pub stripe_customer_id: String,
+    #[serde(default)]
+    pub stripe_price_id_pro: String,
+    #[serde(default)]
+    pub stripe_price_id_team: String,
+
+    // C3: Google Calendar OAuth
+    #[serde(default)]
+    pub google_client_id: String,
+    #[serde(default)]
+    pub google_client_secret: String,
+    #[serde(default)]
+    pub google_refresh_token: String,
+
     // R25: Local LLMs (Ollama)
     #[serde(default)]
     pub use_local_llm: bool,
@@ -244,6 +264,21 @@ impl Settings {
             "voice_auto_listen" => {
                 self.voice_auto_listen = value == "true" || value == "1";
             }
+            "stripe_secret_key" => {
+                self.stripe_secret_key = value.to_string();
+            }
+            "stripe_webhook_secret" => {
+                self.stripe_webhook_secret = value.to_string();
+            }
+            "stripe_customer_id" => {
+                self.stripe_customer_id = value.to_string();
+            }
+            "stripe_price_id_pro" => {
+                self.stripe_price_id_pro = value.to_string();
+            }
+            "stripe_price_id_team" => {
+                self.stripe_price_id_team = value.to_string();
+            }
             "use_local_llm" => {
                 self.use_local_llm = value == "true" || value == "1";
             }
@@ -306,6 +341,15 @@ impl Settings {
             "training_opt_in" => {
                 self.training_opt_in = value == "true" || value == "1";
             }
+            "google_client_id" => {
+                self.google_client_id = value.to_string();
+            }
+            "google_client_secret" => {
+                self.google_client_secret = value.to_string();
+            }
+            "google_refresh_token" => {
+                self.google_refresh_token = value.to_string();
+            }
             "training_telemetry_url" => {
                 self.training_telemetry_url = value.to_string();
             }
@@ -343,6 +387,8 @@ impl Settings {
             "has_whatsapp": !self.whatsapp_phone_number_id.is_empty() && !self.whatsapp_access_token.is_empty(),
             "whatsapp_webhook_port": self.whatsapp_webhook_port,
             "plan_type": self.plan_type,
+            "has_stripe": !self.stripe_secret_key.is_empty(),
+            "has_stripe_customer": !self.stripe_customer_id.is_empty(),
             "language": self.language,
             "use_local_llm": self.use_local_llm,
             "local_llm_url": self.local_llm_url,
@@ -364,6 +410,8 @@ impl Settings {
             "has_relay_token": !self.relay_auth_token.is_empty(),
             "training_opt_in": self.training_opt_in,
             "training_telemetry_url": self.training_telemetry_url,
+            "has_google_calendar": !self.google_client_id.is_empty() && !self.google_client_secret.is_empty(),
+            "has_google_refresh_token": !self.google_refresh_token.is_empty(),
         })
     }
 }
@@ -513,6 +561,14 @@ impl Default for Settings {
             relay_auth_token: String::new(),
             training_opt_in: false,
             training_telemetry_url: String::new(),
+            stripe_secret_key: String::new(),
+            stripe_webhook_secret: String::new(),
+            stripe_customer_id: String::new(),
+            stripe_price_id_pro: String::new(),
+            stripe_price_id_team: String::new(),
+            google_client_id: String::new(),
+            google_client_secret: String::new(),
+            google_refresh_token: String::new(),
             use_local_llm: false,
             local_llm_url: default_local_llm_url(),
             local_model: default_local_model(),
