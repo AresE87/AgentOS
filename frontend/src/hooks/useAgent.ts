@@ -288,6 +288,20 @@ export function useAgent() {
     const processFile = (path: string, task: string) =>
         callInvoke<any>('process_file', { path, task });
 
+    // R58: Template Engine
+    const getTemplates = () => callInvoke<any>('get_templates');
+    const getTemplate = (name: string) => callInvoke<any>('get_template', { name });
+    const saveTemplate = (name: string, content: string) => callInvoke<any>('save_template', { name, content });
+    const renderTemplate = (name: string, data: Record<string, string>) => callInvoke<any>('render_template', { name, data });
+    const deleteTemplate = (name: string) => callInvoke<any>('delete_template', { name });
+
+    // R59: Agent Personas
+    const listPersonas = () => callInvoke<any>('list_personas');
+    const getPersona = (id: string) => callInvoke<any>('get_persona', { id });
+    const createPersona = (persona: any) => callInvoke<any>('create_persona', { persona });
+    const updatePersona = (persona: any) => callInvoke<any>('update_persona', { persona });
+    const deletePersona = (id: string) => callInvoke<any>('delete_persona', { id });
+
     return {
         getStatus, processMessage, getTasks, getPlaybooks, setActivePlaybook,
         getSettings, updateSettings, healthCheck, getActiveChain, getChainHistory,
@@ -352,6 +366,10 @@ export function useAgent() {
         readFileContent, saveTempFile, processFile,
         // R57: Collaborative Chains — intervention
         injectChainContext, chainSubtaskAction, getChainInterventions,
+        // R58: Template Engine
+        getTemplates, getTemplate, saveTemplate, renderTemplate, deleteTemplate,
+        // R59: Agent Personas
+        listPersonas, getPersona, createPersona, updatePersona, deletePersona,
     };
 }
 

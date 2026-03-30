@@ -35,6 +35,8 @@ pub mod chains;
 pub mod conversations;
 pub mod monitors;
 pub mod files;
+pub mod personas;
+pub mod templates;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -91,6 +93,8 @@ pub struct AppState {
     pub monitor_manager: Arc<tokio::sync::Mutex<monitors::MonitorManager>>,
     /// R57: Collaborative Chains — intervention manager
     pub intervention_manager: Arc<tokio::sync::Mutex<chains::intervention::InterventionManager>>,
+    /// R58: Template Engine
+    pub template_engine: Arc<templates::TemplateEngine>,
 }
 
 // ── R44: Cloud Mesh Relay commands ──────────────────────────────────
@@ -3561,6 +3565,145 @@ Please complete the task based on the file content above.",
     }))
 }
 
+// ── R58: Template Engine commands ──────────────────────────────────
+
+#[tauri::command]
+async fn cmd_get_templates(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let templates = state.template_engine.list()?;
+    serde_json::to_value(&templates).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_get_template(
+    name: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let content = state.template_engine.get(&name)?;
+    Ok(serde_json::json!({
+        "name": name,
+        "content": content,
+    }))
+}
+
+#[tauri::command]
+async fn cmd_save_template(
+    name: String,
+    content: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    state.template_engine.save(&name, &content)?;
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+#[tauri::command]
+async fn cmd_render_template(
+    name: String,
+    data: serde_json::Value,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let content = state.template_engine.get(&name)?;
+    let map: std::collections::HashMap<String, String> = data
+        .as_object()
+        .map(|obj| {
+            obj.iter()
+                .map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    let rendered = state.template_engine.render(&content, &map);
+    Ok(serde_json::json!({
+        "name": name,
+        "rendered": rendered,
+    }))
+}
+
+#[tauri::command]
+async fn cmd_delete_template(
+    name: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    state.template_engine.delete(&name)?;
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+// ── R59: Agent Personas commands ──────────────────────────────────
+
+#[tauri::command]
+async fn cmd_list_personas(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let mut custom = personas::PersonaManager::list(db.conn())?;
+    let defaults = personas::PersonaManager::get_defaults();
+    // Merge defaults (only add defaults whose id is not already in custom)
+    let custom_ids: Vec<String> = custom.iter().map(|p| p.id.clone()).collect();
+    for d in defaults {
+        if !custom_ids.contains(&d.id) {
+            custom.push(d);
+        }
+    }
+    Ok(serde_json::json!({ "personas": custom }))
+}
+
+#[tauri::command]
+async fn cmd_get_persona(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    match personas::PersonaManager::get(db.conn(), &id) {
+        Ok(p) => serde_json::to_value(&p).map_err(|e| e.to_string()),
+        Err(_) => {
+            // Fall back to defaults
+            let defaults = personas::PersonaManager::get_defaults();
+            match defaults.into_iter().find(|d| d.id == id) {
+                Some(p) => serde_json::to_value(&p).map_err(|e| e.to_string()),
+                None => Err(format!("Persona '{}' not found", id)),
+            }
+        }
+    }
+}
+
+#[tauri::command]
+async fn cmd_create_persona(
+    persona: serde_json::Value,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut p: personas::AgentPersona = serde_json::from_value(persona).map_err(|e| e.to_string())?;
+    if p.id.is_empty() {
+        p.id = uuid::Uuid::new_v4().to_string();
+    }
+    if p.created_at.is_empty() {
+        p.created_at = chrono::Utc::now().to_rfc3339();
+    }
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    personas::PersonaManager::create(db.conn(), &p)?;
+    serde_json::to_value(&p).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_update_persona(
+    persona: serde_json::Value,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let p: personas::AgentPersona = serde_json::from_value(persona).map_err(|e| e.to_string())?;
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    personas::PersonaManager::update(db.conn(), &p)?;
+    serde_json::to_value(&p).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_delete_persona(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    personas::PersonaManager::delete(db.conn(), &id)?;
+    Ok(serde_json::json!({ "ok": true }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -3689,6 +3832,13 @@ pub fn run() {
                 intervention_manager: Arc::new(tokio::sync::Mutex::new(
                     chains::intervention::InterventionManager::new(),
                 )),
+                template_engine: {
+                    let engine = Arc::new(templates::TemplateEngine::new(
+                        app_dir.join("templates"),
+                    ));
+                    engine.seed_defaults();
+                    engine
+                },
             });
 
             // ── R35: Deferred startup — plugin discovery in background ────
@@ -4218,6 +4368,18 @@ pub fn run() {
             cmd_read_file_content,
             cmd_save_temp_file,
             cmd_process_file,
+            // R58: Template Engine commands
+            cmd_get_templates,
+            cmd_get_template,
+            cmd_save_template,
+            cmd_render_template,
+            cmd_delete_template,
+            // R59: Agent Personas commands
+            cmd_list_personas,
+            cmd_get_persona,
+            cmd_create_persona,
+            cmd_update_persona,
+            cmd_delete_persona,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");
