@@ -28,6 +28,7 @@ pub mod protocol;
 pub mod web;
 pub mod branding;
 pub mod observability;
+pub mod training;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -2957,6 +2958,61 @@ async fn cmd_get_health() -> Result<serde_json::Value, String> {
     Ok(serde_json::json!(status))
 }
 
+// ── R48: AI Training Pipeline commands ─────────────────────────────
+
+fn open_training_conn(db_path: &std::path::Path) -> Result<rusqlite::Connection, String> {
+    rusqlite::Connection::open(db_path).map_err(|e| format!("DB open error: {}", e))
+}
+
+#[tauri::command]
+async fn cmd_get_training_summary(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_training_conn(&state.db_path)?;
+    training::collector::TrainingCollector::ensure_table(&conn)?;
+    let summary = training::collector::TrainingCollector::get_summary(&conn)?;
+    Ok(serde_json::to_value(&summary).map_err(|e| e.to_string())?)
+}
+
+#[tauri::command]
+async fn cmd_get_training_records(
+    limit: Option<usize>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_training_conn(&state.db_path)?;
+    training::collector::TrainingCollector::ensure_table(&conn)?;
+    let records = training::collector::TrainingCollector::get_records(&conn, limit.unwrap_or(50))?;
+    Ok(serde_json::json!({ "records": records, "count": records.len() }))
+}
+
+#[tauri::command]
+async fn cmd_preview_anonymized(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_training_conn(&state.db_path)?;
+    training::collector::TrainingCollector::ensure_table(&conn)?;
+    let records = training::collector::TrainingCollector::get_records(&conn, 20)?;
+    let anonymized = training::anonymizer::Anonymizer::anonymize_batch(&records);
+    let opt_in = state.settings.lock().map_err(|e| e.to_string())?.training_opt_in;
+    Ok(serde_json::json!({
+        "preview": anonymized,
+        "count": anonymized.len(),
+        "opt_in": opt_in,
+        "note": "This is what would be sent if telemetry is enabled. No prompts or responses are ever included."
+    }))
+}
+
+#[tauri::command]
+async fn cmd_set_training_opt_in(
+    opt_in: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut settings = state.settings.lock().map_err(|e| e.to_string())?;
+    settings.set("training_opt_in", if opt_in { "true" } else { "false" });
+    let _ = settings.save();
+    Ok(serde_json::json!({ "ok": true, "training_opt_in": opt_in }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -3499,6 +3555,11 @@ pub fn run() {
             cmd_get_alerts,
             cmd_acknowledge_alert,
             cmd_get_health,
+            // R48: AI Training Pipeline commands
+            cmd_get_training_summary,
+            cmd_get_training_records,
+            cmd_preview_anonymized,
+            cmd_set_training_opt_in,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");

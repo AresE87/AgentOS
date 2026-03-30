@@ -1,0 +1,119 @@
+{
+  "name": "AgentOS Integration",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.AGENTOS_HOST }}/v1/message",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "text",
+              "value": "run scheduled system health check and report any issues"
+            }
+          ]
+        }
+      },
+      "name": "Send Task to AgentOS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [500, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "AgentOS API Key",
+          "id": "1"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.status }}",
+              "operation": "equals",
+              "value2": "completed"
+            }
+          ]
+        }
+      },
+      "name": "Check Status",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "agentos@example.com",
+        "toEmail": "ops@example.com",
+        "subject": "AgentOS Health Check Report",
+        "text": "={{ $json.result }}"
+      },
+      "name": "Send Email Report",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 1,
+      "position": [1000, 200]
+    },
+    {
+      "parameters": {
+        "channel": "#ops-alerts",
+        "text": "AgentOS health check failed. Task ID: {{ $json.task_id }}",
+        "otherOptions": {}
+      },
+      "name": "Slack Alert on Failure",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 1,
+      "position": [1000, 400]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [{ "node": "Send Task to AgentOS", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send Task to AgentOS": {
+      "main": [
+        [{ "node": "Check Status", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check Status": {
+      "main": [
+        [{ "node": "Send Email Report", "type": "main", "index": 0 }],
+        [{ "node": "Slack Alert on Failure", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all"
+  }
+}

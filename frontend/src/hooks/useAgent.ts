@@ -211,6 +211,12 @@ export function useAgent() {
         callInvoke<any>('acknowledge_alert', { alert_id: alertId });
     const getHealth = () => callInvoke<any>('get_health');
 
+    // R48: AI Training Pipeline
+    const getTrainingSummary = () => callInvoke<any>('get_training_summary');
+    const getTrainingRecords = (limit?: number) => callInvoke<any>('get_training_records', { limit });
+    const previewAnonymized = () => callInvoke<any>('preview_anonymized');
+    const setTrainingOptIn = (optIn: boolean) => callInvoke<any>('set_training_opt_in', { opt_in: optIn });
+
     return {
         getStatus, processMessage, getTasks, getPlaybooks, setActivePlaybook,
         getSettings, updateSettings, healthCheck, getActiveChain, getChainHistory,
@@ -257,6 +263,8 @@ export function useAgent() {
         getBranding, updateBranding, getCssVariables, resetBranding,
         // R46: Observability
         getLogs, exportLogs, getAlerts, acknowledgeAlert, getHealth,
+        // R48: AI Training Pipeline
+        getTrainingSummary, getTrainingRecords, previewAnonymized, setTrainingOptIn,
     };
 }
 

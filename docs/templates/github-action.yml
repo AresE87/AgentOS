@@ -1,0 +1,50 @@
+# AgentOS GitHub Action Integration
+# Triggers an AgentOS task when code is pushed or a PR is opened.
+#
+# Setup:
+# 1. Add AGENTOS_HOST and AGENTOS_API_KEY to your repo's GitHub Secrets.
+# 2. Copy this file to .github/workflows/agentos.yml in your repo.
+
+name: AgentOS Task
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  agentos-task:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Send task to AgentOS
+        env:
+          AGENTOS_HOST: ${{ secrets.AGENTOS_HOST }}
+          AGENTOS_API_KEY: ${{ secrets.AGENTOS_API_KEY }}
+        run: |
+          RESPONSE=$(curl -s -X POST "${AGENTOS_HOST}/v1/message" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${AGENTOS_API_KEY}" \
+            -d "{\"text\": \"New push to ${{ github.repository }} on branch ${{ github.ref_name }} by ${{ github.actor }}. Review the changes and run health checks.\"}")
+          echo "AgentOS Response: $RESPONSE"
+          TASK_ID=$(echo "$RESPONSE" | jq -r '.task_id')
+          echo "task_id=$TASK_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for task completion
+        env:
+          AGENTOS_HOST: ${{ secrets.AGENTOS_HOST }}
+          AGENTOS_API_KEY: ${{ secrets.AGENTOS_API_KEY }}
+        run: |
+          TASK_ID="${{ steps.send-task.outputs.task_id }}"
+          for i in $(seq 1 30); do
+            STATUS=$(curl -s "${AGENTOS_HOST}/v1/task/${TASK_ID}" \
+              -H "Authorization: Bearer ${AGENTOS_API_KEY}" | jq -r '.status')
+            echo "Attempt $i: status=$STATUS"
+            if [ "$STATUS" = "completed" ] || [ "$STATUS" = "failed" ]; then
+              break
+            fi
+            sleep 10
+          done

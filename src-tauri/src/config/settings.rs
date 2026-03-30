@@ -82,6 +82,12 @@ pub struct Settings {
     #[serde(default)]
     pub relay_auth_token: String,
 
+    // R48: AI Training Pipeline
+    #[serde(default)]
+    pub training_opt_in: bool,
+    #[serde(default)]
+    pub training_telemetry_url: String,
+
     // R25: Local LLMs (Ollama)
     #[serde(default)]
     pub use_local_llm: bool,
@@ -297,6 +303,12 @@ impl Settings {
             "relay_auth_token" => {
                 self.relay_auth_token = value.to_string();
             }
+            "training_opt_in" => {
+                self.training_opt_in = value == "true" || value == "1";
+            }
+            "training_telemetry_url" => {
+                self.training_telemetry_url = value.to_string();
+            }
             _ => {}
         }
     }
@@ -350,6 +362,8 @@ impl Settings {
             "relay_enabled": self.relay_enabled,
             "relay_server_url": self.relay_server_url,
             "has_relay_token": !self.relay_auth_token.is_empty(),
+            "training_opt_in": self.training_opt_in,
+            "training_telemetry_url": self.training_telemetry_url,
         })
     }
 }
@@ -497,6 +511,8 @@ impl Default for Settings {
             relay_enabled: false,
             relay_server_url: default_relay_server_url(),
             relay_auth_token: String::new(),
+            training_opt_in: false,
+            training_telemetry_url: String::new(),
             use_local_llm: false,
             local_llm_url: default_local_llm_url(),
             local_model: default_local_model(),

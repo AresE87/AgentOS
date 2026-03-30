@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>AgentOS API Playground</title>
+  <style>
+    body { font-family: Inter, sans-serif; background: #0a0a0f; color: #e0e0e0; margin: 0; padding: 40px; }
+    h1 { color: #00ffff; }
+    .form-group { margin: 16px 0; }
+    label { display: block; color: #888; margin-bottom: 4px; font-size: 12px; }
+    input, select, textarea { background: #1a1a2e; color: #fff; border: 1px solid #333; border-radius: 8px; padding: 10px; width: 100%; max-width: 500px; font-family: monospace; }
+    button { background: #00ffff; color: #0a0a0f; border: none; border-radius: 8px; padding: 12px 24px; font-weight: bold; cursor: pointer; margin-top: 8px; }
+    button:hover { opacity: 0.9; }
+    pre { background: #1a1a2e; padding: 16px; border-radius: 8px; overflow-x: auto; max-width: 600px; }
+    .endpoint-card { background: #0d0d1a; border: 1px solid #1a1a2e; border-radius: 12px; padding: 24px; margin: 16px 0; max-width: 600px; }
+    .method { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; margin-right: 8px; }
+    .method.get { background: #1a4a1a; color: #4ade80; }
+    .method.post { background: #1a1a4a; color: #60a5fa; }
+  </style>
+</head>
+<body>
+  <h1>API Playground</h1>
+  <p>Test AgentOS API endpoints directly from your browser.</p>
+
+  <div class="form-group">
+    <label>Host</label>
+    <input id="host" value="http://localhost:8080" />
+  </div>
+  <div class="form-group">
+    <label>API Key</label>
+    <input id="apikey" placeholder="aos_..." type="password" />
+  </div>
+
+  <div class="endpoint-card">
+    <h3><span class="method get">GET</span> /health</h3>
+    <p>Check if AgentOS is running</p>
+    <button onclick="callApi('GET', '/health', false)">Try it</button>
+  </div>
+
+  <div class="endpoint-card">
+    <h3><span class="method get">GET</span> /v1/status</h3>
+    <p>Get agent status</p>
+    <button onclick="callApi('GET', '/v1/status')">Try it</button>
+  </div>
+
+  <div class="endpoint-card">
+    <h3><span class="method post">POST</span> /v1/message</h3>
+    <p>Send a task to the agent</p>
+    <div class="form-group">
+      <label>Task</label>
+      <input id="task-input" placeholder="check disk space" />
+    </div>
+    <button onclick="sendTask()">Send Task</button>
+  </div>
+
+  <h3>Response</h3>
+  <pre id="response">// Response will appear here</pre>
+
+  <script>
+  async function callApi(method, path, auth = true) {
+    const host = document.getElementById('host').value;
+    const key = document.getElementById('apikey').value;
+    const headers = { 'Content-Type': 'application/json' };
+    if (auth) headers['Authorization'] = 'Bearer ' + key;
+    try {
+      const res = await fetch(host + path, { method, headers });
+      const data = await res.json();
+      document.getElementById('response').textContent = JSON.stringify(data, null, 2);
+    } catch (e) {
+      document.getElementById('response').textContent = 'Error: ' + e.message;
+    }
+  }
+  async function sendTask() {
+    const host = document.getElementById('host').value;
+    const key = document.getElementById('apikey').value;
+    const task = document.getElementById('task-input').value;
+    try {
+      const res = await fetch(host + '/v1/message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
+        body: JSON.stringify({ text: task })
+      });
+      const data = await res.json();
+      document.getElementById('response').textContent = JSON.stringify(data, null, 2);
+    } catch (e) {
+      document.getElementById('response').textContent = 'Error: ' + e.message;
+    }
+  }
+  </script>
+</body>
+</html>
