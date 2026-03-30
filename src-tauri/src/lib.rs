@@ -103,6 +103,12 @@ pub struct AppState {
     pub approval_manager: Arc<approvals::ApprovalManager>,
     /// R63: Calendar Integration
     pub calendar_manager: Arc<tokio::sync::Mutex<integrations::CalendarManager>>,
+    /// R64: Email Integration
+    pub email_manager: Arc<tokio::sync::Mutex<integrations::EmailManager>>,
+    /// R65: Database Connector
+    pub database_manager: Arc<tokio::sync::Mutex<integrations::DatabaseManager>>,
+    /// R66: API Orchestrator — registry for external API connections
+    pub api_registry: Arc<tokio::sync::Mutex<integrations::APIRegistry>>,
 }
 
 // ── R44: Cloud Mesh Relay commands ──────────────────────────────────
@@ -3939,6 +3945,218 @@ async fn cmd_calendar_get_event(
     serde_json::to_value(&event).map_err(|e| e.to_string())
 }
 
+// ── R64: Email Integration commands ─────────────────────────────────
+
+#[tauri::command]
+async fn cmd_email_list(
+    folder: String,
+    limit: Option<usize>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.email_manager.lock().await;
+    let messages = mgr.list_messages(&folder, limit.unwrap_or(50));
+    Ok(serde_json::json!({ "messages": messages }))
+}
+
+#[tauri::command]
+async fn cmd_email_get(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.email_manager.lock().await;
+    let msg = mgr.get_message(&id)?;
+    serde_json::to_value(&msg).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_email_send(
+    to: Vec<String>,
+    subject: String,
+    body: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.email_manager.lock().await;
+    let sent = mgr.send_message(to, subject, body)?;
+    serde_json::to_value(&sent).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_email_draft(
+    to: Vec<String>,
+    subject: String,
+    body: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.email_manager.lock().await;
+    let draft = mgr.create_draft(to, subject, body)?;
+    serde_json::to_value(&draft).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_email_search(
+    query: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.email_manager.lock().await;
+    let results = mgr.search(&query);
+    Ok(serde_json::json!({ "results": results }))
+}
+
+#[tauri::command]
+async fn cmd_email_move(
+    id: String,
+    folder: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.email_manager.lock().await;
+    let moved = mgr.move_to(&id, &folder)?;
+    Ok(serde_json::json!({ "ok": true, "moved": moved }))
+}
+
+#[tauri::command]
+async fn cmd_email_mark_read(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.email_manager.lock().await;
+    let done = mgr.mark_read(&id)?;
+    Ok(serde_json::json!({ "ok": true, "marked_read": done }))
+}
+
+// ── R65: Database Connector commands ─────────────────────────────────
+
+#[tauri::command]
+async fn cmd_db_add(
+    config: serde_json::Value,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db_config: integrations::DatabaseConfig =
+        serde_json::from_value(config).map_err(|e| e.to_string())?;
+    let mut mgr = state.database_manager.lock().await;
+    let added = mgr.add_connection(db_config);
+    serde_json::to_value(&added).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_db_remove(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.database_manager.lock().await;
+    let removed = mgr.remove_connection(&id)?;
+    Ok(serde_json::json!({ "ok": true, "removed": removed }))
+}
+
+#[tauri::command]
+async fn cmd_db_list(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.database_manager.lock().await;
+    let connections = mgr.list_connections();
+    Ok(serde_json::json!({ "connections": connections }))
+}
+
+#[tauri::command]
+async fn cmd_db_test(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.database_manager.lock().await;
+    let ok = mgr.test_connection(&id)?;
+    Ok(serde_json::json!({ "ok": ok }))
+}
+
+#[tauri::command]
+async fn cmd_db_tables(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.database_manager.lock().await;
+    let tables = mgr.list_tables(&id)?;
+    serde_json::to_value(&tables).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_db_query(
+    id: String,
+    sql: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.database_manager.lock().await;
+    let result = mgr.execute_query(&id, &sql)?;
+    serde_json::to_value(&result).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_db_raw_query(
+    connection_string: String,
+    sql: String,
+    read_only: Option<bool>,
+) -> Result<serde_json::Value, String> {
+    let read_only = read_only.unwrap_or(true);
+    let mut mgr = integrations::DatabaseManager::new();
+    let config = integrations::DatabaseConfig {
+        id: "temp".to_string(),
+        name: "Temporary".to_string(),
+        db_type: "sqlite".to_string(),
+        connection_string,
+        read_only,
+    };
+    let added = mgr.add_connection(config);
+    let result = mgr.execute_query(&added.id, &sql)?;
+    serde_json::to_value(&result).map_err(|e| e.to_string())
+}
+
+// ── R66: API Orchestrator commands ─────────────────────────────────
+
+#[tauri::command]
+async fn cmd_api_registry_add(
+    api: serde_json::Value,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn: integrations::APIConnection =
+        serde_json::from_value(api).map_err(|e| e.to_string())?;
+    let mut reg = state.api_registry.lock().await;
+    let id = reg.add_api(conn);
+    Ok(serde_json::json!({ "ok": true, "id": id }))
+}
+
+#[tauri::command]
+async fn cmd_api_registry_remove(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut reg = state.api_registry.lock().await;
+    let removed = reg.remove_api(&id);
+    Ok(serde_json::json!({ "ok": true, "removed": removed }))
+}
+
+#[tauri::command]
+async fn cmd_api_registry_list(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let reg = state.api_registry.lock().await;
+    let apis = reg.list_apis();
+    serde_json::to_value(&apis).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_api_registry_call(
+    api_id: String,
+    endpoint_name: String,
+    params: std::collections::HashMap<String, String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let reg = state.api_registry.lock().await;
+    reg.call_endpoint(&api_id, &endpoint_name, params).await
+}
+
+#[tauri::command]
+async fn cmd_api_registry_templates() -> Result<serde_json::Value, String> {
+    let templates = integrations::api_registry::get_templates();
+    serde_json::to_value(&templates).map_err(|e| e.to_string())
+}
+
 /// Simple non-cryptographic hash for referral IDs (not security-sensitive).
 fn md5_simple(data: &[u8]) -> u64 {
     let mut hash: u64 = 0xcbf29ce484222325;
@@ -4087,6 +4305,17 @@ pub fn run() {
                 approval_manager: Arc::new(approvals::ApprovalManager::new()),
                 calendar_manager: Arc::new(tokio::sync::Mutex::new(
                     integrations::CalendarManager::new(),
+                )),
+                email_manager: {
+                    let mut em = integrations::EmailManager::new();
+                    em.seed_samples();
+                    Arc::new(tokio::sync::Mutex::new(em))
+                },
+                database_manager: Arc::new(tokio::sync::Mutex::new(
+                    integrations::DatabaseManager::new(),
+                )),
+                api_registry: Arc::new(tokio::sync::Mutex::new(
+                    integrations::APIRegistry::new(),
                 )),
             });
 
@@ -4652,6 +4881,28 @@ pub fn run() {
             cmd_calendar_delete_event,
             cmd_calendar_free_slots,
             cmd_calendar_get_event,
+            // R64: Email Integration commands
+            cmd_email_list,
+            cmd_email_get,
+            cmd_email_send,
+            cmd_email_draft,
+            cmd_email_search,
+            cmd_email_move,
+            cmd_email_mark_read,
+            // R65: Database Connector commands
+            cmd_db_add,
+            cmd_db_remove,
+            cmd_db_list,
+            cmd_db_test,
+            cmd_db_tables,
+            cmd_db_query,
+            cmd_db_raw_query,
+            // R66: API Orchestrator commands
+            cmd_api_registry_add,
+            cmd_api_registry_remove,
+            cmd_api_registry_list,
+            cmd_api_registry_call,
+            cmd_api_registry_templates,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");

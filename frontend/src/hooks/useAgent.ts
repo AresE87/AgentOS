@@ -341,6 +341,50 @@ export function useAgent() {
     const calendarGetEvent = (id: string) =>
         callInvoke<any>('calendar_get_event', { id });
 
+    // R64: Email Integration
+    const emailList = (folder: string, limit?: number) =>
+        callInvoke<{ messages: any[] }>('email_list', { folder, limit });
+    const emailGet = (id: string) =>
+        callInvoke<any>('email_get', { id });
+    const emailSend = (to: string[], subject: string, body: string) =>
+        callInvoke<any>('email_send', { to, subject, body });
+    const emailDraft = (to: string[], subject: string, body: string) =>
+        callInvoke<any>('email_draft', { to, subject, body });
+    const emailSearch = (query: string) =>
+        callInvoke<{ results: any[] }>('email_search', { query });
+    const emailMove = (id: string, folder: string) =>
+        callInvoke<{ ok: boolean; moved: boolean }>('email_move', { id, folder });
+    const emailMarkRead = (id: string) =>
+        callInvoke<{ ok: boolean; marked_read: boolean }>('email_mark_read', { id });
+
+    // R65: Database Connector
+    const dbAdd = (config: { name: string; db_type: string; connection_string: string; read_only?: boolean }) =>
+        callInvoke<any>('db_add', { config: { ...config, id: '', read_only: config.read_only ?? false } });
+    const dbRemove = (id: string) =>
+        callInvoke<{ ok: boolean; removed: boolean }>('db_remove', { id });
+    const dbList = () =>
+        callInvoke<{ connections: any[] }>('db_list');
+    const dbTest = (id: string) =>
+        callInvoke<{ ok: boolean }>('db_test', { id });
+    const dbTables = (id: string) =>
+        callInvoke<any[]>('db_tables', { id });
+    const dbQuery = (id: string, sql: string) =>
+        callInvoke<{ columns: string[]; rows: string[][]; row_count: number; duration_ms: number }>('db_query', { id, sql });
+    const dbRawQuery = (connectionString: string, sql: string, readOnly?: boolean) =>
+        callInvoke<{ columns: string[]; rows: string[][]; row_count: number; duration_ms: number }>('db_raw_query', { connection_string: connectionString, sql, read_only: readOnly });
+
+    // R66: API Orchestrator
+    const apiRegistryAdd = (api: { name: string; base_url: string; auth_type: string; auth_token: string; headers?: Record<string, string>; endpoints?: { name: string; method: string; path: string; description: string; body_template?: string }[] }) =>
+        callInvoke<{ ok: boolean; id: string }>('api_registry_add', { api: { id: '', ...api, headers: api.headers || {}, endpoints: api.endpoints || [] } });
+    const apiRegistryRemove = (id: string) =>
+        callInvoke<{ ok: boolean; removed: boolean }>('api_registry_remove', { id });
+    const apiRegistryList = () =>
+        callInvoke<any[]>('api_registry_list');
+    const apiRegistryCall = (apiId: string, endpointName: string, params?: Record<string, string>) =>
+        callInvoke<{ status: number; body: any }>('api_registry_call', { api_id: apiId, endpoint_name: endpointName, params: params || {} });
+    const apiRegistryTemplates = () =>
+        callInvoke<any[]>('api_registry_templates');
+
     return {
         getStatus, processMessage, getTasks, getPlaybooks, setActivePlaybook,
         getSettings, updateSettings, healthCheck, getActiveChain, getChainHistory,
@@ -417,6 +461,12 @@ export function useAgent() {
         getPendingApprovals, respondApproval, classifyRisk, listApprovalHistory,
         // R63: Calendar Integration
         calendarListEvents, calendarCreateEvent, calendarUpdateEvent, calendarDeleteEvent, calendarFreeSlots, calendarGetEvent,
+        // R64: Email Integration
+        emailList, emailGet, emailSend, emailDraft, emailSearch, emailMove, emailMarkRead,
+        // R65: Database Connector
+        dbAdd, dbRemove, dbList, dbTest, dbTables, dbQuery, dbRawQuery,
+        // R66: API Orchestrator
+        apiRegistryAdd, apiRegistryRemove, apiRegistryList, apiRegistryCall, apiRegistryTemplates,
     };
 }
 
