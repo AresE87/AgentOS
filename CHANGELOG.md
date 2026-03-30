@@ -1,5 +1,24 @@
 # Changelog
 
+## [3.0.0] - 2026-03-29
+
+### Added
+- R91: OS Integration — shell context-menu file and text actions
+- R92: Federated Learning — privacy-preserving weight delta client
+- R93: Human Handoff — escalation detector and handoff manager
+- R94: Compliance Automation — multi-framework reporter (GDPR, HIPAA, SOC2, PCI-DSS)
+- R95: White-Label Org Marketplace — org-scoped agent publishing, approval, search
+- R96: Agent Debugger — execution traces, step-through timeline, 8-phase tracking
+- R97: Revenue Optimization — MRR/ARR metrics, churn prediction, upsell engine
+- R98: Global Infrastructure — multi-region status (us-east, eu-west, ap-southeast), latency monitoring
+- R99: IPO Readiness — investor dashboard, data room index, financial projections
+- R100: v3.0 The Standard — AAP Protocol v2.0 specification, Open Agent Foundation charter
+
+### Changed
+- Version bump to 3.0.0 across Cargo.toml, frontend, and mobile packages
+- AAP Protocol upgraded to v2.0 with streaming, conversations, swarm coordination
+- Open Agent Foundation charter established for open agent standards governance
+
 ## [2.0.0] - 2026-03-29
 
 ### Added
