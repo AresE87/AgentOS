@@ -266,6 +266,28 @@ export function useAgent() {
     const memoryStats = () =>
         callInvoke<any>('memory_stats');
 
+    // R56: Smart Notifications
+    const getNotifications = () => callInvoke<any>('get_notifications');
+    const markNotificationRead = (id: string) => callInvoke<any>('mark_notification_read', { id });
+    const markAllNotificationsRead = () => callInvoke<any>('mark_all_notifications_read');
+    const runMonitorCheck = () => callInvoke<any>('run_monitor_check');
+
+    // R57: Collaborative Chains — user intervention
+    const injectChainContext = (chainId: string, message: string) =>
+        callInvoke<any>('inject_chain_context', { chain_id: chainId, message });
+    const chainSubtaskAction = (chainId: string, subtaskId: string, action: string, message?: string) =>
+        callInvoke<any>('chain_subtask_action', { chain_id: chainId, subtask_id: subtaskId, action, message });
+    const getChainInterventions = (chainId: string) =>
+        callInvoke<any>('get_chain_interventions', { chain_id: chainId });
+
+    // R55: File Understanding
+    const readFileContent = (path: string) =>
+        callInvoke<any>('read_file_content', { path });
+    const saveTempFile = (name: string, dataBase64: string) =>
+        callInvoke<{ path: string; size_bytes: number }>('save_temp_file', { name, data_base64: dataBase64 });
+    const processFile = (path: string, task: string) =>
+        callInvoke<any>('process_file', { path, task });
+
     return {
         getStatus, processMessage, getTasks, getPlaybooks, setActivePlaybook,
         getSettings, updateSettings, healthCheck, getActiveChain, getChainHistory,
@@ -324,6 +346,12 @@ export function useAgent() {
         parseNLTrigger, createTriggerFromNL, listAllTriggers,
         // R54: Agent Memory (RAG Local)
         memoryStore, memorySearch, memoryList, memoryDelete, memoryForgetAll, memoryStats,
+        // R56: Smart Notifications
+        getNotifications, markNotificationRead, markAllNotificationsRead, runMonitorCheck,
+        // R55: File Understanding
+        readFileContent, saveTempFile, processFile,
+        // R57: Collaborative Chains — intervention
+        injectChainContext, chainSubtaskAction, getChainInterventions,
     };
 }
 

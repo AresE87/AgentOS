@@ -31,7 +31,10 @@ pub mod observability;
 pub mod training;
 pub mod widgets;
 pub mod recording;
+pub mod chains;
 pub mod conversations;
+pub mod monitors;
+pub mod files;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -84,6 +87,10 @@ pub struct AppState {
     pub conversations: Arc<tokio::sync::Mutex<Vec<conversations::ConversationChain>>>,
     /// R52: Screen Recording & Replay
     pub screen_recorder: Arc<tokio::sync::Mutex<recording::ScreenRecorder>>,
+    /// R56: Smart Notifications — monitor manager
+    pub monitor_manager: Arc<tokio::sync::Mutex<monitors::MonitorManager>>,
+    /// R57: Collaborative Chains — intervention manager
+    pub intervention_manager: Arc<tokio::sync::Mutex<chains::intervention::InterventionManager>>,
 }
 
 // ── R44: Cloud Mesh Relay commands ──────────────────────────────────
@@ -3334,6 +3341,226 @@ async fn cmd_memory_stats(
     memory::MemoryStore::stats(db.conn())
 }
 
+// ── R56: Smart Notifications commands ──────────────────────────────
+
+#[tauri::command]
+async fn cmd_get_notifications(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.monitor_manager.lock().await;
+    let all = mgr.get_all();
+    let unread = mgr.unread_count();
+    Ok(serde_json::json!({
+        "notifications": all,
+        "total": all.len(),
+        "unread": unread,
+    }))
+}
+
+#[tauri::command]
+async fn cmd_mark_notification_read(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.monitor_manager.lock().await;
+    mgr.mark_read(&id);
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+#[tauri::command]
+async fn cmd_mark_all_notifications_read(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.monitor_manager.lock().await;
+    mgr.mark_all_read();
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+#[tauri::command]
+async fn cmd_run_monitor_check(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut alerts_added = 0u32;
+
+    // Disk check
+    if let Some((severity, title, message)) = monitors::disk::DiskMonitor::check().await {
+        let mut mgr = state.monitor_manager.lock().await;
+        mgr.add("disk", &severity, &title, &message, None);
+        alerts_added += 1;
+    }
+
+    // Health check
+    if let Some((severity, title, message)) = monitors::health::SystemHealthMonitor::check().await {
+        let mut mgr = state.monitor_manager.lock().await;
+        mgr.add("health", &severity, &title, &message, None);
+        alerts_added += 1;
+    }
+
+    // Prune old notifications (older than 7 days)
+    {
+        let mut mgr = state.monitor_manager.lock().await;
+        mgr.clear_old(7);
+    }
+
+    Ok(serde_json::json!({
+        "ok": true,
+        "alerts_added": alerts_added,
+    }))
+}
+
+// ── R57: Collaborative Chains — user intervention commands ────────
+
+#[tauri::command]
+async fn cmd_inject_chain_context(
+    chain_id: String,
+    message: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.intervention_manager.lock().await;
+    let intervention = mgr.inject_context(&chain_id, &message);
+    serde_json::to_value(&intervention).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_chain_subtask_action(
+    chain_id: String,
+    subtask_id: String,
+    action: String,
+    message: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let intervention_action = match action.as_str() {
+        "skip" => chains::intervention::InterventionAction::Skip,
+        "retry" => chains::intervention::InterventionAction::Retry,
+        "edit" => chains::intervention::InterventionAction::Edit,
+        "reassign" => chains::intervention::InterventionAction::Reassign,
+        "cancel" => chains::intervention::InterventionAction::Cancel,
+        "pause" => chains::intervention::InterventionAction::Pause,
+        "resume" => chains::intervention::InterventionAction::Resume,
+        other => return Err(format!("Unknown intervention action: {}", other)),
+    };
+    let mut mgr = state.intervention_manager.lock().await;
+    let intervention = mgr.subtask_action(
+        &chain_id,
+        &subtask_id,
+        intervention_action,
+        message.as_deref(),
+    );
+    serde_json::to_value(&intervention).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_get_chain_interventions(
+    chain_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.intervention_manager.lock().await;
+    let interventions: Vec<_> = mgr.get_for_chain(&chain_id).into_iter().cloned().collect();
+    Ok(serde_json::json!({ "interventions": interventions }))
+}
+
+
+// ── R55: File Understanding commands ──────────────────────────────────
+
+#[tauri::command]
+async fn cmd_read_file_content(path: String) -> Result<serde_json::Value, String> {
+    let p = std::path::Path::new(&path);
+    let preview = files::FileReader::read(p)?;
+    serde_json::to_value(&preview).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_save_temp_file(
+    name: String,
+    data_base64: String,
+) -> Result<serde_json::Value, String> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&data_base64)
+        .map_err(|e| format!("Base64 decode error: {}", e))?;
+    let temp_dir = std::env::temp_dir().join("agentos_files");
+    std::fs::create_dir_all(&temp_dir).map_err(|e| e.to_string())?;
+    let dest = temp_dir.join(&name);
+    std::fs::write(&dest, &bytes).map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({
+        "path": dest.to_string_lossy(),
+        "size_bytes": bytes.len(),
+    }))
+}
+
+#[tauri::command]
+async fn cmd_process_file(
+    path: String,
+    task: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let p = std::path::Path::new(&path);
+    let preview = files::FileReader::read(p)?;
+
+    let file_summary = match &preview.content {
+        files::reader::FileContent::Text { content, line_count } => {
+            format!(
+                "File: {} ({} lines)
+---
+{}",
+                preview.name, line_count, content
+            )
+        }
+        files::reader::FileContent::Table { headers, rows, row_count } => {
+            let header_line = headers.join(" | ");
+            let sample: Vec<String> = rows.iter().take(20).map(|r| r.join(" | ")).collect();
+            format!(
+                "File: {} (table, {} rows)
+Headers: {}
+---
+{}",
+                preview.name,
+                row_count,
+                header_line,
+                sample.join("\n")
+            )
+        }
+        files::reader::FileContent::Image { width, height, format, .. } => {
+            format!(
+                "File: {} (image, {}x{}, {})",
+                preview.name, width, height, format
+            )
+        }
+        files::reader::FileContent::Binary { description, size_bytes } => {
+            format!(
+                "File: {} ({}, {} bytes)",
+                preview.name, description, size_bytes
+            )
+        }
+    };
+
+    let prompt = format!(
+        "The user uploaded a file and wants you to perform the following task:
+
+Task: {}
+
+{}
+
+Please complete the task based on the file content above.",
+        task, file_summary
+    );
+
+    let settings = state.settings.lock().map_err(|e| e.to_string())?.clone();
+    let gateway = state.gateway.lock().await;
+    let result = gateway
+        .complete_with_system(
+            &prompt,
+            Some("You are a file analysis assistant. Analyze the provided file content and complete the user's requested task accurately and concisely."),
+            &settings,
+        )
+        .await?;
+
+    Ok(serde_json::json!({
+        "file": preview,
+        "analysis": result.content,
+    }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -3456,6 +3683,12 @@ pub fn run() {
                 screen_recorder: Arc::new(tokio::sync::Mutex::new(
                     recording::ScreenRecorder::new(app_dir.join("recordings")),
                 )),
+                monitor_manager: Arc::new(tokio::sync::Mutex::new(
+                    monitors::MonitorManager::new(),
+                )),
+                intervention_manager: Arc::new(tokio::sync::Mutex::new(
+                    chains::intervention::InterventionManager::new(),
+                )),
             });
 
             // ── R35: Deferred startup — plugin discovery in background ────
@@ -3505,6 +3738,63 @@ pub fn run() {
                                 available = was_available,
                                 "Ollama availability changed"
                             );
+                        }
+                    }
+                });
+            }
+
+            // ── R56: Background monitor checks ──────────────────────────
+            {
+                let monitor_mgr = app.state::<AppState>().monitor_manager.clone();
+                let app_handle_monitors = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let mut disk_tick = 0u64;
+                    loop {
+                        tokio::time::sleep(Duration::from_secs(60)).await;
+                        disk_tick += 1;
+
+                        // Health check every 2 minutes
+                        if disk_tick % 2 == 0 {
+                            if let Some((severity, title, message)) =
+                                monitors::health::SystemHealthMonitor::check().await
+                            {
+                                let mut mgr = monitor_mgr.lock().await;
+                                mgr.add("health", &severity, &title, &message, None);
+                                let _ = app_handle_monitors.emit(
+                                    "monitor:notification",
+                                    serde_json::json!({
+                                        "monitor": "health",
+                                        "severity": severity,
+                                        "title": title,
+                                        "message": message,
+                                    }),
+                                );
+                            }
+                        }
+
+                        // Disk check every 5 minutes
+                        if disk_tick % 5 == 0 {
+                            if let Some((severity, title, message)) =
+                                monitors::disk::DiskMonitor::check().await
+                            {
+                                let mut mgr = monitor_mgr.lock().await;
+                                mgr.add("disk", &severity, &title, &message, None);
+                                let _ = app_handle_monitors.emit(
+                                    "monitor:notification",
+                                    serde_json::json!({
+                                        "monitor": "disk",
+                                        "severity": severity,
+                                        "title": title,
+                                        "message": message,
+                                    }),
+                                );
+                            }
+                        }
+
+                        // Prune old notifications every 30 minutes
+                        if disk_tick % 30 == 0 {
+                            let mut mgr = monitor_mgr.lock().await;
+                            mgr.clear_old(7);
                         }
                     }
                 });
@@ -3915,6 +4205,19 @@ pub fn run() {
             cmd_memory_delete,
             cmd_memory_forget_all,
             cmd_memory_stats,
+            // R56: Smart Notifications commands
+            cmd_get_notifications,
+            cmd_mark_notification_read,
+            cmd_mark_all_notifications_read,
+            cmd_run_monitor_check,
+            // R57: Collaborative Chains — intervention commands
+            cmd_inject_chain_context,
+            cmd_chain_subtask_action,
+            cmd_get_chain_interventions,
+            // R55: File Understanding commands
+            cmd_read_file_content,
+            cmd_save_temp_file,
+            cmd_process_file,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");
