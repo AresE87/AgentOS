@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AgentOS Widget Embed Demo</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 40px; background: #f5f5f5; }
+        h1 { color: #1a1a2e; }
+        .section { background: white; border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+        pre { background: #1a1a2e; color: #e0e0e0; padding: 16px; border-radius: 8px; overflow-x: auto; font-size: 13px; }
+        code { font-family: 'Fira Code', 'Consolas', monospace; }
+        .badge { display: inline-block; background: #6366f1; color: white; padding: 4px 12px; border-radius: 20px; font-size: 12px; margin-bottom: 12px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid #eee; }
+        th { background: #f9fafb; font-weight: 600; }
+    </style>
+</head>
+<body>
+    <h1>AgentOS Embeddable Widget</h1>
+    <p>Embed your AgentOS assistant on any website with a single code snippet.</p>
+
+    <div class="section">
+        <span class="badge">Quick Start</span>
+        <h2>1. Generate your embed snippet</h2>
+        <p>Use the AgentOS dashboard or API to generate a snippet. The minimal configuration requires an API key and agent URL.</p>
+        <pre><code>&lt;!-- AgentOS Embeddable Widget --&gt;
+&lt;div id="agentos-widget"
+     data-api-key="YOUR_API_KEY"
+     data-agent-url="https://your-agent.example.com"
+     data-theme="light"
+     data-position="bottom-right"
+     data-welcome="Hello! How can I help you today?"&gt;
+&lt;/div&gt;
+&lt;script&gt;
+(function() {
+  var w = document.getElementById('agentos-widget');
+  var cfg = {
+    apiKey: w.getAttribute('data-api-key'),
+    agentUrl: w.getAttribute('data-agent-url'),
+    theme: w.getAttribute('data-theme') || 'light',
+    position: w.getAttribute('data-position') || 'bottom-right',
+    welcome: w.getAttribute('data-welcome') || 'Hello!'
+  };
+  var iframe = document.createElement('iframe');
+  iframe.src = cfg.agentUrl + '/widget?api_key=' + encodeURIComponent(cfg.apiKey)
+    + '&amp;theme=' + cfg.theme + '&amp;position=' + cfg.position
+    + '&amp;welcome=' + encodeURIComponent(cfg.welcome);
+  iframe.style.cssText = 'border:none;width:380px;height:520px;position:fixed;'
+    + 'bottom:20px;right:20px;z-index:99999;border-radius:12px;'
+    + 'box-shadow:0 4px 24px rgba(0,0,0,0.15);';
+  w.appendChild(iframe);
+})();
+&lt;/script&gt;</code></pre>
+    </div>
+
+    <div class="section">
+        <span class="badge">Configuration</span>
+        <h2>2. Widget Options</h2>
+        <table>
+            <tr><th>Attribute</th><th>Required</th><th>Default</th><th>Description</th></tr>
+            <tr><td><code>data-api-key</code></td><td>Yes</td><td>-</td><td>Your AgentOS API key</td></tr>
+            <tr><td><code>data-agent-url</code></td><td>Yes</td><td>-</td><td>URL of your AgentOS instance</td></tr>
+            <tr><td><code>data-persona</code></td><td>No</td><td>default</td><td>Agent persona to use</td></tr>
+            <tr><td><code>data-theme</code></td><td>No</td><td>light</td><td>"light" or "dark"</td></tr>
+            <tr><td><code>data-position</code></td><td>No</td><td>bottom-right</td><td>"bottom-right", "bottom-left", "top-right", "top-left"</td></tr>
+            <tr><td><code>data-welcome</code></td><td>No</td><td>Hello!</td><td>Welcome message displayed on open</td></tr>
+        </table>
+    </div>
+
+    <div class="section">
+        <span class="badge">Iframe</span>
+        <h2>3. Direct Iframe Embed</h2>
+        <p>You can also embed the widget directly as an iframe:</p>
+        <pre><code>&lt;iframe
+  src="https://your-agent.example.com/widget?api_key=YOUR_KEY&amp;theme=dark"
+  style="border:none;width:380px;height:520px;"
+&gt;&lt;/iframe&gt;</code></pre>
+    </div>
+</body>
+</html>
