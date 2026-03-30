@@ -217,11 +217,32 @@ export function useAgent() {
     const previewAnonymized = () => callInvoke<any>('preview_anonymized');
     const setTrainingOptIn = (optIn: boolean) => callInvoke<any>('set_training_opt_in', { opt_in: optIn });
 
+    // R51: Multi-Agent Conversations
+    const startConversation = (topic: string, participants: string[]) =>
+        callInvoke<any>('start_conversation', { topic, participants });
+    const getConversation = (id: string) =>
+        callInvoke<any>('get_conversation', { id });
+    const listConversations = () => callInvoke<any>('list_conversations');
+    const addConversationMessage = (id: string, fromAgent: string, toAgent: string, content: string) =>
+        callInvoke<any>('add_conversation_message', { id, from_agent: fromAgent, to_agent: toAgent, content });
+
     // R49: Desktop Widgets
     const getWidgets = () => callInvoke<any>('get_widgets');
     const toggleWidget = (id: string, enabled: boolean) => callInvoke<any>('toggle_widget', { id, enabled });
     const updateWidgetPosition = (id: string, x: number, y: number) => callInvoke<any>('update_widget_position', { id, x, y });
     const updateWidgetOpacity = (id: string, opacity: number) => callInvoke<any>('update_widget_opacity', { id, opacity });
+
+    // R52: Screen Recording & Replay
+    const startScreenRecording = (taskId: string, description: string) =>
+        callInvoke<{ id: string }>('start_screen_recording', { task_id: taskId, description });
+    const stopScreenRecording = (recordingId: string) =>
+        callInvoke<any>('stop_screen_recording', { recording_id: recordingId });
+    const getScreenRecording = (id: string) =>
+        callInvoke<any>('get_screen_recording', { id });
+    const listScreenRecordings = () =>
+        callInvoke<any>('list_screen_recordings');
+    const deleteScreenRecording = (id: string) =>
+        callInvoke<any>('delete_screen_recording', { id });
 
     return {
         getStatus, processMessage, getTasks, getPlaybooks, setActivePlaybook,
@@ -273,6 +294,10 @@ export function useAgent() {
         getTrainingSummary, getTrainingRecords, previewAnonymized, setTrainingOptIn,
         // R49: Desktop Widgets
         getWidgets, toggleWidget, updateWidgetPosition, updateWidgetOpacity,
+        // R51: Multi-Agent Conversations
+        startConversation, getConversation, listConversations, addConversationMessage,
+        // R52: Screen Recording & Replay
+        startScreenRecording, stopScreenRecording, getScreenRecording, listScreenRecordings, deleteScreenRecording,
     };
 }
 

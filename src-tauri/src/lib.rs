@@ -30,6 +30,8 @@ pub mod branding;
 pub mod observability;
 pub mod training;
 pub mod widgets;
+pub mod recording;
+pub mod conversations;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -78,6 +80,10 @@ pub struct AppState {
     pub alert_manager: Arc<tokio::sync::Mutex<observability::alerts::AlertManager>>,
     /// R49: Desktop Widgets manager
     pub widget_manager: Arc<tokio::sync::Mutex<widgets::WidgetManager>>,
+    /// R51: Multi-Agent Conversations
+    pub conversations: Arc<tokio::sync::Mutex<Vec<conversations::ConversationChain>>>,
+    /// R52: Screen Recording & Replay
+    pub screen_recorder: Arc<tokio::sync::Mutex<recording::ScreenRecorder>>,
 }
 
 // ── R44: Cloud Mesh Relay commands ──────────────────────────────────
@@ -3064,6 +3070,155 @@ async fn cmd_update_widget_opacity(
     Ok(serde_json::json!({ "ok": true, "widget": widget }))
 }
 
+// ── R51: Multi-Agent Conversations commands ───────────────────────
+
+#[tauri::command]
+async fn cmd_start_conversation(
+    topic: String,
+    participants: Vec<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let chain = conversations::ConversationChain::new(&topic, participants);
+    let id = chain.id.clone();
+    let summary = chain.summary();
+    let mut convos = state.conversations.lock().await;
+    convos.push(chain);
+    Ok(serde_json::json!({ "id": id, "summary": summary }))
+}
+
+#[tauri::command]
+async fn cmd_get_conversation(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let convos = state.conversations.lock().await;
+    let chain = convos.iter().find(|c| c.id == id)
+        .ok_or_else(|| "Conversation not found".to_string())?;
+    serde_json::to_value(chain).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_list_conversations(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let convos = state.conversations.lock().await;
+    let list: Vec<serde_json::Value> = convos.iter().map(|c| {
+        serde_json::json!({
+            "id": c.id,
+            "topic": c.topic,
+            "participants": c.participants,
+            "message_count": c.messages.len(),
+            "round": c.current_round(),
+            "status": c.status,
+            "created_at": c.created_at,
+        })
+    }).collect();
+    Ok(serde_json::json!({ "conversations": list }))
+}
+
+#[tauri::command]
+async fn cmd_add_conversation_message(
+    id: String,
+    from_agent: String,
+    to_agent: String,
+    content: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut convos = state.conversations.lock().await;
+    let chain = convos.iter_mut().find(|c| c.id == id)
+        .ok_or_else(|| "Conversation not found".to_string())?;
+
+    if chain.is_complete() {
+        return Err("Conversation is already complete".to_string());
+    }
+
+    let msg = conversations::AgentMessage {
+        id: uuid::Uuid::new_v4().to_string(),
+        from_agent: from_agent.clone(),
+        to_agent: to_agent.clone(),
+        message_type: "response".to_string(),
+        content: content.clone(),
+        context: None,
+        requires_response: true,
+        timestamp: chrono::Utc::now().to_rfc3339(),
+    };
+
+    chain.add_message(msg)?;
+
+    let summary = chain.summary();
+    let is_complete = chain.is_complete();
+    let round = chain.current_round();
+    let message_count = chain.messages.len();
+
+    Ok(serde_json::json!({
+        "ok": true,
+        "summary": summary,
+        "is_complete": is_complete,
+        "round": round,
+        "message_count": message_count,
+    }))
+}
+
+// ── R52: Screen Recording & Replay commands ───────────────────────
+
+#[tauri::command]
+async fn cmd_start_screen_recording(
+    task_id: String,
+    description: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut rec = state.screen_recorder.lock().await;
+    let id = rec.start_recording(&task_id, &description);
+    Ok(serde_json::json!({ "id": id }))
+}
+
+#[tauri::command]
+async fn cmd_stop_screen_recording(
+    recording_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut rec = state.screen_recorder.lock().await;
+    let recording = rec.stop_recording(&recording_id)?;
+    Ok(serde_json::json!({
+        "id": recording.id,
+        "task_id": recording.task_id,
+        "task_description": recording.task_description,
+        "frame_count": recording.frames.len(),
+        "duration_ms": recording.duration_ms,
+        "total_actions": recording.total_actions,
+        "status": recording.status,
+    }))
+}
+
+#[tauri::command]
+async fn cmd_get_screen_recording(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let rec = state.screen_recorder.lock().await;
+    let recording = rec.get_recording(&id).ok_or("Recording not found")?;
+    Ok(serde_json::to_value(recording).map_err(|e| e.to_string())?)
+}
+
+#[tauri::command]
+async fn cmd_list_screen_recordings(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let rec = state.screen_recorder.lock().await;
+    let list = rec.list_recordings();
+    Ok(serde_json::json!({ "recordings": list }))
+}
+
+#[tauri::command]
+async fn cmd_delete_screen_recording(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut rec = state.screen_recorder.lock().await;
+    rec.delete_recording(&id)?;
+    Ok(serde_json::json!({ "ok": true }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -3181,6 +3336,10 @@ pub fn run() {
                 )),
                 widget_manager: Arc::new(tokio::sync::Mutex::new(
                     widgets::WidgetManager::new(),
+                )),
+                conversations: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+                screen_recorder: Arc::new(tokio::sync::Mutex::new(
+                    recording::ScreenRecorder::new(app_dir.join("recordings")),
                 )),
             });
 
@@ -3619,6 +3778,17 @@ pub fn run() {
             cmd_toggle_widget,
             cmd_update_widget_position,
             cmd_update_widget_opacity,
+            // R51: Multi-Agent Conversations commands
+            cmd_start_conversation,
+            cmd_get_conversation,
+            cmd_list_conversations,
+            cmd_add_conversation_message,
+            // R52: Screen Recording & Replay commands
+            cmd_start_screen_recording,
+            cmd_stop_screen_recording,
+            cmd_get_screen_recording,
+            cmd_list_screen_recordings,
+            cmd_delete_screen_recording,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");
