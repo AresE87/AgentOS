@@ -111,6 +111,8 @@ pub struct AppState {
     pub database_manager: Arc<tokio::sync::Mutex<integrations::DatabaseManager>>,
     /// R66: API Orchestrator — registry for external API connections
     pub api_registry: Arc<tokio::sync::Mutex<integrations::APIRegistry>>,
+    /// R70: Department quota manager
+    pub quota_manager: Arc<enterprise::QuotaManager>,
 }
 
 // ── R44: Cloud Mesh Relay commands ──────────────────────────────────
@@ -4342,6 +4344,64 @@ async fn cmd_team_share_resource(
     serde_json::to_value(&resource).map_err(|e| e.to_string())
 }
 
+// ── R70: v1.2 Enterprise — Department Quotas ──────────────────────────
+
+#[tauri::command]
+async fn cmd_set_department_quota(
+    quota: serde_json::Value,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let dq: enterprise::quotas::DepartmentQuota =
+        serde_json::from_value(quota).map_err(|e| e.to_string())?;
+    state.quota_manager.set_quota(dq)?;
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+#[tauri::command]
+async fn cmd_get_department_quota(
+    department: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let q = state.quota_manager.get_quota(&department)?;
+    match q {
+        Some(quota) => serde_json::to_value(&quota).map_err(|e| e.to_string()),
+        None => Ok(serde_json::Value::Null),
+    }
+}
+
+#[tauri::command]
+async fn cmd_list_department_quotas(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let quotas = state.quota_manager.list_quotas()?;
+    Ok(serde_json::json!({ "quotas": quotas }))
+}
+
+#[tauri::command]
+async fn cmd_check_quota(
+    department: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    match state.quota_manager.check_quota(&department) {
+        Ok(()) => Ok(serde_json::json!({ "allowed": true })),
+        Err(reason) => Ok(serde_json::json!({ "allowed": false, "reason": reason })),
+    }
+}
+
+// ── R70: v1.2 Enterprise — SCIM Provisioning ─────────────────────────
+
+#[tauri::command]
+async fn cmd_scim_list_users() -> Result<serde_json::Value, String> {
+    let users = enterprise::SCIMProvider::list_users();
+    serde_json::to_value(&users).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_scim_sync() -> Result<serde_json::Value, String> {
+    let result = enterprise::SCIMProvider::sync();
+    Ok(result)
+}
+
 /// Simple non-cryptographic hash for referral IDs (not security-sensitive).
 fn md5_simple(data: &[u8]) -> u64 {
     let mut hash: u64 = 0xcbf29ce484222325;
@@ -4502,6 +4562,7 @@ pub fn run() {
                 api_registry: Arc::new(tokio::sync::Mutex::new(
                     integrations::APIRegistry::new(),
                 )),
+                quota_manager: Arc::new(enterprise::QuotaManager::new()),
             });
 
             // ── R35: Deferred startup — plugin discovery in background ────
@@ -5107,6 +5168,13 @@ pub fn run() {
             cmd_team_remove_member,
             cmd_team_update_role,
             cmd_team_share_resource,
+            // R70: v1.2 Enterprise — Department Quotas & SCIM
+            cmd_set_department_quota,
+            cmd_get_department_quota,
+            cmd_list_department_quotas,
+            cmd_check_quota,
+            cmd_scim_list_users,
+            cmd_scim_sync,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");

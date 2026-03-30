@@ -422,6 +422,18 @@ export function useAgent() {
     const teamShareResource = (teamId: string, resourceType: string, resourceId: string) =>
         callInvoke<any>('team_share_resource', { team_id: teamId, resource_type: resourceType, resource_id: resourceId });
 
+    // R70: v1.2 Enterprise — Department Quotas & SCIM
+    const setDepartmentQuota = (quota: { department: string; monthly_budget: number; max_tasks_per_day: number; allowed_models: string[] }) =>
+        callInvoke<{ ok: boolean }>('set_department_quota', { quota });
+    const getDepartmentQuota = (department: string) =>
+        callInvoke<any>('get_department_quota', { department });
+    const listDepartmentQuotas = () =>
+        callInvoke<{ quotas: any[] }>('list_department_quotas');
+    const checkQuota = (department: string) =>
+        callInvoke<{ allowed: boolean; reason?: string }>('check_quota', { department });
+    const scimListUsers = () => callInvoke<any[]>('scim_list_users');
+    const scimSync = () => callInvoke<any>('scim_sync');
+
     return {
         getStatus, processMessage, getTasks, getPlaybooks, setActivePlaybook,
         getSettings, updateSettings, healthCheck, getActiveChain, getChainHistory,
@@ -510,6 +522,8 @@ export function useAgent() {
         marketplaceListAgents, marketplaceSearchAgents, marketplaceInstallAgent, marketplaceUninstallAgent, marketplaceCreateAgentPackage,
         // R69: Team Collaboration
         teamCreate, teamList, teamMembers, teamAddMember, teamRemoveMember, teamUpdateRole, teamShareResource,
+        // R70: v1.2 Enterprise — Department Quotas & SCIM
+        setDepartmentQuota, getDepartmentQuota, listDepartmentQuotas, checkQuota, scimListUsers, scimSync,
     };
 }
 
