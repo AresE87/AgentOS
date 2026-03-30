@@ -3219,6 +3219,121 @@ async fn cmd_delete_screen_recording(
     Ok(serde_json::json!({ "ok": true }))
 }
 
+// ── R53: Natural Language Triggers commands ──────────────────────
+
+#[tauri::command]
+async fn cmd_parse_nl_trigger(input: String) -> Result<serde_json::Value, String> {
+    let config = automation::nl_triggers::NLTriggerParser::parse(&input)?;
+    serde_json::to_value(&config).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_create_trigger_from_nl(
+    input: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let config = automation::nl_triggers::NLTriggerParser::parse(&input)?;
+
+    let trigger_type_str = match &config.trigger_type {
+        automation::nl_triggers::TriggerType::Cron { .. } => "cron",
+        automation::nl_triggers::TriggerType::FileWatch { .. } => "file_watch",
+        automation::nl_triggers::TriggerType::Condition { .. } => "condition",
+    };
+    let config_json = serde_json::to_string(&config.trigger_type).map_err(|e| e.to_string())?;
+
+    // Persist to database using existing Database::create_trigger method
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.create_trigger(
+        &config.id,
+        &config.name,
+        trigger_type_str,
+        &config_json,
+        &config.task,
+    ).map_err(|e| e.to_string())?;
+
+    Ok(serde_json::json!({
+        "ok": true,
+        "trigger": serde_json::to_value(&config).map_err(|e| e.to_string())?,
+    }))
+}
+
+#[tauri::command]
+async fn cmd_list_all_triggers(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let triggers = db.get_triggers().map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({ "triggers": triggers }))
+}
+
+// ── R54: Agent Memory (RAG Local) commands ───────────────────────
+
+#[tauri::command]
+async fn cmd_memory_store(
+    content: String,
+    category: String,
+    importance: Option<f64>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let imp = importance.unwrap_or(0.5);
+    let mem = memory::MemoryStore::store(db.conn(), &content, &category, imp)?;
+    serde_json::to_value(&mem).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_memory_search(
+    query: String,
+    limit: Option<usize>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let memories = memory::MemoryStore::search(db.conn(), &query, limit.unwrap_or(20))?;
+    Ok(serde_json::json!({ "memories": memories }))
+}
+
+#[tauri::command]
+async fn cmd_memory_list(
+    category: Option<String>,
+    limit: Option<usize>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let lim = limit.unwrap_or(50);
+    let memories = match category {
+        Some(cat) => memory::MemoryStore::list_by_category(db.conn(), &cat, lim)?,
+        None => memory::MemoryStore::list_all(db.conn(), lim)?,
+    };
+    Ok(serde_json::json!({ "memories": memories }))
+}
+
+#[tauri::command]
+async fn cmd_memory_delete(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    memory::MemoryStore::delete(db.conn(), &id)?;
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+#[tauri::command]
+async fn cmd_memory_forget_all(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let count = memory::MemoryStore::forget_all(db.conn())?;
+    Ok(serde_json::json!({ "ok": true, "deleted": count }))
+}
+
+#[tauri::command]
+async fn cmd_memory_stats(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    memory::MemoryStore::stats(db.conn())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -3789,6 +3904,17 @@ pub fn run() {
             cmd_get_screen_recording,
             cmd_list_screen_recordings,
             cmd_delete_screen_recording,
+            // R53: Natural Language Triggers commands
+            cmd_parse_nl_trigger,
+            cmd_create_trigger_from_nl,
+            cmd_list_all_triggers,
+            // R54: Agent Memory (RAG Local) commands
+            cmd_memory_store,
+            cmd_memory_search,
+            cmd_memory_list,
+            cmd_memory_delete,
+            cmd_memory_forget_all,
+            cmd_memory_stats,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");

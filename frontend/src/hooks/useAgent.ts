@@ -244,6 +244,28 @@ export function useAgent() {
     const deleteScreenRecording = (id: string) =>
         callInvoke<any>('delete_screen_recording', { id });
 
+    // R53: Natural Language Triggers
+    const parseNLTrigger = (input: string) =>
+        callInvoke<any>('parse_nl_trigger', { input });
+    const createTriggerFromNL = (input: string) =>
+        callInvoke<any>('create_trigger_from_nl', { input });
+    const listAllTriggers = () =>
+        callInvoke<any>('list_all_triggers');
+
+    // R54: Agent Memory (RAG Local)
+    const memoryStore = (content: string, category: string, importance?: number) =>
+        callInvoke<any>('memory_store', { content, category, importance });
+    const memorySearch = (query: string, limit?: number) =>
+        callInvoke<any>('memory_search', { query, limit });
+    const memoryList = (category?: string, limit?: number) =>
+        callInvoke<any>('memory_list', { category, limit });
+    const memoryDelete = (id: string) =>
+        callInvoke<any>('memory_delete', { id });
+    const memoryForgetAll = () =>
+        callInvoke<any>('memory_forget_all');
+    const memoryStats = () =>
+        callInvoke<any>('memory_stats');
+
     return {
         getStatus, processMessage, getTasks, getPlaybooks, setActivePlaybook,
         getSettings, updateSettings, healthCheck, getActiveChain, getChainHistory,
@@ -298,6 +320,10 @@ export function useAgent() {
         startConversation, getConversation, listConversations, addConversationMessage,
         // R52: Screen Recording & Replay
         startScreenRecording, stopScreenRecording, getScreenRecording, listScreenRecordings, deleteScreenRecording,
+        // R53: Natural Language Triggers
+        parseNLTrigger, createTriggerFromNL, listAllTriggers,
+        // R54: Agent Memory (RAG Local)
+        memoryStore, memorySearch, memoryList, memoryDelete, memoryForgetAll, memoryStats,
     };
 }
 

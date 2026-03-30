@@ -721,6 +721,11 @@ impl Database {
         Ok(())
     }
 
+    /// Expose the underlying connection for sub-modules (e.g. MemoryStore)
+    pub fn conn(&self) -> &Connection {
+        &self.conn
+    }
+
     pub fn update_trigger_last_run(&self, id: &str, last_run: &str) -> Result<(), rusqlite::Error> {
         self.conn.execute(
             "UPDATE triggers SET last_run = ?2 WHERE id = ?1",
