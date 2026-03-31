@@ -186,9 +186,9 @@ pub async fn stripe_webhook(
         let conn = rusqlite::Connection::open(&state.db_path)
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-        // Store the plan change in a simple key-value approach
+        // Update plan_type in daily_usage, preserving existing counters
         conn.execute(
-            "INSERT OR REPLACE INTO daily_usage (date, tasks_count, tokens_used, plan_type) VALUES (date('now'), 0, 0, ?1)
+            "INSERT INTO daily_usage (date, tasks_count, tokens_used, plan_type) VALUES (date('now'), 0, 0, ?1)
              ON CONFLICT(date) DO UPDATE SET plan_type = ?1",
             rusqlite::params![new_plan],
         )

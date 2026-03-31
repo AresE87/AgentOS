@@ -312,16 +312,8 @@ impl Database {
     }
 
     pub fn get_usage_summary(&self) -> Result<Value, rusqlite::Error> {
-        let tasks_today: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM tasks WHERE date(created_at) = date('now')",
-            [],
-            |r| r.get(0),
-        )?;
-        let tokens_today: i64 = self.conn.query_row(
-            "SELECT COALESCE(SUM(tokens_in + tokens_out), 0) FROM tasks WHERE date(created_at) = date('now')",
-            [],
-            |r| r.get(0),
-        )?;
+        // Read from daily_usage table (persisted counters) for billing enforcement
+        let (tasks_today, tokens_today) = self.get_daily_usage()?;
         let cost_today: f64 = self.conn.query_row(
             "SELECT COALESCE(SUM(cost), 0) FROM tasks WHERE date(created_at) = date('now')",
             [],
