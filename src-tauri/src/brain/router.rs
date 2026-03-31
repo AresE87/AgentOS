@@ -49,6 +49,8 @@ mod tests {
             task_type: TaskType::Text,
             tier,
             complexity: 1,
+            suggested_specialist: "General Assistant".to_string(),
+            confidence: 1.0,
         }
     }
 
