@@ -26,7 +26,7 @@
 // Voice:       transcribeAudio, speakText, listVoices, saveSpeech
 // Vision:      detectMonitors, ocrScreenshot, screenDiff
 // Billing:     (Stripe via C1 — checkout, webhooks, usage tracking)
-// Auto-Update: checkForUpdate, getCurrentVersion
+// Auto-Update: checkForUpdate, installUpdate, getCurrentVersion
 // Smart PB:    runSmartPlaybook, validateSmartPlaybook, getPlaybookVariables
 // i18n:        setLanguage
 // Memory:      memoryStore, memorySearch, memoryList, memoryDelete, memoryForgetAll,
@@ -209,6 +209,7 @@ export function useAgent() {
         callInvoke<{ ok: boolean }>('send_chain_message', { message });
 
     const getAnalytics = () => callInvoke<any>('get_analytics');
+    const getPlan = () => callInvoke<any>('get_plan');
     const getUsageSummary = () => callInvoke<{ tasks_today: number; tokens_today: number; cost_today: number }>('get_usage_summary');
 
     // Playbooks
@@ -1275,12 +1276,13 @@ export function useAgent() {
 
     // C2: Auto-Update
     const checkForUpdate = () => callInvoke<any>('check_for_update');
+    const installUpdate = () => callInvoke<void>('install_update');
     const getCurrentVersion = () => callInvoke<{ version: string }>('get_current_version');
 
     return {
         getStatus, processMessage, getTasks, getPlaybooks, setActivePlaybook,
         getSettings, updateSettings, healthCheck, getActiveChain, getChainHistory,
-        sendChainMessage, getAnalytics, getUsageSummary,
+        sendChainMessage, getAnalytics, getPlan, getUsageSummary,
         // Playbooks
         getPlaybookDetail, startRecording, recordStep, stopRecording, playPlaybook, deletePlaybook,
         // PC Control
@@ -1522,7 +1524,7 @@ export function useAgent() {
         // R149: Affiliate Program
         affiliateCreate, affiliateEarnings, affiliateList, affiliateTrack,
         // C2: Auto-Update
-        checkForUpdate, getCurrentVersion,
+        checkForUpdate, installUpdate, getCurrentVersion,
     };
 }
 

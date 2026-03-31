@@ -60,7 +60,8 @@ export default function Dashboard({ onResetWizard }: DashboardProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [notifications] = useState(0);
   const [setupIncomplete, setSetupIncomplete] = useState(false);
-  const { getStatus } = useAgent();
+  const [version, setVersion] = useState('unknown');
+  const { getStatus, getCurrentVersion } = useAgent();
 
   // Check if setup is complete (has at least one provider)
   useEffect(() => {
@@ -71,7 +72,10 @@ export default function Dashboard({ onResetWizard }: DashboardProps) {
         }
       })
       .catch(() => setSetupIncomplete(true));
-  }, []);
+    getCurrentVersion()
+      .then((result) => setVersion(result.version))
+      .catch(() => setVersion('unknown'));
+  }, [getCurrentVersion, getStatus]);
 
   const sidebarWidth = collapsed ? 'w-[52px]' : 'w-[210px]';
 
@@ -205,7 +209,7 @@ export default function Dashboard({ onResetWizard }: DashboardProps) {
 
           {/* Version */}
           {!collapsed && (
-            <div className="px-3 py-1 text-[10px] font-mono text-text-muted">v1.0.0</div>
+            <div className="px-3 py-1 text-[10px] font-mono text-text-muted">v{version}</div>
           )}
         </div>
       </aside>

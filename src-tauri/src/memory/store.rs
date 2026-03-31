@@ -1,12 +1,12 @@
-use serde::{Deserialize, Serialize};
 use rusqlite::Connection;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Memory {
     pub id: String,
     pub content: String,
-    pub category: String,       // "conversation", "preference", "project", "correction", "person"
-    pub importance: f64,        // 0.0-1.0
+    pub category: String, // "conversation", "preference", "project", "correction", "person"
+    pub importance: f64,  // 0.0-1.0
     pub access_count: u32,
     pub created_at: String,
     pub last_accessed: Option<String>,
@@ -167,11 +167,7 @@ impl MemoryStore {
     }
 
     /// Search memories by keyword (simple text matching) -- LIKE fallback
-    pub fn search(
-        conn: &Connection,
-        query: &str,
-        limit: usize,
-    ) -> Result<Vec<Memory>, String> {
+    pub fn search(conn: &Connection, query: &str, limit: usize) -> Result<Vec<Memory>, String> {
         Self::ensure_table(conn)?;
         let pattern = format!("%{}%", query);
         let mut stmt = conn.prepare(
@@ -246,6 +242,30 @@ impl MemoryStore {
         scored
     }
 
+    /// Build a semantic context snippet from stored embeddings.
+    /// Returns None when no semantic matches are available.
+    pub fn semantic_context(
+        conn: &Connection,
+        query_embedding: &[f32],
+        max_memories: usize,
+    ) -> Result<Option<String>, String> {
+        let scored = Self::rank_by_similarity(
+            Self::load_embedded_memories(conn)?,
+            query_embedding,
+            max_memories,
+        );
+
+        if scored.is_empty() {
+            return Ok(None);
+        }
+
+        let memories: Vec<Memory> = scored.into_iter().map(|(memory, _)| memory).collect();
+        let ids: Vec<String> = memories.iter().map(|memory| memory.id.clone()).collect();
+        Self::update_access_counts(conn, &ids);
+
+        Ok(Some(format_context_block(&memories, "semantic")))
+    }
+
     /// Load memories without embeddings (for reindexing). Returns (id, content) pairs.
     pub fn load_unembedded_memories(conn: &Connection) -> Result<Vec<(String, String)>, String> {
         Self::ensure_table(conn)?;
@@ -254,7 +274,9 @@ impl MemoryStore {
             .map_err(|e| e.to_string())?;
 
         let rows = stmt
-            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
             .map_err(|e| e.to_string())?
             .filter_map(|r| r.ok())
             .collect();
@@ -263,7 +285,11 @@ impl MemoryStore {
     }
 
     /// Update embedding for a single memory by ID (sync)
-    pub fn update_embedding(conn: &Connection, id: &str, embedding_blob: &[u8]) -> Result<(), String> {
+    pub fn update_embedding(
+        conn: &Connection,
+        id: &str,
+        embedding_blob: &[u8],
+    ) -> Result<(), String> {
         conn.execute(
             "UPDATE agent_memories SET embedding = ?1 WHERE id = ?2",
             rusqlite::params![embedding_blob, id],
@@ -335,12 +361,6 @@ impl MemoryStore {
             return Ok(String::new());
         }
 
-        let context = memories
-            .iter()
-            .map(|m| format!("[{}] {}", m.category, m.content))
-            .collect::<Vec<_>>()
-            .join("\n");
-
         // Update access counts
         for m in &memories {
             conn.execute(
@@ -350,7 +370,7 @@ impl MemoryStore {
             .ok();
         }
 
-        Ok(format!("## Relevant memories:\n{}", context))
+        Ok(format_context_block(&memories, "keyword"))
     }
 
     /// Update access counts for a batch of memories
@@ -376,8 +396,9 @@ impl MemoryStore {
 
     pub fn forget_all(conn: &Connection) -> Result<u64, String> {
         Self::ensure_table(conn)?;
-        let count =
-            conn.execute("DELETE FROM agent_memories", []).map_err(|e| e.to_string())? as u64;
+        let count = conn
+            .execute("DELETE FROM agent_memories", [])
+            .map_err(|e| e.to_string())? as u64;
         Ok(count)
     }
 
@@ -410,5 +431,60 @@ impl MemoryStore {
             "with_embeddings": with_embeddings,
             "categories": categories.into_iter().map(|(k, v)| serde_json::json!({"name": k, "count": v})).collect::<Vec<_>>()
         }))
+    }
+}
+
+fn format_context_block(memories: &[Memory], method: &str) -> String {
+    let context = memories
+        .iter()
+        .map(|memory| format!("[{}] {}", memory.category, memory.content))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("## Relevant memories ({method}):\n{context}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_conn() -> Connection {
+        Connection::open_in_memory().unwrap()
+    }
+
+    #[test]
+    fn semantic_context_prefers_high_similarity_memories() {
+        let conn = temp_conn();
+        let strong = embedding_to_bytes(&[1.0, 0.0, 0.0]);
+        let weak = embedding_to_bytes(&[0.0, 1.0, 0.0]);
+
+        MemoryStore::store_with_embedding(
+            &conn,
+            "Project alpha deadline is Friday",
+            "project",
+            0.9,
+            &strong,
+        )
+        .unwrap();
+        MemoryStore::store_with_embedding(&conn, "Buy groceries later", "personal", 0.4, &weak)
+            .unwrap();
+
+        let context = MemoryStore::semantic_context(&conn, &[0.95, 0.05, 0.0], 5)
+            .unwrap()
+            .unwrap();
+
+        assert!(context.contains("Project alpha deadline is Friday"));
+        assert!(!context.contains("Buy groceries later"));
+        assert!(context.contains("semantic"));
+    }
+
+    #[test]
+    fn keyword_context_marks_fallback_method() {
+        let conn = temp_conn();
+        MemoryStore::store(&conn, "Juan is my manager", "person", 0.8).unwrap();
+
+        let context = MemoryStore::get_relevant_context(&conn, "manager", 5).unwrap();
+
+        assert!(context.contains("Juan is my manager"));
+        assert!(context.contains("keyword"));
     }
 }

@@ -7,6 +7,24 @@ pub enum PlanType {
     Team,
 }
 
+impl PlanType {
+    pub fn from_str(value: &str) -> Self {
+        match value {
+            "pro" => Self::Pro,
+            "team" => Self::Team,
+            _ => Self::Free,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Free => "free",
+            Self::Pro => "pro",
+            Self::Team => "team",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Plan {
     pub plan_type: PlanType,
@@ -57,6 +75,10 @@ impl Plan {
             PlanType::Pro => Self::pro(),
             PlanType::Team => Self::team(),
         }
+    }
+
+    pub fn from_str(value: &str) -> Self {
+        Self::from_type(&PlanType::from_str(value))
     }
 
     pub fn display_name(&self) -> &'static str {

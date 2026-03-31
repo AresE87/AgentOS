@@ -29,10 +29,16 @@ const MOCK_DATA: Record<string, unknown> = {
     log_level: 'INFO',
     max_cost_per_task: 1.0,
     cli_timeout: 300,
+    max_steps_per_task: 20,
+    input_delay_ms: 50,
+    screenshot_quality: 80,
+    plan_type: 'free',
     has_anthropic: false,
     has_openai: false,
     has_google: false,
     has_telegram: false,
+    has_updater_pubkey: false,
+    github_repo: 'AresE87/AgentOS',
   },
   health_check: {
     providers: { anthropic: false, openai: false, google: false },
@@ -44,6 +50,23 @@ const MOCK_DATA: Record<string, unknown> = {
     tasks_today: 0,
     tokens_today: 0,
     cost_today: 0,
+  },
+
+  get_plan: {
+    plan_type: 'free',
+    display_name: 'Free',
+    limits: {
+      tasks_per_day: 20,
+      tokens_per_day: 50000,
+      mesh_nodes: 1,
+      can_use_triggers: false,
+      can_use_marketplace: false,
+    },
+    usage: {
+      tasks_today: 0,
+      tokens_today: 0,
+      cost_today: 0,
+    },
   },
 
   get_analytics: {
@@ -110,6 +133,27 @@ const MOCK_DATA: Record<string, unknown> = {
   // Web browsing
   browse_url: { ok: true },
   web_search: { results: [] },
+
+  // Auto-update
+  check_for_update: {
+    current_version: '4.2.0',
+    latest_version: '4.2.0',
+    update_available: false,
+    release_notes: null,
+    download_url: 'https://github.com/AresE87/AgentOS/releases',
+    checked_at: '2026-03-31T00:00:00Z',
+    updater_configured: false,
+    install_supported: false,
+    status_mode: 'check_only',
+    check_strategy: 'github_release_api',
+    release_url: 'https://github.com/AresE87/AgentOS/releases',
+    manifest_url: 'https://github.com/AresE87/AgentOS/releases/latest/download/latest.json',
+    status_message: 'Signed updater install is disabled: missing updater public key.',
+  },
+  get_current_version: {
+    version: '4.2.0',
+  },
+  install_update: {},
 };
 
 export async function invoke<T>(command: string, _args?: Record<string, unknown>): Promise<T> {

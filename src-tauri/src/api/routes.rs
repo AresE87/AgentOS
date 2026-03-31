@@ -8,8 +8,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use super::server::ApiState;
 use super::auth;
+use super::server::ApiState;
 
 fn extract_bearer(headers: &HeaderMap) -> Option<String> {
     let auth = headers.get("authorization")?.to_str().ok()?;
@@ -18,8 +18,12 @@ fn extract_bearer(headers: &HeaderMap) -> Option<String> {
 }
 
 fn validate_auth(state: &ApiState, headers: &HeaderMap) -> Result<(), (StatusCode, String)> {
-    let token = extract_bearer(headers)
-        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Missing Authorization header".to_string()))?;
+    let token = extract_bearer(headers).ok_or_else(|| {
+        (
+            StatusCode::UNAUTHORIZED,
+            "Missing Authorization header".to_string(),
+        )
+    })?;
 
     let conn = rusqlite::Connection::open(&state.db_path)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -30,7 +34,10 @@ fn validate_auth(state: &ApiState, headers: &HeaderMap) -> Result<(), (StatusCod
     if valid {
         Ok(())
     } else {
-        Err((StatusCode::UNAUTHORIZED, "Invalid or revoked API key".to_string()))
+        Err((
+            StatusCode::UNAUTHORIZED,
+            "Invalid or revoked API key".to_string(),
+        ))
     }
 }
 
@@ -77,7 +84,10 @@ pub async fn post_message(
     validate_auth(&state, &headers)?;
 
     if body.text.trim().is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "text must not be empty".to_string()));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "text must not be empty".to_string(),
+        ));
     }
 
     let task_id = uuid::Uuid::new_v4().to_string();
@@ -85,10 +95,13 @@ pub async fn post_message(
     // Insert task as pending
     {
         let mut store = state.task_store.write().await;
-        store.insert(task_id.clone(), TaskEntry {
-            status: "queued".to_string(),
-            result: None,
-        });
+        store.insert(
+            task_id.clone(),
+            TaskEntry {
+                status: "queued".to_string(),
+                result: None,
+            },
+        );
     }
 
     // Send to task sender channel
@@ -157,68 +170,200 @@ pub async fn stripe_webhook(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
 
-    // Read webhook secret from the db_path-adjacent config
-    // For now we rely on the secret being passed via the ApiState
     let webhook_secret = state.stripe_webhook_secret.as_deref().unwrap_or("");
-
-    if !webhook_secret.is_empty() {
-        let valid = crate::billing::stripe::StripeClient::verify_webhook_signature(
-            &body,
-            signature,
-            webhook_secret,
-        );
-        if !valid {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                "Invalid webhook signature".to_string(),
-            ));
-        }
+    if webhook_secret.is_empty() {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Stripe webhook secret is not configured".to_string(),
+        ));
     }
 
-    // Parse the event and determine plan change
-    let plan_change = crate::billing::stripe::StripeClient::parse_webhook_event(&body)
-        .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+    let valid = crate::billing::stripe::StripeClient::verify_webhook_signature(
+        &body,
+        signature,
+        webhook_secret,
+    );
+    if !valid {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Invalid webhook signature".to_string(),
+        ));
+    }
 
-    if let Some(new_plan) = plan_change {
-        tracing::info!("Stripe webhook: updating plan to '{}'", new_plan);
+    let config_settings = load_api_settings(state.settings_path.as_deref());
+    let plan_change = crate::billing::stripe::StripeClient::parse_webhook_event(
+        &body,
+        config_settings
+            .as_ref()
+            .map(|settings| settings.stripe_price_id_pro.as_str())
+            .filter(|value| !value.is_empty()),
+        config_settings
+            .as_ref()
+            .map(|settings| settings.stripe_price_id_team.as_str())
+            .filter(|value| !value.is_empty()),
+    )
+    .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
 
-        // Update plan_type in the settings file via database
-        let conn = rusqlite::Connection::open(&state.db_path)
+    if let Some(change) = plan_change {
+        tracing::info!(
+            plan = %change.plan_type,
+            customer_id = ?change.customer_id,
+            "Stripe webhook: updating billing state"
+        );
+
+        let db = crate::memory::Database::new(std::path::Path::new(&state.db_path))
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-        // Update plan_type in daily_usage, preserving existing counters
-        conn.execute(
-            "INSERT INTO daily_usage (date, tasks_count, tokens_used, plan_type) VALUES (date('now'), 0, 0, ?1)
-             ON CONFLICT(date) DO UPDATE SET plan_type = ?1",
-            rusqlite::params![new_plan],
-        )
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        db.set_billing_state(&change.plan_type, change.customer_id.as_deref())
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-        // Also update the settings config file if we have a settings_path
-        if let Some(ref settings_path) = state.settings_path {
-            if let Ok(content) = std::fs::read_to_string(settings_path) {
-                if let Ok(mut settings) = serde_json::from_str::<serde_json::Value>(&content) {
-                    if let Some(obj) = settings.as_object_mut() {
-                        obj.insert(
-                            "plan_type".to_string(),
-                            serde_json::Value::String(new_plan.clone()),
-                        );
-                        if let Ok(json) = serde_json::to_string_pretty(&settings) {
-                            let _ = std::fs::write(settings_path, json);
-                        }
-                    }
-                }
+        if let Some(mut settings) = config_settings {
+            settings.set("plan_type", &change.plan_type);
+            if let Some(customer_id) = change.customer_id.as_deref() {
+                settings.set("stripe_customer_id", customer_id);
             }
+            settings
+                .save()
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
         }
 
         Ok(Json(serde_json::json!({
             "received": true,
-            "plan_updated": new_plan,
+            "plan_updated": change.plan_type,
+            "customer_updated": change.customer_id,
         })))
     } else {
         Ok(Json(serde_json::json!({
             "received": true,
             "plan_updated": null,
         })))
+    }
+}
+
+fn load_api_settings(settings_path: Option<&str>) -> Option<crate::config::Settings> {
+    let path = settings_path?;
+    let app_dir = std::path::Path::new(path).parent()?;
+    Some(crate::config::Settings::load(app_dir))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sha2::{Digest, Sha256};
+
+    fn compute_signature(secret: &str, timestamp: i64, body: &str) -> String {
+        let payload = format!("{}.{}", timestamp, body);
+        let digest = compute_hmac_sha256(secret.as_bytes(), payload.as_bytes());
+        let hex = digest
+            .iter()
+            .map(|byte| format!("{:02x}", byte))
+            .collect::<String>();
+        format!("t={},v1={}", timestamp, hex)
+    }
+
+    fn compute_hmac_sha256(secret: &[u8], payload: &[u8]) -> Vec<u8> {
+        const BLOCK_SIZE: usize = 64;
+        let mut key = [0_u8; BLOCK_SIZE];
+
+        if secret.len() > BLOCK_SIZE {
+            let digest = Sha256::digest(secret);
+            key[..digest.len()].copy_from_slice(&digest);
+        } else {
+            key[..secret.len()].copy_from_slice(secret);
+        }
+
+        let mut inner_pad = [0_u8; BLOCK_SIZE];
+        let mut outer_pad = [0_u8; BLOCK_SIZE];
+        for (index, byte) in key.iter().enumerate() {
+            inner_pad[index] = byte ^ 0x36;
+            outer_pad[index] = byte ^ 0x5c;
+        }
+
+        let mut inner = Sha256::new();
+        inner.update(inner_pad);
+        inner.update(payload);
+        let inner_hash = inner.finalize();
+
+        let mut outer = Sha256::new();
+        outer.update(outer_pad);
+        outer.update(inner_hash);
+        outer.finalize().to_vec()
+    }
+
+    fn test_state(secret: &str, price_id_pro: &str) -> (tempfile::TempDir, ApiState) {
+        let dir = tempfile::tempdir().unwrap();
+        let mut settings = crate::config::Settings::load(dir.path());
+        settings.set("stripe_webhook_secret", secret);
+        settings.set("stripe_price_id_pro", price_id_pro);
+        settings.save().unwrap();
+
+        let db_path = dir.path().join("agentos.db");
+        crate::memory::Database::new(&db_path).unwrap();
+
+        let (tx, _rx) = tokio::sync::mpsc::channel(4);
+        let state = ApiState {
+            db_path: db_path.to_string_lossy().to_string(),
+            task_sender: tx,
+            task_store: Arc::new(RwLock::new(HashMap::new())),
+            stripe_webhook_secret: Some(secret.to_string()),
+            settings_path: Some(dir.path().join("config.json").to_string_lossy().to_string()),
+        };
+
+        (dir, state)
+    }
+
+    #[tokio::test]
+    async fn stripe_webhook_persists_plan_and_customer() {
+        let secret = "whsec_test";
+        let (_dir, state) = test_state(secret, "price_pro");
+        let body = r#"{
+            "id":"evt_1",
+            "type":"customer.subscription.updated",
+            "data":{"object":{
+                "customer":"cus_123",
+                "status":"active",
+                "items":{"data":[{"price":{"id":"price_pro"}}]}
+            }}
+        }"#;
+        let timestamp = chrono::Utc::now().timestamp();
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "stripe-signature",
+            compute_signature(secret, timestamp, body).parse().unwrap(),
+        );
+
+        let response = stripe_webhook(headers, State(state.clone()), body.to_string())
+            .await
+            .unwrap();
+
+        assert_eq!(response.0["plan_updated"], "pro");
+        assert_eq!(response.0["customer_updated"], "cus_123");
+
+        let db = crate::memory::Database::new(std::path::Path::new(&state.db_path)).unwrap();
+        let billing = db.get_billing_state().unwrap();
+        assert_eq!(billing.plan_type, "pro");
+        assert_eq!(billing.stripe_customer_id, "cus_123");
+
+        let settings = load_api_settings(state.settings_path.as_deref()).unwrap();
+        assert_eq!(settings.plan_type, "pro");
+        assert_eq!(settings.stripe_customer_id, "cus_123");
+    }
+
+    #[tokio::test]
+    async fn stripe_webhook_rejects_invalid_signature() {
+        let secret = "whsec_test";
+        let (_dir, state) = test_state(secret, "price_pro");
+        let body = r#"{"id":"evt_1","type":"checkout.session.completed","data":{"object":{"metadata":{"plan":"pro"}}}}"#;
+
+        let mut headers = HeaderMap::new();
+        headers.insert("stripe-signature", "t=1,v1=deadbeef".parse().unwrap());
+
+        let err = stripe_webhook(headers, State(state), body.to_string())
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+        assert_eq!(err.1, "Invalid webhook signature");
     }
 }

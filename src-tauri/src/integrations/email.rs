@@ -31,8 +31,8 @@ pub struct EmailMessage {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmailTriage {
-    pub priority: String,   // "high" | "medium" | "low"
-    pub category: String,   // "action" | "info" | "spam"
+    pub priority: String, // "high" | "medium" | "low"
+    pub category: String, // "action" | "info" | "spam"
     pub suggested_action: String,
     pub draft_reply: Option<String>,
 }
@@ -45,6 +45,9 @@ pub struct GmailProvider {
     refresh_token: Option<String>,
     client_id: String,
     client_secret: String,
+    auth_url: String,
+    token_url: String,
+    api_base_url: String,
 }
 
 impl GmailProvider {
@@ -55,6 +58,29 @@ impl GmailProvider {
             refresh_token: None,
             client_id: client_id.to_string(),
             client_secret: client_secret.to_string(),
+            auth_url: GOOGLE_AUTH_URL.to_string(),
+            token_url: GOOGLE_TOKEN_URL.to_string(),
+            api_base_url: GMAIL_API.to_string(),
+        }
+    }
+
+    #[cfg(test)]
+    fn with_endpoints(
+        client_id: &str,
+        client_secret: &str,
+        auth_url: &str,
+        token_url: &str,
+        api_base_url: &str,
+    ) -> Self {
+        Self {
+            client: Client::new(),
+            access_token: None,
+            refresh_token: None,
+            client_id: client_id.to_string(),
+            client_secret: client_secret.to_string(),
+            auth_url: auth_url.to_string(),
+            token_url: token_url.to_string(),
+            api_base_url: api_base_url.to_string(),
         }
     }
 
@@ -62,7 +88,7 @@ impl GmailProvider {
     pub fn get_auth_url(&self, redirect_uri: &str) -> String {
         format!(
             "{}?client_id={}&redirect_uri={}&response_type=code&scope={}&access_type=offline&prompt=consent",
-            GOOGLE_AUTH_URL,
+            self.auth_url,
             self.client_id,
             urlencoding::encode(redirect_uri),
             urlencoding::encode(GOOGLE_COMBINED_SCOPES),
@@ -81,7 +107,7 @@ impl GmailProvider {
 
         let response = self
             .client
-            .post(GOOGLE_TOKEN_URL)
+            .post(&self.token_url)
             .form(&params)
             .send()
             .await
@@ -116,7 +142,7 @@ impl GmailProvider {
 
         let response = self
             .client
-            .post(GOOGLE_TOKEN_URL)
+            .post(&self.token_url)
             .form(&params)
             .send()
             .await
@@ -156,7 +182,10 @@ impl GmailProvider {
         folder: &str,
         limit: usize,
     ) -> Result<Vec<EmailMessage>, String> {
-        let token = self.access_token.as_ref().ok_or("Gmail not authenticated")?;
+        let token = self
+            .access_token
+            .as_ref()
+            .ok_or("Gmail not authenticated")?;
 
         // Map common folder names to Gmail label IDs
         let folder_upper = folder.to_uppercase();
@@ -174,7 +203,7 @@ impl GmailProvider {
 
         let url = format!(
             "{}/messages?labelIds={}&maxResults={}",
-            GMAIL_API, label_id, limit
+            self.api_base_url, label_id, limit
         );
 
         let response = self
@@ -215,9 +244,12 @@ impl GmailProvider {
 
     /// Get a single message by ID
     pub async fn get_message(&self, msg_id: &str) -> Result<EmailMessage, String> {
-        let token = self.access_token.as_ref().ok_or("Gmail not authenticated")?;
+        let token = self
+            .access_token
+            .as_ref()
+            .ok_or("Gmail not authenticated")?;
 
-        let url = format!("{}/messages/{}?format=full", GMAIL_API, msg_id);
+        let url = format!("{}/messages/{}?format=full", self.api_base_url, msg_id);
 
         let response = self
             .client
@@ -243,7 +275,10 @@ impl GmailProvider {
         subject: &str,
         email_body: &str,
     ) -> Result<EmailMessage, String> {
-        let token = self.access_token.as_ref().ok_or("Gmail not authenticated")?;
+        let token = self
+            .access_token
+            .as_ref()
+            .ok_or("Gmail not authenticated")?;
 
         // Build RFC2822 message
         let to_str = to.join(", ");
@@ -259,7 +294,7 @@ impl GmailProvider {
 
         let response = self
             .client
-            .post(&format!("{}/messages/send", GMAIL_API))
+            .post(&format!("{}/messages/send", self.api_base_url))
             .bearer_auth(token)
             .json(&send_body)
             .send()
@@ -294,11 +329,14 @@ impl GmailProvider {
 
     /// Search Gmail messages
     pub async fn search(&self, query: &str) -> Result<Vec<EmailMessage>, String> {
-        let token = self.access_token.as_ref().ok_or("Gmail not authenticated")?;
+        let token = self
+            .access_token
+            .as_ref()
+            .ok_or("Gmail not authenticated")?;
 
         let url = format!(
             "{}/messages?q={}&maxResults=20",
-            GMAIL_API,
+            self.api_base_url,
             urlencoding::encode(query)
         );
 
@@ -337,9 +375,12 @@ impl GmailProvider {
 
     /// Mark a message as read (remove UNREAD label)
     pub async fn mark_read(&self, msg_id: &str) -> Result<bool, String> {
-        let token = self.access_token.as_ref().ok_or("Gmail not authenticated")?;
+        let token = self
+            .access_token
+            .as_ref()
+            .ok_or("Gmail not authenticated")?;
 
-        let url = format!("{}/messages/{}/modify", GMAIL_API, msg_id);
+        let url = format!("{}/messages/{}/modify", self.api_base_url, msg_id);
         let modify_body = serde_json::json!({
             "removeLabelIds": ["UNREAD"]
         });
@@ -364,7 +405,10 @@ impl GmailProvider {
 
     /// Move a message to a different label/folder
     pub async fn move_to(&self, msg_id: &str, folder: &str) -> Result<bool, String> {
-        let token = self.access_token.as_ref().ok_or("Gmail not authenticated")?;
+        let token = self
+            .access_token
+            .as_ref()
+            .ok_or("Gmail not authenticated")?;
 
         let folder_upper = folder.to_uppercase();
         let label_id = match folder_upper.as_str() {
@@ -375,7 +419,7 @@ impl GmailProvider {
             other => other,
         };
 
-        let url = format!("{}/messages/{}/modify", GMAIL_API, msg_id);
+        let url = format!("{}/messages/{}/modify", self.api_base_url, msg_id);
         let modify_body = serde_json::json!({
             "addLabelIds": [label_id]
         });
@@ -512,10 +556,7 @@ fn extract_body_text(payload: Option<&serde_json::Value>) -> String {
     // Try parts (multipart messages) — prefer text/plain
     if let Some(parts) = payload.get("parts").and_then(|p| p.as_array()) {
         for part in parts {
-            let mime = part
-                .get("mimeType")
-                .and_then(|m| m.as_str())
-                .unwrap_or("");
+            let mime = part.get("mimeType").and_then(|m| m.as_str()).unwrap_or("");
             if mime == "text/plain" {
                 if let Some(data) = part
                     .get("body")
@@ -532,10 +573,7 @@ fn extract_body_text(payload: Option<&serde_json::Value>) -> String {
         }
         // Fallback: try text/html
         for part in parts {
-            let mime = part
-                .get("mimeType")
-                .and_then(|m| m.as_str())
-                .unwrap_or("");
+            let mime = part.get("mimeType").and_then(|m| m.as_str()).unwrap_or("");
             if mime == "text/html" {
                 if let Some(data) = part
                     .get("body")
@@ -661,7 +699,11 @@ impl EmailManager {
 
     // ── Async dual-mode Public API ─────────────────────────────────
 
-    pub async fn list_messages_async(&self, folder: &str, limit: usize) -> Result<Vec<EmailMessage>, String> {
+    pub async fn list_messages_async(
+        &self,
+        folder: &str,
+        limit: usize,
+    ) -> Result<Vec<EmailMessage>, String> {
         if self.gmail_active() {
             return self.gmail.list_messages(folder, limit).await;
         }
@@ -862,5 +904,454 @@ impl EmailManager {
             suggested_action,
             draft_reply,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{
+        extract::{Form, Path, Query, State},
+        http::{HeaderMap, StatusCode},
+        response::IntoResponse,
+        routing::{get, post},
+        Json, Router,
+    };
+    use serde_json::json;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+
+    #[derive(Clone)]
+    struct MockGmailState {
+        list_ids: Arc<Vec<String>>,
+        search_ids: Arc<Vec<String>>,
+        messages: Arc<HashMap<String, serde_json::Value>>,
+        sent_payloads: Arc<Mutex<Vec<serde_json::Value>>>,
+        modified_ids: Arc<Mutex<Vec<String>>>,
+    }
+
+    fn mock_message_payload(
+        id: &str,
+        subject: &str,
+        body: &str,
+        labels: &[&str],
+    ) -> serde_json::Value {
+        json!({
+            "id": id,
+            "labelIds": labels,
+            "payload": {
+                "headers": [
+                    {"name": "From", "value": "alice@example.com"},
+                    {"name": "To", "value": "me@agentos.local"},
+                    {"name": "Subject", "value": subject},
+                    {"name": "Date", "value": "Tue, 31 Mar 2026 10:00:00 +0000"}
+                ],
+                "parts": [
+                    {
+                        "mimeType": "text/plain",
+                        "body": { "data": URL_SAFE_NO_PAD.encode(body.as_bytes()) }
+                    }
+                ]
+            }
+        })
+    }
+
+    fn mock_gmail_state() -> MockGmailState {
+        let inbox_id = "msg_inbox".to_string();
+        let release_id = "msg_release".to_string();
+        let mut messages = HashMap::new();
+        messages.insert(
+            inbox_id.clone(),
+            mock_message_payload(
+                &inbox_id,
+                "Daily inbox",
+                "Inbox message body",
+                &["INBOX", "UNREAD"],
+            ),
+        );
+        messages.insert(
+            release_id.clone(),
+            mock_message_payload(
+                &release_id,
+                "Release candidate ready",
+                "Release validation body",
+                &["INBOX"],
+            ),
+        );
+
+        MockGmailState {
+            list_ids: Arc::new(vec![inbox_id]),
+            search_ids: Arc::new(vec![release_id]),
+            messages: Arc::new(messages),
+            sent_payloads: Arc::new(Mutex::new(Vec::new())),
+            modified_ids: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    async fn require_bearer(
+        headers: &HeaderMap,
+    ) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
+        match headers
+            .get(axum::http::header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+        {
+            Some(value) if value.starts_with("Bearer ") => Ok(()),
+            _ => Err((
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": {"message": "missing bearer token"}})),
+            )),
+        }
+    }
+
+    async fn mock_token(Form(form): Form<HashMap<String, String>>) -> Json<serde_json::Value> {
+        let grant_type = form.get("grant_type").map(String::as_str).unwrap_or("");
+        let body = match grant_type {
+            "authorization_code" => json!({
+                "access_token": "access-token",
+                "refresh_token": "refresh-token",
+                "token_type": "Bearer"
+            }),
+            "refresh_token" => json!({
+                "access_token": "refreshed-token",
+                "token_type": "Bearer"
+            }),
+            _ => json!({"error": "unsupported_grant_type"}),
+        };
+        Json(body)
+    }
+
+    async fn mock_list_messages(
+        State(state): State<MockGmailState>,
+        Query(query): Query<HashMap<String, String>>,
+        headers: HeaderMap,
+    ) -> impl IntoResponse {
+        if let Err(err) = require_bearer(&headers).await {
+            return err.into_response();
+        }
+
+        let ids = if query.get("q").is_some() {
+            state.search_ids.as_ref()
+        } else {
+            state.list_ids.as_ref()
+        };
+
+        Json(json!({
+            "messages": ids.iter().map(|id| json!({ "id": id })).collect::<Vec<_>>()
+        }))
+        .into_response()
+    }
+
+    async fn mock_get_message(
+        State(state): State<MockGmailState>,
+        Path(id): Path<String>,
+        headers: HeaderMap,
+    ) -> impl IntoResponse {
+        if let Err(err) = require_bearer(&headers).await {
+            return err.into_response();
+        }
+
+        let payload = state
+            .messages
+            .get(&id)
+            .cloned()
+            .unwrap_or_else(|| json!({"error": {"message": "message not found"}}));
+        Json(payload).into_response()
+    }
+
+    async fn mock_send_message(
+        State(state): State<MockGmailState>,
+        headers: HeaderMap,
+        Json(body): Json<serde_json::Value>,
+    ) -> impl IntoResponse {
+        if let Err(err) = require_bearer(&headers).await {
+            return err.into_response();
+        }
+
+        state.sent_payloads.lock().await.push(body);
+        Json(json!({ "id": "sent_1" })).into_response()
+    }
+
+    async fn mock_modify_message(
+        State(state): State<MockGmailState>,
+        Path(id): Path<String>,
+        headers: HeaderMap,
+        Json(_body): Json<serde_json::Value>,
+    ) -> impl IntoResponse {
+        if let Err(err) = require_bearer(&headers).await {
+            return err.into_response();
+        }
+
+        state.modified_ids.lock().await.push(id);
+        Json(json!({ "ok": true })).into_response()
+    }
+
+    async fn spawn_mock_gmail_server() -> (String, MockGmailState) {
+        let state = mock_gmail_state();
+        let app = Router::new()
+            .route("/oauth", get(|| async { "ok" }))
+            .route("/token", post(mock_token))
+            .route("/gmail/v1/users/me/messages", get(mock_list_messages))
+            .route("/gmail/v1/users/me/messages/send", post(mock_send_message))
+            .route("/gmail/v1/users/me/messages/:id", get(mock_get_message))
+            .route(
+                "/gmail/v1/users/me/messages/:id/modify",
+                post(mock_modify_message),
+            )
+            .with_state(state.clone());
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        (format!("http://{addr}"), state)
+    }
+
+    #[test]
+    fn gmail_auth_url_uses_combined_scopes() {
+        let provider = GmailProvider::new("client-id", "client-secret");
+        let url = provider.get_auth_url("http://localhost:8080/oauth/google/callback");
+
+        assert!(url.contains("client_id=client-id"));
+        assert!(url.contains("access_type=offline"));
+        assert!(url.contains("prompt=consent"));
+        assert!(url.contains(urlencoding::encode(GOOGLE_COMBINED_SCOPES).as_ref()));
+    }
+
+    #[test]
+    fn parse_gmail_message_extracts_plain_text_and_attachments() {
+        let body_text = URL_SAFE_NO_PAD.encode("Hello from Gmail".as_bytes());
+        let payload = json!({
+            "id": "msg_123",
+            "labelIds": ["INBOX", "UNREAD"],
+            "payload": {
+                "headers": [
+                    {"name": "From", "value": "alice@example.com"},
+                    {"name": "To", "value": "bob@example.com, carol@example.com"},
+                    {"name": "Subject", "value": "Status update"},
+                    {"name": "Date", "value": "Tue, 31 Mar 2026 10:00:00 +0000"}
+                ],
+                "parts": [
+                    {
+                        "mimeType": "text/plain",
+                        "body": { "data": body_text }
+                    },
+                    {
+                        "filename": "report.pdf",
+                        "mimeType": "application/pdf",
+                        "body": {}
+                    }
+                ]
+            }
+        });
+
+        let msg = parse_gmail_message(&payload).unwrap();
+        assert_eq!(msg.id, "msg_123");
+        assert_eq!(msg.from, "alice@example.com");
+        assert_eq!(
+            msg.to,
+            vec![
+                "bob@example.com".to_string(),
+                "carol@example.com".to_string()
+            ]
+        );
+        assert_eq!(msg.subject, "Status update");
+        assert_eq!(msg.body, "Hello from Gmail");
+        assert_eq!(msg.folder, "inbox");
+        assert!(!msg.read);
+        assert_eq!(msg.attachments, vec!["report.pdf".to_string()]);
+    }
+
+    #[test]
+    fn gmail_active_requires_enabled_and_authenticated() {
+        let mut mgr = EmailManager::with_google("client-id", "client-secret", true);
+        assert!(!mgr.gmail_active());
+
+        mgr.gmail.access_token = Some("access-token".to_string());
+        assert!(mgr.gmail_active());
+
+        mgr.set_gmail_enabled(false);
+        assert!(!mgr.gmail_active());
+    }
+
+    #[tokio::test]
+    async fn gmail_provider_methods_require_authentication() {
+        let provider = GmailProvider::new("client-id", "client-secret");
+
+        assert!(provider
+            .list_messages("inbox", 5)
+            .await
+            .unwrap_err()
+            .contains("Gmail not authenticated"));
+        assert!(provider
+            .get_message("msg_123")
+            .await
+            .unwrap_err()
+            .contains("Gmail not authenticated"));
+        assert!(provider
+            .send_email(&[String::from("user@example.com")], "Subject", "Body")
+            .await
+            .unwrap_err()
+            .contains("Gmail not authenticated"));
+        assert!(provider
+            .search("subject")
+            .await
+            .unwrap_err()
+            .contains("Gmail not authenticated"));
+        assert!(provider
+            .mark_read("msg_123")
+            .await
+            .unwrap_err()
+            .contains("Gmail not authenticated"));
+        assert!(provider
+            .move_to("msg_123", "archive")
+            .await
+            .unwrap_err()
+            .contains("Gmail not authenticated"));
+    }
+
+    #[tokio::test]
+    async fn gmail_oauth_exchange_and_refresh_succeed_with_mock_server() {
+        let (base_url, _) = spawn_mock_gmail_server().await;
+        let mut provider = GmailProvider::with_endpoints(
+            "client-id",
+            "client-secret",
+            &format!("{base_url}/oauth"),
+            &format!("{base_url}/token"),
+            &format!("{base_url}/gmail/v1/users/me"),
+        );
+
+        provider
+            .exchange_code("auth-code", "http://localhost:8080/oauth/google/callback")
+            .await
+            .unwrap();
+        assert!(provider.is_authenticated());
+        assert_eq!(provider.get_refresh_token(), Some("refresh-token"));
+
+        provider.access_token = None;
+        provider.refresh_access_token().await.unwrap();
+        assert_eq!(provider.access_token.as_deref(), Some("refreshed-token"));
+    }
+
+    #[tokio::test]
+    async fn gmail_provider_positive_flow_supports_list_get_search_send_and_modify() {
+        let (base_url, state) = spawn_mock_gmail_server().await;
+        let mut provider = GmailProvider::with_endpoints(
+            "client-id",
+            "client-secret",
+            &format!("{base_url}/oauth"),
+            &format!("{base_url}/token"),
+            &format!("{base_url}/gmail/v1/users/me"),
+        );
+        provider.access_token = Some("access-token".to_string());
+
+        let inbox = provider.list_messages("inbox", 10).await.unwrap();
+        assert_eq!(inbox.len(), 1);
+        assert_eq!(inbox[0].id, "msg_inbox");
+
+        let msg = provider.get_message("msg_release").await.unwrap();
+        assert_eq!(msg.subject, "Release candidate ready");
+
+        let results = provider.search("release").await.unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, "msg_release");
+
+        let sent = provider
+            .send_email(
+                &[String::from("dev@example.com")],
+                "Subject",
+                "Body payload",
+            )
+            .await
+            .unwrap();
+        assert_eq!(sent.id, "sent_1");
+        assert_eq!(sent.folder, "sent");
+
+        assert!(provider.mark_read("msg_inbox").await.unwrap());
+        assert!(provider.move_to("msg_inbox", "archive").await.unwrap());
+
+        let sent_payloads = state.sent_payloads.lock().await;
+        assert_eq!(sent_payloads.len(), 1);
+        assert!(sent_payloads[0]["raw"]
+            .as_str()
+            .is_some_and(|raw| !raw.is_empty()));
+        drop(sent_payloads);
+
+        let modified_ids = state.modified_ids.lock().await;
+        assert_eq!(
+            modified_ids.as_slice(),
+            &["msg_inbox".to_string(), "msg_inbox".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn email_manager_uses_gmail_provider_when_enabled_and_authenticated() {
+        let (base_url, _) = spawn_mock_gmail_server().await;
+        let mut provider = GmailProvider::with_endpoints(
+            "client-id",
+            "client-secret",
+            &format!("{base_url}/oauth"),
+            &format!("{base_url}/token"),
+            &format!("{base_url}/gmail/v1/users/me"),
+        );
+        provider.access_token = Some("access-token".to_string());
+
+        let mut mgr = EmailManager {
+            messages: HashMap::new(),
+            drafts: HashMap::new(),
+            gmail: provider,
+            gmail_enabled: true,
+        };
+
+        let inbox = mgr.list_messages_async("inbox", 10).await.unwrap();
+        assert_eq!(inbox[0].id, "msg_inbox");
+
+        let results = mgr.search_async("release").await.unwrap();
+        assert_eq!(results[0].id, "msg_release");
+
+        let sent = mgr
+            .send_message_async(
+                vec!["team@example.com".to_string()],
+                "Mock release".to_string(),
+                "Ship it".to_string(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(sent.id, "sent_1");
+    }
+
+    #[tokio::test]
+    async fn email_manager_fallback_supports_send_list_search_move_and_mark_read() {
+        let mut mgr = EmailManager::with_google("client-id", "client-secret", true);
+        mgr.seed_samples();
+
+        assert!(!mgr.gmail_active());
+
+        let inbox = mgr.list_messages_async("inbox", 10).await.unwrap();
+        assert!(!inbox.is_empty());
+
+        let sent = mgr
+            .send_message_async(
+                vec!["dev@example.com".to_string()],
+                "Release check".to_string(),
+                "Please review the latest build".to_string(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(sent.folder, "sent");
+
+        let results = mgr.search_async("release").await.unwrap();
+        assert!(results.iter().any(|msg| msg.id == sent.id));
+
+        let first_inbox_id = inbox.first().unwrap().id.clone();
+        mgr.mark_read_async(&first_inbox_id).await.unwrap();
+        assert!(mgr.get_message_async(&first_inbox_id).await.unwrap().read);
+
+        mgr.move_to_async(&first_inbox_id, "archive").await.unwrap();
+        assert_eq!(
+            mgr.get_message_async(&first_inbox_id).await.unwrap().folder,
+            "archive"
+        );
     }
 }

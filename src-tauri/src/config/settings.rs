@@ -121,6 +121,8 @@ pub struct Settings {
     // C2: Auto-Update
     #[serde(default = "default_github_repo")]
     pub github_repo: String,
+    #[serde(default)]
+    pub updater_pubkey: String,
 
     // R25: Local LLMs (Ollama)
     #[serde(default)]
@@ -300,6 +302,9 @@ impl Settings {
             "github_repo" => {
                 self.github_repo = value.to_string();
             }
+            "updater_pubkey" => {
+                self.updater_pubkey = value.to_string();
+            }
             "use_local_llm" => {
                 self.use_local_llm = value == "true" || value == "1";
             }
@@ -421,6 +426,7 @@ impl Settings {
             "has_stripe_customer": !self.stripe_customer_id.is_empty(),
             "language": self.language,
             "github_repo": self.github_repo,
+            "has_updater_pubkey": !self.updater_pubkey.trim().is_empty(),
             "use_local_llm": self.use_local_llm,
             "local_llm_url": self.local_llm_url,
             "local_model": self.local_model,
@@ -551,10 +557,13 @@ mod tests {
     fn to_json_masks_keys() {
         let mut s = Settings::default();
         s.set("anthropic_api_key", "sk-secret");
+        s.set("updater_pubkey", "pubkey-secret");
         let j = s.to_json();
         // to_json shows has_anthropic: true, not the actual key
         assert_eq!(j["has_anthropic"], true);
+        assert_eq!(j["has_updater_pubkey"], true);
         assert!(j.get("anthropic_api_key").is_none());
+        assert!(j.get("updater_pubkey").is_none());
     }
 }
 
@@ -607,6 +616,7 @@ impl Default for Settings {
             discord_bot_token: String::new(),
             discord_enabled: false,
             github_repo: default_github_repo(),
+            updater_pubkey: String::new(),
             use_local_llm: false,
             local_llm_url: default_local_llm_url(),
             local_model: default_local_model(),

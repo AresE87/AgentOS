@@ -7,6 +7,12 @@ pub struct Database {
     conn: Connection,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct BillingState {
+    pub plan_type: String,
+    pub stripe_customer_id: String,
+}
+
 impl Database {
     pub fn new(path: &std::path::Path) -> Result<Self, rusqlite::Error> {
         let conn = Connection::open(path)?;
@@ -128,21 +134,102 @@ impl Database {
                 tasks_count INTEGER NOT NULL DEFAULT 0,
                 tokens_used INTEGER NOT NULL DEFAULT 0,
                 plan_type TEXT NOT NULL DEFAULT 'free'
-            );",
+            );
+
+            CREATE TABLE IF NOT EXISTS billing_state (
+                singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+                plan_type TEXT NOT NULL DEFAULT 'free',
+                stripe_customer_id TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            INSERT OR IGNORE INTO billing_state (singleton, plan_type, stripe_customer_id)
+            VALUES (1, 'free', '');",
         )
     }
 
     /// Increment the daily task and token counters. Called on each task execution.
     pub fn increment_daily_usage(&self, tokens: i64) -> Result<(), rusqlite::Error> {
+        let billing = self.get_billing_state()?;
         self.conn.execute(
             "INSERT INTO daily_usage (date, tasks_count, tokens_used, plan_type)
-             VALUES (date('now'), 1, ?1, 'free')
+             VALUES (date('now'), 1, ?1, ?2)
              ON CONFLICT(date) DO UPDATE SET
                 tasks_count = tasks_count + 1,
-                tokens_used = tokens_used + ?1",
-            params![tokens],
+                tokens_used = tokens_used + ?1,
+                plan_type = ?2",
+            params![tokens, billing.plan_type],
         )?;
         Ok(())
+    }
+
+    pub fn get_billing_state(&self) -> Result<BillingState, rusqlite::Error> {
+        self.conn.query_row(
+            "SELECT plan_type, stripe_customer_id FROM billing_state WHERE singleton = 1",
+            [],
+            |row| {
+                Ok(BillingState {
+                    plan_type: row.get(0)?,
+                    stripe_customer_id: row.get(1)?,
+                })
+            },
+        )
+    }
+
+    pub fn set_billing_state(
+        &self,
+        plan_type: &str,
+        stripe_customer_id: Option<&str>,
+    ) -> Result<(), rusqlite::Error> {
+        let normalized_plan = normalize_plan_type(plan_type);
+
+        self.conn.execute(
+            "INSERT INTO billing_state (singleton, plan_type, stripe_customer_id, updated_at)
+             VALUES (1, ?1, COALESCE(?2, ''), datetime('now'))
+             ON CONFLICT(singleton) DO UPDATE SET
+                plan_type = excluded.plan_type,
+                stripe_customer_id = CASE
+                    WHEN ?2 IS NULL THEN billing_state.stripe_customer_id
+                    ELSE excluded.stripe_customer_id
+                END,
+                updated_at = datetime('now')",
+            params![normalized_plan, stripe_customer_id],
+        )?;
+
+        self.conn.execute(
+            "INSERT INTO daily_usage (date, tasks_count, tokens_used, plan_type)
+             VALUES (date('now'), 0, 0, ?1)
+             ON CONFLICT(date) DO UPDATE SET plan_type = ?1",
+            params![normalized_plan],
+        )?;
+
+        Ok(())
+    }
+
+    pub fn sync_billing_state_from_settings(
+        &self,
+        plan_type: &str,
+        stripe_customer_id: &str,
+    ) -> Result<BillingState, rusqlite::Error> {
+        let current = self.get_billing_state()?;
+        let normalized_plan = normalize_plan_type(plan_type);
+        let config_customer = stripe_customer_id.trim();
+
+        if current.plan_type == "free"
+            && current.stripe_customer_id.is_empty()
+            && (normalized_plan != "free" || !config_customer.is_empty())
+        {
+            self.set_billing_state(
+                normalized_plan,
+                if config_customer.is_empty() {
+                    None
+                } else {
+                    Some(config_customer)
+                },
+            )?;
+        }
+
+        self.get_billing_state()
     }
 
     /// Get today's usage from the daily_usage table.
@@ -222,19 +309,17 @@ impl Database {
     }
 
     pub fn get_analytics(&self) -> Result<Value, rusqlite::Error> {
-        let total_tasks: i64 =
-            self.conn
-                .query_row("SELECT COUNT(*) FROM tasks", [], |r| r.get(0))?;
+        let total_tasks: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM tasks", [], |r| r.get(0))?;
         let completed: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM tasks WHERE status='completed'",
             [],
             |r| r.get(0),
         )?;
-        let total_cost: f64 = self.conn.query_row(
-            "SELECT COALESCE(SUM(cost), 0) FROM tasks",
-            [],
-            |r| r.get(0),
-        )?;
+        let total_cost: f64 =
+            self.conn
+                .query_row("SELECT COALESCE(SUM(cost), 0) FROM tasks", [], |r| r.get(0))?;
         let total_tokens: i64 = self.conn.query_row(
             "SELECT COALESCE(SUM(tokens_in + tokens_out), 0) FROM tasks",
             [],
@@ -338,42 +423,91 @@ impl Database {
         };
 
         let total: i64 = self.conn.query_row(
-            &format!("SELECT COUNT(*) FROM tasks WHERE {}", date_filter), [], |r| r.get(0))?;
+            &format!("SELECT COUNT(*) FROM tasks WHERE {}", date_filter),
+            [],
+            |r| r.get(0),
+        )?;
         let completed: i64 = self.conn.query_row(
-            &format!("SELECT COUNT(*) FROM tasks WHERE status='completed' AND {}", date_filter), [], |r| r.get(0))?;
+            &format!(
+                "SELECT COUNT(*) FROM tasks WHERE status='completed' AND {}",
+                date_filter
+            ),
+            [],
+            |r| r.get(0),
+        )?;
         let failed: i64 = self.conn.query_row(
-            &format!("SELECT COUNT(*) FROM tasks WHERE status='failed' AND {}", date_filter), [], |r| r.get(0))?;
+            &format!(
+                "SELECT COUNT(*) FROM tasks WHERE status='failed' AND {}",
+                date_filter
+            ),
+            [],
+            |r| r.get(0),
+        )?;
         let total_cost: f64 = self.conn.query_row(
-            &format!("SELECT COALESCE(SUM(cost), 0) FROM tasks WHERE {}", date_filter), [], |r| r.get(0))?;
+            &format!(
+                "SELECT COALESCE(SUM(cost), 0) FROM tasks WHERE {}",
+                date_filter
+            ),
+            [],
+            |r| r.get(0),
+        )?;
         let total_tokens: i64 = self.conn.query_row(
-            &format!("SELECT COALESCE(SUM(tokens_in + tokens_out), 0) FROM tasks WHERE {}", date_filter), [], |r| r.get(0))?;
+            &format!(
+                "SELECT COALESCE(SUM(tokens_in + tokens_out), 0) FROM tasks WHERE {}",
+                date_filter
+            ),
+            [],
+            |r| r.get(0),
+        )?;
         let avg_latency: f64 = self.conn.query_row(
-            &format!("SELECT COALESCE(AVG(duration_ms), 0) FROM tasks WHERE {}", date_filter), [], |r| r.get(0))?;
+            &format!(
+                "SELECT COALESCE(AVG(duration_ms), 0) FROM tasks WHERE {}",
+                date_filter
+            ),
+            [],
+            |r| r.get(0),
+        )?;
 
-        let success_rate = if total > 0 { (completed as f64 / total as f64) * 100.0 } else { 0.0 };
+        let success_rate = if total > 0 {
+            (completed as f64 / total as f64) * 100.0
+        } else {
+            0.0
+        };
 
         // Cost by provider
-        let mut stmt = self.conn.prepare(
-            &format!("SELECT COALESCE(provider, 'unknown'), SUM(cost) FROM tasks WHERE {} GROUP BY provider", date_filter))?;
-        let cost_by_provider: Vec<Value> = stmt.query_map([], |row| {
-            Ok(json!({ "provider": row.get::<_, String>(0)?, "cost": row.get::<_, f64>(1)? }))
-        })?.filter_map(|r| r.ok()).collect();
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT COALESCE(provider, 'unknown'), SUM(cost) FROM tasks WHERE {} GROUP BY provider",
+            date_filter
+        ))?;
+        let cost_by_provider: Vec<Value> = stmt
+            .query_map([], |row| {
+                Ok(json!({ "provider": row.get::<_, String>(0)?, "cost": row.get::<_, f64>(1)? }))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
 
         // Tasks by day (last 7 days)
         let mut stmt = self.conn.prepare(
             "SELECT date(created_at) as day, COUNT(*) as count
              FROM tasks WHERE date(created_at) >= date('now', '-7 days')
-             GROUP BY date(created_at) ORDER BY day")?;
-        let daily_tasks: Vec<Value> = stmt.query_map([], |row| {
-            Ok(json!({ "day": row.get::<_, String>(0)?, "tasks": row.get::<_, i32>(1)? }))
-        })?.filter_map(|r| r.ok()).collect();
+             GROUP BY date(created_at) ORDER BY day",
+        )?;
+        let daily_tasks: Vec<Value> = stmt
+            .query_map([], |row| {
+                Ok(json!({ "day": row.get::<_, String>(0)?, "tasks": row.get::<_, i32>(1)? }))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
 
         // Tasks by type
         let mut stmt = self.conn.prepare(
             &format!("SELECT COALESCE(task_type, 'unknown'), COUNT(*) FROM tasks WHERE {} GROUP BY task_type", date_filter))?;
-        let tasks_by_type: Vec<Value> = stmt.query_map([], |row| {
-            Ok(json!({ "name": row.get::<_, String>(0)?, "value": row.get::<_, i32>(1)? }))
-        })?.filter_map(|r| r.ok()).collect();
+        let tasks_by_type: Vec<Value> = stmt
+            .query_map([], |row| {
+                Ok(json!({ "name": row.get::<_, String>(0)?, "value": row.get::<_, i32>(1)? }))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
 
         Ok(json!({
             "total_tasks": total,
@@ -398,11 +532,11 @@ impl Database {
              GROUP BY input_text
              HAVING cnt >= ?2
              ORDER BY cnt DESC
-             LIMIT 5")?;
+             LIMIT 5",
+        )?;
 
-        let repeated: Vec<Value> = stmt.query_map(
-            params![format!("-{} days", days), threshold],
-            |row| {
+        let repeated: Vec<Value> = stmt
+            .query_map(params![format!("-{} days", days), threshold], |row| {
                 Ok(json!({
                     "input": row.get::<_, String>(0)?,
                     "count": row.get::<_, i32>(1)?,
@@ -576,7 +710,16 @@ impl Database {
              duration_ms = ?6, agent_name = ?7, model = ?8,
              progress = CASE WHEN ?2 = 'done' THEN 1.0 WHEN ?2 = 'running' THEN 0.5 ELSE 0.0 END
              WHERE id = ?1",
-            params![subtask_id, status, message, output, cost, duration_ms as i64, agent_name, model],
+            params![
+                subtask_id,
+                status,
+                message,
+                output,
+                cost,
+                duration_ms as i64,
+                agent_name,
+                model
+            ],
         )?;
         Ok(())
     }
@@ -736,7 +879,8 @@ impl Database {
     }
 
     pub fn delete_trigger(&self, id: &str) -> Result<(), rusqlite::Error> {
-        self.conn.execute("DELETE FROM triggers WHERE id = ?1", params![id])?;
+        self.conn
+            .execute("DELETE FROM triggers WHERE id = ?1", params![id])?;
         Ok(())
     }
 
@@ -759,6 +903,14 @@ impl Database {
             params![id, last_run],
         )?;
         Ok(())
+    }
+}
+
+fn normalize_plan_type(plan_type: &str) -> &str {
+    match plan_type {
+        "pro" => "pro",
+        "team" => "team",
+        _ => "free",
     }
 }
 
@@ -809,6 +961,35 @@ mod tests {
         let _db2 = Database::new(&path).unwrap();
         let tasks = db.get_tasks(10).unwrap();
         assert!(tasks.as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn billing_state_defaults_to_free() {
+        let (db, _) = temp_db();
+        let billing = db.get_billing_state().unwrap();
+        assert_eq!(billing.plan_type, "free");
+        assert!(billing.stripe_customer_id.is_empty());
+    }
+
+    #[test]
+    fn set_billing_state_updates_usage_plan_type() {
+        let (db, _) = temp_db();
+        db.set_billing_state("pro", Some("cus_123")).unwrap();
+        db.increment_daily_usage(42).unwrap();
+
+        let billing = db.get_billing_state().unwrap();
+        assert_eq!(billing.plan_type, "pro");
+        assert_eq!(billing.stripe_customer_id, "cus_123");
+
+        let plan_type: String = db
+            .conn()
+            .query_row(
+                "SELECT plan_type FROM daily_usage WHERE date = date('now')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(plan_type, "pro");
     }
 
     // ── Insert and retrieve task ───────────────────────────────
@@ -874,7 +1055,8 @@ mod tests {
     #[test]
     fn update_task_output() {
         let (db, _) = temp_db();
-        db.create_task_pending("task_p2", "do another thing").unwrap();
+        db.create_task_pending("task_p2", "do another thing")
+            .unwrap();
         db.update_task_output("task_p2", "Result: success").unwrap();
 
         let tasks = db.get_tasks(10).unwrap();
@@ -887,10 +1069,31 @@ mod tests {
     #[test]
     fn insert_and_get_task_steps() {
         let (db, _) = temp_db();
-        db.create_task_pending("task_s1", "multi-step task").unwrap();
+        db.create_task_pending("task_s1", "multi-step task")
+            .unwrap();
 
-        db.insert_task_step("task_s1", 1, "run_command", "echo hi", "", "terminal", true, 100).unwrap();
-        db.insert_task_step("task_s1", 2, "click", "click button", "", "screen", true, 50).unwrap();
+        db.insert_task_step(
+            "task_s1",
+            1,
+            "run_command",
+            "echo hi",
+            "",
+            "terminal",
+            true,
+            100,
+        )
+        .unwrap();
+        db.insert_task_step(
+            "task_s1",
+            2,
+            "click",
+            "click button",
+            "",
+            "screen",
+            true,
+            50,
+        )
+        .unwrap();
 
         let steps = db.get_task_steps("task_s1").unwrap();
         let arr = steps.as_array().unwrap();
@@ -907,9 +1110,12 @@ mod tests {
         let (db, _) = temp_db();
         db.create_task_pending("task_s2", "ordered steps").unwrap();
         // Insert out of order
-        db.insert_task_step("task_s2", 3, "type", "typing", "", "screen", true, 30).unwrap();
-        db.insert_task_step("task_s2", 1, "click", "first click", "", "screen", true, 10).unwrap();
-        db.insert_task_step("task_s2", 2, "run_command", "cmd", "", "terminal", true, 20).unwrap();
+        db.insert_task_step("task_s2", 3, "type", "typing", "", "screen", true, 30)
+            .unwrap();
+        db.insert_task_step("task_s2", 1, "click", "first click", "", "screen", true, 10)
+            .unwrap();
+        db.insert_task_step("task_s2", 2, "run_command", "cmd", "", "terminal", true, 20)
+            .unwrap();
 
         let steps = db.get_task_steps("task_s2").unwrap();
         let arr = steps.as_array().unwrap();
@@ -934,14 +1140,24 @@ mod tests {
     fn analytics_with_tasks() {
         let (db, _) = temp_db();
         let r1 = LLMResponse {
-            task_id: "t1".into(), content: "ok".into(), model: "haiku".into(),
-            provider: "anthropic".into(), tokens_in: 100, tokens_out: 200,
-            cost: 0.01, duration_ms: 500,
+            task_id: "t1".into(),
+            content: "ok".into(),
+            model: "haiku".into(),
+            provider: "anthropic".into(),
+            tokens_in: 100,
+            tokens_out: 200,
+            cost: 0.01,
+            duration_ms: 500,
         };
         let r2 = LLMResponse {
-            task_id: "t2".into(), content: "ok".into(), model: "haiku".into(),
-            provider: "anthropic".into(), tokens_in: 50, tokens_out: 150,
-            cost: 0.005, duration_ms: 300,
+            task_id: "t2".into(),
+            content: "ok".into(),
+            model: "haiku".into(),
+            provider: "anthropic".into(),
+            tokens_in: 50,
+            tokens_out: 150,
+            cost: 0.005,
+            duration_ms: 300,
         };
         db.insert_task("hello", &r1).unwrap();
         db.insert_task("world", &r2).unwrap();
@@ -966,7 +1182,8 @@ mod tests {
     fn insert_llm_call() {
         let (db, _) = temp_db();
         db.create_task_pending("t_llm", "test llm").unwrap();
-        db.insert_llm_call("t_llm", "anthropic", "haiku", 100, 200, 0.01, 500).unwrap();
+        db.insert_llm_call("t_llm", "anthropic", "haiku", 100, 200, 0.01, 500)
+            .unwrap();
         // No panic = success. The llm_calls table is not directly queried in the current API,
         // but insert_task already creates one, so we verify it doesn't error.
     }
@@ -976,10 +1193,22 @@ mod tests {
     #[test]
     fn create_and_list_triggers() {
         let (db, _) = temp_db();
-        db.create_trigger("tr1", "Morning report", "cron", r#"{"cron":"0 9 * * *"}"#, "Generate daily report")
-            .unwrap();
-        db.create_trigger("tr2", "Hourly check", "cron", r#"{"cron":"0 * * * *"}"#, "Check system status")
-            .unwrap();
+        db.create_trigger(
+            "tr1",
+            "Morning report",
+            "cron",
+            r#"{"cron":"0 9 * * *"}"#,
+            "Generate daily report",
+        )
+        .unwrap();
+        db.create_trigger(
+            "tr2",
+            "Hourly check",
+            "cron",
+            r#"{"cron":"0 * * * *"}"#,
+            "Check system status",
+        )
+        .unwrap();
 
         let triggers = db.get_triggers().unwrap();
         assert_eq!(triggers.len(), 2);
@@ -1009,8 +1238,14 @@ mod tests {
     #[test]
     fn update_trigger() {
         let (db, _) = temp_db();
-        db.create_trigger("tr1", "Old Name", "cron", r#"{"cron":"*/5 * * * *"}"#, "old task")
-            .unwrap();
+        db.create_trigger(
+            "tr1",
+            "Old Name",
+            "cron",
+            r#"{"cron":"*/5 * * * *"}"#,
+            "old task",
+        )
+        .unwrap();
 
         db.update_trigger("tr1", "New Name", r#"{"cron":"*/10 * * * *"}"#, "new task")
             .unwrap();
@@ -1037,9 +1272,13 @@ mod tests {
         db.create_trigger("tr1", "Test", "cron", r#"{"cron":"*/5 * * * *"}"#, "test")
             .unwrap();
 
-        db.update_trigger_last_run("tr1", "2026-03-29T10:00:00Z").unwrap();
+        db.update_trigger_last_run("tr1", "2026-03-29T10:00:00Z")
+            .unwrap();
 
         let triggers = db.get_triggers().unwrap();
-        assert_eq!(triggers[0].last_run, Some("2026-03-29T10:00:00Z".to_string()));
+        assert_eq!(
+            triggers[0].last_run,
+            Some("2026-03-29T10:00:00Z".to_string())
+        );
     }
 }

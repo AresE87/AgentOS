@@ -38,10 +38,29 @@ export interface AgentSettings {
     log_level: string;
     max_cost_per_task: number;
     cli_timeout: number;
+    max_steps_per_task: number;
+    input_delay_ms: number;
+    screenshot_quality: number;
+    plan_type: string;
     has_anthropic: boolean;
     has_openai: boolean;
     has_google: boolean;
     has_telegram: boolean;
+    has_whatsapp?: boolean;
+    has_stripe?: boolean;
+    has_stripe_customer?: boolean;
+    has_updater_pubkey?: boolean;
+    language?: string;
+    github_repo?: string;
+    use_local_llm?: boolean;
+    local_llm_url?: string;
+    local_model?: string;
+    voice_enabled?: boolean;
+    has_google_calendar?: boolean;
+    has_google_refresh_token?: boolean;
+    google_gmail_enabled?: boolean;
+    has_discord?: boolean;
+    discord_enabled?: boolean;
 }
 
 // Chain / Task Board

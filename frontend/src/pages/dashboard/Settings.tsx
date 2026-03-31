@@ -1,74 +1,181 @@
-// AOS-R20 — Settings page (release polish)
-import { useState, useEffect, useCallback } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  CreditCard,
+  ExternalLink,
+  MessageCircle,
+  RefreshCw,
+  RotateCcw,
+} from 'lucide-react';
 import Card from '../../components/Card';
 import Button from '../../components/Button';
 import Input from '../../components/Input';
-import Toggle from '../../components/Toggle';
 import { useAgent } from '../../hooks/useAgent';
 import type { AgentSettings } from '../../types/ipc';
-import {
-  ExternalLink,
-  RotateCcw,
-  Trash2,
-  MessageCircle,
-  RefreshCw,
-} from 'lucide-react';
 
 interface SettingsPageProps {
   onResetWizard?: () => void;
 }
 
-export default function Settings({ onResetWizard }: SettingsPageProps) {
-  const { getSettings, updateSettings, healthCheck, getChannelStatus } = useAgent();
-  const [settings, setSettings] = useState<AgentSettings | null>(null);
-  const [loading, setLoading] = useState(true);
+interface BillingPlanSummary {
+  plan_type: string;
+  display_name: string;
+  limits: {
+    tasks_per_day: number | null;
+    tokens_per_day: number | null;
+    mesh_nodes: number;
+    can_use_triggers: boolean;
+    can_use_marketplace: boolean;
+  };
+  usage: {
+    tasks_today: number;
+    tokens_today: number;
+    cost_today: number;
+  };
+}
 
-  // Provider key inputs
+interface UpdateStatus {
+  current_version: string;
+  latest_version: string | null;
+  update_available: boolean;
+  release_notes: string | null;
+  download_url: string | null;
+  checked_at: string;
+  updater_configured: boolean;
+  install_supported: boolean;
+  status_mode: 'check_only' | 'manifest_pending' | 'install_ready';
+  check_strategy: string;
+  release_url: string;
+  manifest_url: string;
+  status_message: string | null;
+}
+
+function StatusBadge({
+  label,
+  tone,
+}: {
+  label: string;
+  tone: 'success' | 'warning' | 'muted';
+}) {
+  const styles = {
+    success:
+      'bg-[#2ECC71]/10 text-[#2ECC71] border border-[#2ECC71]/20',
+    warning:
+      'bg-[#F39C12]/10 text-[#F39C12] border border-[#F39C12]/20',
+    muted:
+      'bg-[#1A1E26] text-[#3D4F5F] border border-[#1A1E26]',
+  } as const;
+
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] ${styles[tone]}`}>
+      {label}
+    </span>
+  );
+}
+
+export default function Settings({ onResetWizard }: SettingsPageProps) {
+  const {
+    getSettings,
+    updateSettings,
+    healthCheck,
+    getChannelStatus,
+    checkForUpdate,
+    installUpdate,
+    getCurrentVersion,
+    getPlan,
+  } = useAgent();
+
+  const [settings, setSettings] = useState<AgentSettings | null>(null);
+  const [plan, setPlan] = useState<BillingPlanSummary | null>(null);
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
+  const [version, setVersion] = useState('unknown');
+  const [loading, setLoading] = useState(true);
+  const [updateLoading, setUpdateLoading] = useState(false);
+  const [installingUpdate, setInstallingUpdate] = useState(false);
+  const [githubRepoInput, setGithubRepoInput] = useState('AresE87/AgentOS');
+  const [updaterPubkeyInput, setUpdaterPubkeyInput] = useState('');
+
   const [keyInputs, setKeyInputs] = useState<Record<string, string>>({});
   const [testing, setTesting] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, boolean>>({});
 
-  // Channel status from backend
   const [channelStatus, setChannelStatus] = useState<Record<string, { connected: boolean; info?: string }>>({});
   const [channelLoading, setChannelLoading] = useState(false);
 
-  // Permission state
-  const [permissions, setPermissions] = useState({
-    cli: true,
-    screen: false,
-    files: true,
-    network: true,
-  });
-
-  // Agent config
-  const [logLevel, setLogLevel] = useState('info');
-  const [maxCost, setMaxCost] = useState('5.00');
-  const [cliTimeout, setCliTimeout] = useState('30');
-  const [defaultLevel, setDefaultLevel] = useState('auto');
-  const [maxConcurrent, setMaxConcurrent] = useState('3');
+  const [logLevel, setLogLevel] = useState('INFO');
+  const [maxCost, setMaxCost] = useState('1.0');
+  const [cliTimeout, setCliTimeout] = useState('300');
+  const [maxSteps, setMaxSteps] = useState('20');
+  const [inputDelay, setInputDelay] = useState('50');
+  const [language, setLanguage] = useState('auto');
 
   const refreshChannels = useCallback(async () => {
     setChannelLoading(true);
     try {
       const result = await getChannelStatus();
       setChannelStatus((result as any).channels || {});
-    } catch { /* ignore */ }
+    } catch {
+      setChannelStatus({});
+    }
     setChannelLoading(false);
   }, [getChannelStatus]);
 
+  const refreshUpdateStatus = useCallback(async () => {
+    setUpdateLoading(true);
+    try {
+      const result = await checkForUpdate();
+      setUpdateStatus(result as UpdateStatus);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Update check failed';
+      setUpdateStatus((prev) => ({
+        current_version: prev?.current_version || version,
+        latest_version: prev?.latest_version || null,
+        update_available: false,
+        release_notes: prev?.release_notes || null,
+        download_url: prev?.download_url || null,
+        checked_at: prev?.checked_at || new Date().toISOString(),
+        updater_configured: prev?.updater_configured || false,
+        install_supported: false,
+        check_strategy: prev?.check_strategy || 'github_release_api',
+        release_url:
+          prev?.release_url || `https://github.com/${settings?.github_repo || 'AresE87/AgentOS'}/releases`,
+        manifest_url:
+          prev?.manifest_url ||
+          `https://github.com/${settings?.github_repo || 'AresE87/AgentOS'}/releases/latest/download/latest.json`,
+        status_mode: prev?.status_mode || 'check_only',
+        status_message: message,
+      }));
+    }
+    setUpdateLoading(false);
+  }, [checkForUpdate, settings?.github_repo, version]);
+
   const refresh = useCallback(async () => {
     try {
-      const s = await getSettings();
-      setSettings(s);
-      setLogLevel(s.log_level);
-      setMaxCost(String(s.max_cost_per_task));
-      setCliTimeout(String(s.cli_timeout));
-    } catch {
-      // backend not ready
+      const [settingsResult, versionResult, planResult, updateResult] = await Promise.all([
+        getSettings(),
+        getCurrentVersion(),
+        getPlan(),
+        checkForUpdate().catch(() => null),
+      ]);
+
+      setSettings(settingsResult);
+      setVersion(versionResult.version);
+      setPlan(planResult as BillingPlanSummary);
+      if (updateResult) {
+        setUpdateStatus(updateResult as UpdateStatus);
+      }
+      setGithubRepoInput(settingsResult.github_repo || 'AresE87/AgentOS');
+      setUpdaterPubkeyInput('');
+      setLogLevel(settingsResult.log_level);
+      setMaxCost(String(settingsResult.max_cost_per_task));
+      setCliTimeout(String(settingsResult.cli_timeout));
+      setMaxSteps(String(settingsResult.max_steps_per_task));
+      setInputDelay(String(settingsResult.input_delay_ms));
+      setLanguage(settingsResult.language || 'auto');
+    } finally {
+      await refreshChannels();
+      setLoading(false);
     }
-    await refreshChannels();
-    setLoading(false);
-  }, [getSettings, refreshChannels]);
+  }, [checkForUpdate, getCurrentVersion, getPlan, getSettings, refreshChannels]);
 
   useEffect(() => {
     refresh();
@@ -89,33 +196,142 @@ export default function Settings({ onResetWizard }: SettingsPageProps) {
     setTesting(null);
   };
 
-  const savePermissions = async (perms: typeof permissions) => {
-    const enabled = Object.entries(perms)
-      .filter(([, v]) => v)
-      .map(([k]) => k)
-      .join(',');
-    try {
-      await updateSettings('permissions', enabled);
-    } catch {
-      // handle error
-    }
-  };
-
   const handleSaveConfig = async (key: string, value: string) => {
     try {
       await updateSettings(key, value);
+      await refresh();
     } catch {
-      // handle error
+      // leave UI state as-is until the next refresh
+    }
+  };
+
+  const handleInstallUpdate = async () => {
+    setInstallingUpdate(true);
+    try {
+      await installUpdate();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Update install failed';
+      setUpdateStatus((prev) =>
+        prev
+          ? {
+              ...prev,
+              install_supported: false,
+              status_message: message,
+            }
+          : null,
+      );
+      setInstallingUpdate(false);
     }
   };
 
   const providers = [
-    { id: 'anthropic', label: 'Anthropic', hasKey: settings?.has_anthropic },
-    { id: 'openai', label: 'OpenAI', hasKey: settings?.has_openai },
-    { id: 'google', label: 'Google AI', hasKey: settings?.has_google },
+    { id: 'anthropic', label: 'Anthropic', configured: settings?.has_anthropic },
+    { id: 'openai', label: 'OpenAI', configured: settings?.has_openai },
+    { id: 'google', label: 'Google AI', configured: settings?.has_google },
   ];
 
-  if (loading) {
+  const integrations = useMemo(() => {
+    if (!settings || !plan) return [];
+
+    return [
+      {
+        name: 'Google Calendar',
+        description: settings.has_google_calendar
+          ? settings.has_google_refresh_token
+            ? 'OAuth configurado y token de refresh presente'
+            : 'Cliente OAuth configurado; falta completar autenticación'
+          : 'No configurado',
+        label: settings.has_google_calendar
+          ? settings.has_google_refresh_token ? 'Real' : 'Parcial'
+          : 'Deshabilitado',
+        tone: settings.has_google_calendar
+          ? settings.has_google_refresh_token ? 'success' : 'warning'
+          : 'muted',
+      },
+      {
+        name: 'Gmail',
+        description: settings.google_gmail_enabled
+          ? settings.has_google_refresh_token
+            ? 'Gmail API habilitado con token compartido de Google'
+            : 'Habilitado, pero sin token de refresh aún'
+          : 'Deshabilitado en settings',
+        label: settings.google_gmail_enabled
+          ? settings.has_google_refresh_token ? 'Real' : 'Parcial'
+          : 'Deshabilitado',
+        tone: settings.google_gmail_enabled
+          ? settings.has_google_refresh_token ? 'success' : 'warning'
+          : 'muted',
+      },
+      {
+        name: 'Stripe Billing',
+        description: settings.has_stripe
+          ? settings.has_stripe_customer
+            ? `Plan ${plan.display_name} con customer de Stripe persistido`
+            : `Stripe configurado; plan actual ${plan.display_name}`
+          : 'Backend de billing activo, pero sin claves Stripe configuradas',
+        label: settings.has_stripe ? 'Configurado' : 'Parcial',
+        tone: settings.has_stripe ? 'success' : 'warning',
+      },
+      {
+        name: 'Voice',
+        description: settings.voice_enabled
+          ? 'TTS/STT habilitado en configuración'
+          : 'Feature real, pero actualmente apagada',
+        label: settings.voice_enabled ? 'Habilitado' : 'Desactivado',
+        tone: settings.voice_enabled ? 'success' : 'muted',
+      },
+      {
+        name: 'Ollama',
+        description: settings.use_local_llm
+          ? `Fallback local activo vía ${settings.local_model || 'modelo local'}`
+          : 'Disponible, pero no habilitado como fallback local',
+        label: settings.use_local_llm ? 'Habilitado' : 'Desactivado',
+        tone: settings.use_local_llm ? 'success' : 'muted',
+      },
+      {
+        name: 'Triggers',
+        description: plan.limits.can_use_triggers
+          ? 'Permitidos por el plan actual'
+          : 'Bloqueados por plan; el backend los limita de forma real',
+        label: plan.limits.can_use_triggers ? 'Disponible' : 'Bloqueado',
+        tone: plan.limits.can_use_triggers ? 'success' : 'warning',
+      },
+      {
+        name: 'Auto-Update',
+        description: updateStatus?.install_supported
+          ? 'Flujo firmado de Tauri validado contra latest.json'
+          : settings.has_updater_pubkey
+            ? 'Clave publica presente, pero el manifest firmado no esta validando aun'
+            : 'Solo chequeo de GitHub Releases; instalacion automatica deshabilitada',
+        label: updateStatus?.install_supported ? 'Real' : 'Parcial',
+        tone: updateStatus?.install_supported ? 'success' : 'warning',
+      },
+    ] as const;
+  }, [plan, settings, updateStatus]);
+
+  const channels = useMemo(() => {
+    if (!settings) return [];
+
+    return [
+      {
+        key: 'telegram',
+        name: 'Telegram',
+        configured: settings.has_telegram,
+      },
+      {
+        key: 'discord',
+        name: 'Discord',
+        configured: Boolean(settings.has_discord && settings.discord_enabled),
+      },
+      {
+        key: 'whatsapp',
+        name: 'WhatsApp',
+        configured: Boolean(settings.has_whatsapp),
+      },
+    ];
+  }, [settings]);
+
+  if (loading || !settings || !plan) {
     return (
       <div className="p-6">
         <p className="text-sm text-[#3D4F5F]">Loading settings...</p>
@@ -123,66 +339,116 @@ export default function Settings({ onResetWizard }: SettingsPageProps) {
     );
   }
 
+  const releaseUrl =
+    updateStatus?.release_url ||
+    `https://github.com/${settings.github_repo || 'AresE87/AgentOS'}/releases`;
+  const updateBadge = updateStatus?.install_supported
+    ? updateStatus.update_available
+      ? { label: 'Ready to install', tone: 'success' as const }
+      : { label: 'Installer ready', tone: 'success' as const }
+    : updateStatus?.status_mode === 'manifest_pending'
+      ? { label: 'Experimental', tone: 'warning' as const }
+      : { label: 'Check only', tone: 'warning' as const };
+  const updateSummary = updateStatus?.install_supported
+    ? updateStatus.update_available
+      ? `Signed update ${updateStatus.latest_version || 'available'} is ready to download and install.`
+      : 'Signed updater validated successfully. No newer installable version is currently published.'
+    : updateStatus?.status_mode === 'manifest_pending'
+      ? 'A public key is configured, but the signed updater manifest is not validating yet.'
+      : 'This build can check GitHub Releases, but auto-install stays disabled until a public key is configured.';
+
   return (
-    <div className="p-6 space-y-6 max-w-4xl">
+    <div className="max-w-4xl space-y-6 p-6">
       <h1 className="text-xl font-bold text-[#E6EDF3]">Settings</h1>
 
-      {/* Plan info */}
-      <div className="rounded-lg border border-[#00E5E5]/20 bg-gradient-to-r from-[#00E5E5]/5 to-transparent p-5 shadow-md shadow-black/20">
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] font-bold tracking-widest text-[#3D4F5F] uppercase">Plan:</span>
-          <span className="text-sm font-bold text-[#00E5E5]">AgentOS Free</span>
-          <span className="text-xs text-[#3D4F5F]">&mdash; Bring your own API keys</span>
-        </div>
-      </div>
+      <Card header="Billing & Usage">
+        <div className="space-y-4">
+          <div className="flex items-start justify-between gap-4 rounded-lg border border-[#00E5E5]/20 bg-gradient-to-r from-[#00E5E5]/5 to-transparent p-4">
+            <div className="flex items-center gap-3">
+              <div className="rounded-lg bg-[#00E5E5]/10 p-2 text-[#00E5E5]">
+                <CreditCard size={18} />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-[#E6EDF3]">{plan.display_name}</p>
+                <p className="text-xs text-[#3D4F5F]">
+                  Source of truth: backend billing state + persisted daily usage
+                </p>
+              </div>
+            </div>
+            <StatusBadge
+              label={settings.has_stripe ? 'Stripe configurado' : 'Stripe sin configurar'}
+              tone={settings.has_stripe ? 'success' : 'warning'}
+            />
+          </div>
 
-      {/* AI Providers */}
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="rounded-lg border border-[#1A1E26] bg-[#0A0E14] p-3">
+              <p className="text-[10px] uppercase tracking-widest text-[#3D4F5F]">Tasks Today</p>
+              <p className="mt-1 text-lg font-semibold text-[#E6EDF3]">
+                {plan.usage.tasks_today}
+                <span className="ml-1 text-xs text-[#3D4F5F]">
+                  / {plan.limits.tasks_per_day ?? '∞'}
+                </span>
+              </p>
+            </div>
+            <div className="rounded-lg border border-[#1A1E26] bg-[#0A0E14] p-3">
+              <p className="text-[10px] uppercase tracking-widest text-[#3D4F5F]">Tokens Today</p>
+              <p className="mt-1 text-lg font-semibold text-[#E6EDF3]">
+                {plan.usage.tokens_today.toLocaleString()}
+              </p>
+            </div>
+            <div className="rounded-lg border border-[#1A1E26] bg-[#0A0E14] p-3">
+              <p className="text-[10px] uppercase tracking-widest text-[#3D4F5F]">Cost Today</p>
+              <p className="mt-1 text-lg font-semibold text-[#E6EDF3]">
+                ${plan.usage.cost_today.toFixed(4)}
+              </p>
+            </div>
+          </div>
+        </div>
+      </Card>
+
       <Card header="AI Providers">
         <div className="space-y-4">
-          {providers.map((p) => (
-            <div key={p.id} className="space-y-2">
+          {providers.map((provider) => (
+            <div key={provider.id} className="space-y-2">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-[#E6EDF3]">{p.label}</span>
-                  {p.hasKey ? (
-                    <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full
-                      bg-[#2ECC71]/10 text-[#2ECC71] border border-[#2ECC71]/20
-                      shadow-[0_0_8px_rgba(46,204,113,0.15)]">
-                      <span className="h-1.5 w-1.5 rounded-full bg-[#2ECC71] shadow-[0_0_4px_#2ECC71]" />
-                      Connected
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full
-                      bg-[#1A1E26] text-[#3D4F5F] border border-[#1A1E26]">
-                      Not Configured
-                    </span>
-                  )}
+                  <span className="text-sm font-medium text-[#E6EDF3]">{provider.label}</span>
+                  <StatusBadge
+                    label={provider.configured ? 'Connected' : 'Not configured'}
+                    tone={provider.configured ? 'success' : 'muted'}
+                  />
                 </div>
               </div>
+
               <div className="flex items-end gap-2">
                 <div className="flex-1">
                   <Input
                     isPassword
-                    placeholder={p.hasKey ? '********' : 'Enter API key'}
-                    value={keyInputs[p.id] || ''}
+                    placeholder={provider.configured ? '********' : 'Enter API key'}
+                    value={keyInputs[provider.id] || ''}
                     onChange={(e) =>
-                      setKeyInputs((prev) => ({ ...prev, [p.id]: (e.target as HTMLInputElement).value }))
+                      setKeyInputs((prev) => ({
+                        ...prev,
+                        [provider.id]: (e.target as HTMLInputElement).value,
+                      }))
                     }
                   />
                 </div>
                 <Button
                   size="sm"
                   variant="secondary"
-                  loading={testing === p.id}
-                  onClick={() => handleTestProvider(p.id)}
-                  disabled={!keyInputs[p.id]}
+                  loading={testing === provider.id}
+                  onClick={() => handleTestProvider(provider.id)}
+                  disabled={!keyInputs[provider.id]}
                 >
                   Test
                 </Button>
               </div>
-              {testResults[p.id] !== undefined && (
-                <p className={`text-xs ${testResults[p.id] ? 'text-[#2ECC71]' : 'text-[#E74C3C]'}`}>
-                  {testResults[p.id] ? 'Connection successful' : 'Connection failed'}
+
+              {testResults[provider.id] !== undefined && (
+                <p className={`text-xs ${testResults[provider.id] ? 'text-[#2ECC71]' : 'text-[#E74C3C]'}`}>
+                  {testResults[provider.id] ? 'Connection successful' : 'Connection failed'}
                 </p>
               )}
             </div>
@@ -190,52 +456,35 @@ export default function Settings({ onResetWizard }: SettingsPageProps) {
         </div>
       </Card>
 
-      {/* Messaging Channels */}
       <Card header="Messaging Channels">
         <div className="space-y-3">
-          {[
-            { key: 'telegram', name: 'Telegram', fallback: settings?.has_telegram ?? false },
-            { key: 'discord', name: 'Discord', fallback: false },
-            { key: 'whatsapp', name: 'WhatsApp', fallback: false },
-          ].map((ch) => {
-            const status = channelStatus[ch.key];
-            const connected = status ? status.connected : ch.fallback;
+          {channels.map((channel) => {
+            const runtime = channelStatus[channel.key];
+            const connected = runtime ? runtime.connected : channel.configured;
             return (
-              <div key={ch.key} className="flex items-center justify-between">
+              <div key={channel.key} className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <MessageCircle size={16} className="text-[#E6EDF3]" />
-                  <span className="text-sm text-[#E6EDF3]">{ch.name}</span>
-                  {status?.info && (
-                    <span className="text-[10px] text-[#3D4F5F]">{status.info}</span>
-                  )}
+                  <span className="text-sm text-[#E6EDF3]">{channel.name}</span>
+                  {runtime?.info && <span className="text-[10px] text-[#3D4F5F]">{runtime.info}</span>}
                 </div>
-                <div className="flex items-center gap-2">
-                  {connected ? (
-                    <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full
-                      bg-[#2ECC71]/10 text-[#2ECC71] border border-[#2ECC71]/20
-                      shadow-[0_0_8px_rgba(46,204,113,0.15)]">
-                      <span className="h-1.5 w-1.5 rounded-full bg-[#2ECC71] shadow-[0_0_4px_#2ECC71]" />
-                      Connected
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full
-                      bg-[#1A1E26] text-[#3D4F5F] border border-[#1A1E26]">
-                      Not Configured
-                    </span>
-                  )}
-                </div>
+                <StatusBadge
+                  label={connected ? 'Connected' : channel.configured ? 'Configured' : 'Not configured'}
+                  tone={connected ? 'success' : channel.configured ? 'warning' : 'muted'}
+                />
               </div>
             );
           })}
         </div>
-        <div className="flex items-center justify-between mt-3">
+
+        <div className="mt-3 flex items-center justify-between">
           <p className="text-xs text-[#3D4F5F]">
-            Configure Telegram in the setup wizard. Discord via DISCORD_BOT_TOKEN env var. WhatsApp via Meta Business API.
+            Los badges reflejan estado real del backend; si una integración está apagada o sin credenciales, se muestra como tal.
           </p>
           <button
             onClick={refreshChannels}
             disabled={channelLoading}
-            className="text-[#3D4F5F] hover:text-[#C5D0DC] transition-colors disabled:opacity-50"
+            className="text-[#3D4F5F] transition-colors hover:text-[#C5D0DC] disabled:opacity-50"
             title="Refresh channel status"
           >
             <RefreshCw size={14} className={channelLoading ? 'animate-spin' : ''} />
@@ -243,194 +492,263 @@ export default function Settings({ onResetWizard }: SettingsPageProps) {
         </div>
       </Card>
 
-      {/* Integrations — working features */}
       <Card header="Integrations">
         <div className="space-y-3">
-          {[
-            { name: 'Google Calendar', desc: 'OAuth via Settings or agent chat', key: 'calendar' },
-            { name: 'Gmail', desc: 'OAuth via Settings or agent chat', key: 'gmail' },
-            { name: 'Voice (TTS/STT)', desc: 'Built-in speech synthesis and transcription', key: 'voice' },
-            { name: 'Ollama', desc: 'Local LLM — auto-detected when running', key: 'ollama' },
-            { name: 'API Server', desc: 'REST API for external integrations', key: 'api_server' },
-            { name: 'Stripe Billing', desc: 'Usage-based billing via Stripe checkout', key: 'stripe' },
-          ].map((item) => (
-            <div key={item.key} className="flex items-center justify-between">
+          {integrations.map((integration) => (
+            <div key={integration.name} className="flex items-center justify-between gap-3">
               <div>
-                <span className="text-sm text-[#E6EDF3]">{item.name}</span>
-                <p className="text-[10px] text-[#3D4F5F]">{item.desc}</p>
+                <span className="text-sm text-[#E6EDF3]">{integration.name}</span>
+                <p className="text-[10px] text-[#3D4F5F]">{integration.description}</p>
               </div>
-              <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full
-                bg-[#2ECC71]/10 text-[#2ECC71] border border-[#2ECC71]/20">
-                Available
-              </span>
+              <StatusBadge
+                label={integration.label}
+                tone={integration.tone}
+              />
             </div>
           ))}
         </div>
       </Card>
 
-      {/* Permissions */}
-      <Card header="Permissions">
+      <Card header="Updates">
         <div className="space-y-4">
-          <Toggle
-            label="Command Line"
-            description="Allow the agent to execute shell commands."
-            checked={permissions.cli}
-            onChange={(v) => {
-              const next = { ...permissions, cli: v };
-              setPermissions(next);
-              savePermissions(next);
-            }}
-          />
-          <Toggle
-            label="Screen Access"
-            description="Allow the agent to view and interact with your screen."
-            checked={permissions.screen}
-            onChange={(v) => {
-              const next = { ...permissions, screen: v };
-              setPermissions(next);
-              savePermissions(next);
-            }}
-          />
-          <Toggle
-            label="File System"
-            description="Allow the agent to read and write files."
-            checked={permissions.files}
-            onChange={(v) => {
-              const next = { ...permissions, files: v };
-              setPermissions(next);
-              savePermissions(next);
-            }}
-          />
-          <Toggle
-            label="Network"
-            description="Allow the agent to make outbound HTTP requests."
-            checked={permissions.network}
-            onChange={(v) => {
-              const next = { ...permissions, network: v };
-              setPermissions(next);
-              savePermissions(next);
-            }}
-          />
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-[#E6EDF3]">Desktop updater</p>
+              <p className="text-xs text-[#3D4F5F]">{updateSummary}</p>
+            </div>
+            <StatusBadge label={updateBadge.label} tone={updateBadge.tone} />
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="rounded-lg border border-[#1A1E26] bg-[#0A0E14] p-3">
+              <p className="text-[10px] uppercase tracking-widest text-[#3D4F5F]">Current</p>
+              <p className="mt-1 text-sm font-semibold text-[#E6EDF3]">{version}</p>
+            </div>
+            <div className="rounded-lg border border-[#1A1E26] bg-[#0A0E14] p-3">
+              <p className="text-[10px] uppercase tracking-widest text-[#3D4F5F]">Latest</p>
+              <p className="mt-1 text-sm font-semibold text-[#E6EDF3]">
+                {updateStatus?.latest_version || 'unknown'}
+              </p>
+            </div>
+            <div className="rounded-lg border border-[#1A1E26] bg-[#0A0E14] p-3">
+              <p className="text-[10px] uppercase tracking-widest text-[#3D4F5F]">Mode</p>
+              <p className="mt-1 text-sm font-semibold text-[#E6EDF3]">
+                {updateStatus?.status_mode === 'install_ready'
+                  ? 'Install ready'
+                  : updateStatus?.status_mode === 'manifest_pending'
+                    ? 'Manifest pending'
+                    : 'Check only'}
+              </p>
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-xs text-[#C5D0DC]">GitHub repo</label>
+              <div className="flex gap-2">
+                <Input
+                  value={githubRepoInput}
+                  onChange={(e) => setGithubRepoInput((e.target as HTMLInputElement).value)}
+                  placeholder="owner/repo"
+                />
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => handleSaveConfig('github_repo', githubRepoInput)}
+                >
+                  Save
+                </Button>
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs text-[#C5D0DC]">Updater public key</label>
+              <div className="flex gap-2">
+                <Input
+                  value={updaterPubkeyInput}
+                  onChange={(e) => setUpdaterPubkeyInput((e.target as HTMLInputElement).value)}
+                  placeholder={
+                    settings.has_updater_pubkey
+                      ? 'Public key already stored; paste to replace'
+                      : 'Paste updater public key'
+                  }
+                />
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => handleSaveConfig('updater_pubkey', updaterPubkeyInput)}
+                  disabled={!updaterPubkeyInput.trim()}
+                >
+                  Save
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-[#1A1E26] bg-[#0A0E14] p-3">
+            <p className="text-[10px] uppercase tracking-widest text-[#3D4F5F]">Manifest URL</p>
+            <p className="mt-1 break-all text-xs text-[#C5D0DC]">
+              {updateStatus?.manifest_url ||
+                `https://github.com/${githubRepoInput || 'AresE87/AgentOS'}/releases/latest/download/latest.json`}
+            </p>
+          </div>
+
+          {updateStatus?.status_message && (
+            <p className="rounded-lg border border-[#F39C12]/20 bg-[#F39C12]/10 p-3 text-xs text-[#F39C12]">
+              {updateStatus.status_message}
+            </p>
+          )}
+
+          {updateStatus?.release_notes && (
+            <div className="rounded-lg border border-[#1A1E26] bg-[#0A0E14] p-3">
+              <p className="text-[10px] uppercase tracking-widest text-[#3D4F5F]">Release notes</p>
+              <p className="mt-2 max-h-24 overflow-auto whitespace-pre-wrap text-xs text-[#C5D0DC]">
+                {updateStatus.release_notes}
+              </p>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" variant="secondary" onClick={refreshUpdateStatus} loading={updateLoading}>
+              Check now
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleInstallUpdate}
+              loading={installingUpdate}
+              disabled={!updateStatus?.update_available || !updateStatus.install_supported}
+            >
+              Install update
+            </Button>
+            <a
+              href={releaseUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-xs text-[#00E5E5] transition-colors hover:text-[#00B8D4]"
+            >
+              Open releases
+              <ExternalLink size={10} />
+            </a>
+          </div>
+
+          <p className="text-xs text-[#3D4F5F]">
+            Install stays enabled only when the signed Tauri updater flow validates against
+            `latest.json`. If that evidence is missing, this screen shows the feature as partial.
+          </p>
         </div>
-        <p className="text-xs text-[#3D4F5F] mt-3">Changes are saved automatically.</p>
       </Card>
 
-      {/* Agent Configuration — expanded */}
       <Card header="Agent Configuration">
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div>
-              <label className="text-xs text-[#C5D0DC] mb-1 block">Default Level</label>
-              <select
-                value={defaultLevel}
-                onChange={(e) => {
-                  setDefaultLevel(e.target.value);
-                  handleSaveConfig('default_level', e.target.value);
-                }}
-                className="w-full rounded-lg border border-[#1A1E26] bg-[#0A0E14] px-3 py-2 text-sm text-[#E6EDF3]
-                  focus:outline-none focus:ring-2 focus:ring-[#00E5E5]/50"
-              >
-                <option value="auto">Auto</option>
-                <option value="basic">Basic</option>
-                <option value="advanced">Advanced</option>
-                <option value="specialist">Specialist</option>
-              </select>
-            </div>
-            <div>
-              <label className="text-xs text-[#C5D0DC] mb-1 block">Max Cost per Task ($)</label>
-              <input
-                type="number"
-                step="0.01"
-                value={maxCost}
-                onChange={(e) => setMaxCost(e.target.value)}
-                onBlur={() => handleSaveConfig('max_cost_per_task', maxCost)}
-                className="w-full rounded-lg border border-[#1A1E26] bg-[#0A0E14] px-3 py-2 text-sm text-[#E6EDF3]
-                  focus:outline-none focus:ring-2 focus:ring-[#00E5E5]/50"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-[#C5D0DC] mb-1 block">CLI Timeout (sec)</label>
-              <input
-                type="number"
-                value={cliTimeout}
-                onChange={(e) => setCliTimeout(e.target.value)}
-                onBlur={() => handleSaveConfig('cli_timeout', cliTimeout)}
-                className="w-full rounded-lg border border-[#1A1E26] bg-[#0A0E14] px-3 py-2 text-sm text-[#E6EDF3]
-                  focus:outline-none focus:ring-2 focus:ring-[#00E5E5]/50"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-[#C5D0DC] mb-1 block">Max Concurrent Tasks</label>
-              <input
-                type="number"
-                min="1"
-                max="10"
-                value={maxConcurrent}
-                onChange={(e) => setMaxConcurrent(e.target.value)}
-                onBlur={() => handleSaveConfig('max_concurrent_tasks', maxConcurrent)}
-                className="w-full rounded-lg border border-[#1A1E26] bg-[#0A0E14] px-3 py-2 text-sm text-[#E6EDF3]
-                  focus:outline-none focus:ring-2 focus:ring-[#00E5E5]/50"
-              />
-            </div>
+        <div className="grid gap-4 md:grid-cols-2">
+          <div>
+            <label className="mb-1 block text-xs text-[#C5D0DC]">Log Level</label>
+            <select
+              value={logLevel}
+              onChange={(e) => {
+                setLogLevel(e.target.value);
+                handleSaveConfig('log_level', e.target.value);
+              }}
+              className="w-full rounded-lg border border-[#1A1E26] bg-[#0A0E14] px-3 py-2 text-sm text-[#E6EDF3] focus:outline-none focus:ring-2 focus:ring-[#00E5E5]/50"
+            >
+              <option value="DEBUG">DEBUG</option>
+              <option value="INFO">INFO</option>
+              <option value="WARN">WARN</option>
+              <option value="ERROR">ERROR</option>
+            </select>
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="text-xs text-[#C5D0DC] mb-1 block">Log Level</label>
-              <select
-                value={logLevel}
-                onChange={(e) => {
-                  setLogLevel(e.target.value);
-                  handleSaveConfig('log_level', e.target.value);
-                }}
-                className="w-full rounded-lg border border-[#1A1E26] bg-[#0A0E14] px-3 py-2 text-sm text-[#E6EDF3]
-                  focus:outline-none focus:ring-2 focus:ring-[#00E5E5]/50"
-              >
-                <option value="debug">Debug</option>
-                <option value="info">Info</option>
-                <option value="warn">Warn</option>
-                <option value="error">Error</option>
-              </select>
-            </div>
-            <div>
-              <label className="text-xs text-[#C5D0DC] mb-1 block">Active Playbook</label>
-              <select
-                className="w-full rounded-lg border border-[#1A1E26] bg-[#0A0E14] px-3 py-2 text-sm text-[#E6EDF3]
-                  focus:outline-none focus:ring-2 focus:ring-[#00E5E5]/50"
-                disabled
-              >
-                <option>Manage in Playbooks tab</option>
-              </select>
-            </div>
+
+          <div>
+            <label className="mb-1 block text-xs text-[#C5D0DC]">Language</label>
+            <select
+              value={language}
+              onChange={(e) => {
+                setLanguage(e.target.value);
+                handleSaveConfig('language', e.target.value);
+              }}
+              className="w-full rounded-lg border border-[#1A1E26] bg-[#0A0E14] px-3 py-2 text-sm text-[#E6EDF3] focus:outline-none focus:ring-2 focus:ring-[#00E5E5]/50"
+            >
+              <option value="auto">Auto</option>
+              <option value="en">English</option>
+              <option value="es">Español</option>
+              <option value="pt">Português</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs text-[#C5D0DC]">Max Cost per Task ($)</label>
+            <input
+              type="number"
+              step="0.01"
+              value={maxCost}
+              onChange={(e) => setMaxCost(e.target.value)}
+              onBlur={() => handleSaveConfig('max_cost_per_task', maxCost)}
+              className="w-full rounded-lg border border-[#1A1E26] bg-[#0A0E14] px-3 py-2 text-sm text-[#E6EDF3] focus:outline-none focus:ring-2 focus:ring-[#00E5E5]/50"
+            />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs text-[#C5D0DC]">CLI Timeout (sec)</label>
+            <input
+              type="number"
+              value={cliTimeout}
+              onChange={(e) => setCliTimeout(e.target.value)}
+              onBlur={() => handleSaveConfig('cli_timeout', cliTimeout)}
+              className="w-full rounded-lg border border-[#1A1E26] bg-[#0A0E14] px-3 py-2 text-sm text-[#E6EDF3] focus:outline-none focus:ring-2 focus:ring-[#00E5E5]/50"
+            />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs text-[#C5D0DC]">Max Steps per Task</label>
+            <input
+              type="number"
+              value={maxSteps}
+              onChange={(e) => setMaxSteps(e.target.value)}
+              onBlur={() => handleSaveConfig('max_steps_per_task', maxSteps)}
+              className="w-full rounded-lg border border-[#1A1E26] bg-[#0A0E14] px-3 py-2 text-sm text-[#E6EDF3] focus:outline-none focus:ring-2 focus:ring-[#00E5E5]/50"
+            />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs text-[#C5D0DC]">Input Delay (ms)</label>
+            <input
+              type="number"
+              value={inputDelay}
+              onChange={(e) => setInputDelay(e.target.value)}
+              onBlur={() => handleSaveConfig('input_delay_ms', inputDelay)}
+              className="w-full rounded-lg border border-[#1A1E26] bg-[#0A0E14] px-3 py-2 text-sm text-[#E6EDF3] focus:outline-none focus:ring-2 focus:ring-[#00E5E5]/50"
+            />
           </div>
         </div>
+
+        <p className="mt-3 text-xs text-[#3D4F5F]">
+          Esta sección sólo expone claves que el backend persiste de verdad. Se removieron toggles y campos que no tenían wiring real.
+        </p>
       </Card>
 
-      {/* About — enhanced */}
       <Card header="About">
         <div className="space-y-4">
-          {/* Logo & version */}
           <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-[#00E5E5] to-[#00B8D4] flex items-center justify-center
-              text-[#0A0E14] font-bold text-sm shadow-md shadow-[#00E5E5]/20">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-[#00E5E5] to-[#00B8D4] text-sm font-bold text-[#0A0E14] shadow-md shadow-[#00E5E5]/20">
               AOS
             </div>
             <div>
               <p className="text-sm font-medium text-[#E6EDF3]">AgentOS</p>
-              <p className="text-xs text-[#3D4F5F]">Version 1.0.0</p>
+              <p className="text-xs text-[#3D4F5F]">Version {version}</p>
             </div>
           </div>
 
-          {/* Links */}
           <div className="flex items-center gap-4">
             {[
-              { label: 'Docs', href: '#' },
-              { label: 'GitHub', href: '#' },
-              { label: 'Discord', href: '#' },
+              { label: 'GitHub', href: 'https://github.com/AresE87/AgentOS' },
+              { label: 'Docs', href: 'https://github.com/AresE87/AgentOS/tree/master/docs' },
+              { label: 'Releases', href: 'https://github.com/AresE87/AgentOS/releases' },
             ].map((link) => (
               <a
                 key={link.label}
                 href={link.href}
-                className="flex items-center gap-1 text-xs text-[#00E5E5] hover:text-[#00B8D4] transition-colors"
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-1 text-xs text-[#00E5E5] transition-colors hover:text-[#00B8D4]"
               >
                 {link.label}
                 <ExternalLink size={10} />
@@ -438,19 +756,14 @@ export default function Settings({ onResetWizard }: SettingsPageProps) {
             ))}
           </div>
 
-          {/* Actions */}
-          <div className="flex items-center gap-2 pt-2 border-t border-[#1A1E26]">
-            {onResetWizard && (
+          {onResetWizard && (
+            <div className="border-t border-[#1A1E26] pt-2">
               <Button size="sm" variant="secondary" onClick={onResetWizard}>
                 <RotateCcw size={14} />
                 Re-run Wizard
               </Button>
-            )}
-            <Button size="sm" variant="danger">
-              <Trash2 size={14} />
-              Reset Data
-            </Button>
-          </div>
+            </div>
+          )}
         </div>
       </Card>
     </div>
