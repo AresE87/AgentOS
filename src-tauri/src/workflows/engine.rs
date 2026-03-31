@@ -1,6 +1,6 @@
-use serde::{Deserialize, Serialize};
-use rusqlite::Connection;
 use chrono::Utc;
+use rusqlite::Connection;
+use serde::{Deserialize, Serialize};
 
 // ── Data structures ──────────────────────────────────────────────────
 
@@ -57,8 +57,9 @@ impl WorkflowEngine {
                 edges_json TEXT NOT NULL DEFAULT '[]',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
-            )"
-        ).map_err(|e| e.to_string())
+            )",
+        )
+        .map_err(|e| e.to_string())
     }
 
     pub fn save(conn: &Connection, workflow: &Workflow) -> Result<Workflow, String> {
@@ -104,7 +105,8 @@ impl WorkflowEngine {
                 created_at: row.get(5)?,
                 updated_at: row.get(6)?,
             })
-        }).map_err(|e| format!("Workflow not found: {}", e))
+        })
+        .map_err(|e| format!("Workflow not found: {}", e))
     }
 
     pub fn list(conn: &Connection) -> Result<Vec<Workflow>, String> {
@@ -112,19 +114,21 @@ impl WorkflowEngine {
             .prepare("SELECT id, name, description, nodes_json, edges_json, created_at, updated_at FROM workflows ORDER BY updated_at DESC")
             .map_err(|e| e.to_string())?;
 
-        let rows = stmt.query_map([], |row| {
-            let nodes_json: String = row.get(3)?;
-            let edges_json: String = row.get(4)?;
-            Ok(Workflow {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                description: row.get(2)?,
-                nodes: serde_json::from_str(&nodes_json).unwrap_or_default(),
-                edges: serde_json::from_str(&edges_json).unwrap_or_default(),
-                created_at: row.get(5)?,
-                updated_at: row.get(6)?,
+        let rows = stmt
+            .query_map([], |row| {
+                let nodes_json: String = row.get(3)?;
+                let edges_json: String = row.get(4)?;
+                Ok(Workflow {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    description: row.get(2)?,
+                    nodes: serde_json::from_str(&nodes_json).unwrap_or_default(),
+                    edges: serde_json::from_str(&edges_json).unwrap_or_default(),
+                    created_at: row.get(5)?,
+                    updated_at: row.get(6)?,
+                })
             })
-        }).map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?;
 
         let mut workflows = Vec::new();
         for row in rows {
@@ -148,11 +152,8 @@ impl WorkflowEngine {
         let start = std::time::Instant::now();
 
         // Find start nodes (nodes that are not the target of any edge)
-        let target_set: std::collections::HashSet<&str> = workflow
-            .edges
-            .iter()
-            .map(|e| e.to_node.as_str())
-            .collect();
+        let target_set: std::collections::HashSet<&str> =
+            workflow.edges.iter().map(|e| e.to_node.as_str()).collect();
 
         let mut start_nodes: Vec<&str> = workflow
             .nodes
@@ -171,11 +172,8 @@ impl WorkflowEngine {
             start_nodes.iter().map(|s| s.to_string()).collect();
         let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-        let node_map: std::collections::HashMap<&str, &WorkflowNode> = workflow
-            .nodes
-            .iter()
-            .map(|n| (n.id.as_str(), n))
-            .collect();
+        let node_map: std::collections::HashMap<&str, &WorkflowNode> =
+            workflow.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
 
         while let Some(current_id) = queue.pop_front() {
             if visited.contains(&current_id) {
@@ -218,7 +216,8 @@ impl WorkflowEngine {
             Workflow {
                 id: "template-daily-standup".into(),
                 name: "Daily Standup".into(),
-                description: "Automated daily standup: collect status, summarize, notify team".into(),
+                description: "Automated daily standup: collect status, summarize, notify team"
+                    .into(),
                 nodes: vec![
                     WorkflowNode {
                         id: "n1".into(),
@@ -254,9 +253,24 @@ impl WorkflowEngine {
                     },
                 ],
                 edges: vec![
-                    WorkflowEdge { id: "e1".into(), from_node: "n1".into(), to_node: "n2".into(), condition: None },
-                    WorkflowEdge { id: "e2".into(), from_node: "n2".into(), to_node: "n3".into(), condition: None },
-                    WorkflowEdge { id: "e3".into(), from_node: "n3".into(), to_node: "n4".into(), condition: None },
+                    WorkflowEdge {
+                        id: "e1".into(),
+                        from_node: "n1".into(),
+                        to_node: "n2".into(),
+                        condition: None,
+                    },
+                    WorkflowEdge {
+                        id: "e2".into(),
+                        from_node: "n2".into(),
+                        to_node: "n3".into(),
+                        condition: None,
+                    },
+                    WorkflowEdge {
+                        id: "e3".into(),
+                        from_node: "n3".into(),
+                        to_node: "n4".into(),
+                        condition: None,
+                    },
                 ],
                 created_at: "2025-01-01T00:00:00Z".into(),
                 updated_at: "2025-01-01T00:00:00Z".into(),
@@ -264,7 +278,9 @@ impl WorkflowEngine {
             Workflow {
                 id: "template-backup-notify".into(),
                 name: "Backup & Notify".into(),
-                description: "Run backup command, check result, send notification on success or failure".into(),
+                description:
+                    "Run backup command, check result, send notification on success or failure"
+                        .into(),
                 nodes: vec![
                     WorkflowNode {
                         id: "n1".into(),
@@ -308,10 +324,30 @@ impl WorkflowEngine {
                     },
                 ],
                 edges: vec![
-                    WorkflowEdge { id: "e1".into(), from_node: "n1".into(), to_node: "n2".into(), condition: None },
-                    WorkflowEdge { id: "e2".into(), from_node: "n2".into(), to_node: "n3".into(), condition: None },
-                    WorkflowEdge { id: "e3".into(), from_node: "n3".into(), to_node: "n4".into(), condition: Some("success".into()) },
-                    WorkflowEdge { id: "e4".into(), from_node: "n3".into(), to_node: "n5".into(), condition: Some("failure".into()) },
+                    WorkflowEdge {
+                        id: "e1".into(),
+                        from_node: "n1".into(),
+                        to_node: "n2".into(),
+                        condition: None,
+                    },
+                    WorkflowEdge {
+                        id: "e2".into(),
+                        from_node: "n2".into(),
+                        to_node: "n3".into(),
+                        condition: None,
+                    },
+                    WorkflowEdge {
+                        id: "e3".into(),
+                        from_node: "n3".into(),
+                        to_node: "n4".into(),
+                        condition: Some("success".into()),
+                    },
+                    WorkflowEdge {
+                        id: "e4".into(),
+                        from_node: "n3".into(),
+                        to_node: "n5".into(),
+                        condition: Some("failure".into()),
+                    },
                 ],
                 created_at: "2025-01-01T00:00:00Z".into(),
                 updated_at: "2025-01-01T00:00:00Z".into(),
@@ -319,7 +355,8 @@ impl WorkflowEngine {
             Workflow {
                 id: "template-code-review".into(),
                 name: "Code Review Pipeline".into(),
-                description: "Automated code review: diff extraction, AI review, post comments".into(),
+                description: "Automated code review: diff extraction, AI review, post comments"
+                    .into(),
                 nodes: vec![
                     WorkflowNode {
                         id: "n1".into(),
@@ -355,9 +392,24 @@ impl WorkflowEngine {
                     },
                 ],
                 edges: vec![
-                    WorkflowEdge { id: "e1".into(), from_node: "n1".into(), to_node: "n2".into(), condition: None },
-                    WorkflowEdge { id: "e2".into(), from_node: "n2".into(), to_node: "n3".into(), condition: None },
-                    WorkflowEdge { id: "e3".into(), from_node: "n3".into(), to_node: "n4".into(), condition: None },
+                    WorkflowEdge {
+                        id: "e1".into(),
+                        from_node: "n1".into(),
+                        to_node: "n2".into(),
+                        condition: None,
+                    },
+                    WorkflowEdge {
+                        id: "e2".into(),
+                        from_node: "n2".into(),
+                        to_node: "n3".into(),
+                        condition: None,
+                    },
+                    WorkflowEdge {
+                        id: "e3".into(),
+                        from_node: "n3".into(),
+                        to_node: "n4".into(),
+                        condition: None,
+                    },
                 ],
                 created_at: "2025-01-01T00:00:00Z".into(),
                 updated_at: "2025-01-01T00:00:00Z".into(),

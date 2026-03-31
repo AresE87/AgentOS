@@ -109,3 +109,18 @@ impl AAPMessage {
         serde_json::from_str(json).map_err(|e| e.to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn aap_message_type_serializes_in_snake_case() {
+        let message = AAPMessage::task_request("node-a", "AgentOS A", "summarize");
+        let json = serde_json::to_value(&message).unwrap();
+
+        assert_eq!(json["msg_type"], "task_request");
+        assert_eq!(json["version"], AAP_VERSION);
+        assert!(json["trace_id"].as_str().is_some());
+    }
+}

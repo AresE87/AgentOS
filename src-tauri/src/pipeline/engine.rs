@@ -1,4 +1,4 @@
-use crate::brain::{Gateway, LLMResponse};
+use crate::brain::Gateway;
 use crate::config::Settings;
 use crate::eyes::{capture, vision};
 use crate::hands;
@@ -16,7 +16,13 @@ use tracing::{info, warn};
 /// Scale coordinates from LLM image space to real screen space.
 /// Uses capture_w/capture_h (physical pixel dimensions from GDI BitBlt)
 /// instead of GetSystemMetrics which returns logical pixels on HiDPI displays.
-fn scale_action_coords(action: AgentAction, img_w: u32, img_h: u32, capture_w: u32, capture_h: u32) -> AgentAction {
+fn scale_action_coords(
+    action: AgentAction,
+    img_w: u32,
+    img_h: u32,
+    capture_w: u32,
+    capture_h: u32,
+) -> AgentAction {
     if capture_w == 0 || capture_h == 0 || img_w == 0 || img_h == 0 {
         return action;
     }
@@ -42,14 +48,17 @@ fn scale_action_coords(action: AgentAction, img_w: u32, img_h: u32, capture_w: u
         }
         AgentAction::Scroll { x, y, delta } => {
             let (rx, ry) = scale(x, y);
-            AgentAction::Scroll { x: rx, y: ry, delta }
+            AgentAction::Scroll {
+                x: rx,
+                y: ry,
+                delta,
+            }
         }
         other => other,
     }
 }
 
 const MAX_TURNS: u32 = 10;
-const MAX_RETRIES: u32 = 2;
 const MAX_BROWSER_OPENS: u32 = 3;
 const BROWSER_OPEN_DELAY_MS: u64 = 2000;
 
@@ -229,49 +238,20 @@ pub async fn run_task(
     let mut accumulated_output = String::new();
     let mut conversation: Vec<(String, String)> = Vec::new(); // (role, content) history
     let mut browser_opens: u32 = 0;
-    let mut total_cost = 0.0;
-    let mut total_tokens_in = 0u32;
-    let mut total_tokens_out = 0u32;
-    let mut primary_model: Option<String> = None;
-    let mut primary_provider: Option<String> = None;
 
     info!(task_id, description, "Starting PC task");
-    ensure_execution_trace(db_path, task_id, description, "pipeline");
-    append_trace_step(
-        db_path,
-        task_id,
-        "prompt_build",
-        description,
-        "Prepared PC-control system prompt for runtime execution.",
-        "Task entered pipeline",
-        0,
-        0.0,
-        0,
-    );
 
     emit(app_handle, "agent:step_started", task_id, 0, "Planning...");
 
     // Initial LLM call — force Standard tier (sonnet/gpt-4o) for PC control
     // Cheap models (haiku, flash) can't follow the complex agent system prompt
-    let plan = gateway.complete_as_agent(description, SYSTEM_PROMPT, settings)
+    let plan = gateway
+        .complete_as_agent(description, SYSTEM_PROMPT, settings)
         .await
-        .map_err(|e| { fail(db_path, task_id, &e); e })?;
-    absorb_llm_metrics(
-        &plan,
-        &mut total_cost,
-        &mut total_tokens_in,
-        &mut total_tokens_out,
-        &mut primary_model,
-        &mut primary_provider,
-    );
-    record_llm_response(
-        db_path,
-        task_id,
-        "llm_plan",
-        description,
-        "Initial planner response from PC-control runtime",
-        &plan,
-    );
+        .map_err(|e| {
+            fail(db_path, task_id, &e);
+            e
+        })?;
 
     let mut current_response = plan.content.trim().to_string();
     conversation.push(("user".into(), description.to_string()));
@@ -288,17 +268,6 @@ pub async fn run_task(
             Some(j) => j,
             None => {
                 // Raw text response — treat as chat
-                append_trace_step(
-                    db_path,
-                    task_id,
-                    "parse_response",
-                    &current_response,
-                    "LLM returned raw text instead of structured JSON.",
-                    "Fallback to raw text completion",
-                    0,
-                    0.0,
-                    0,
-                );
                 accumulated_output = current_response.clone();
                 update_task_status(db_path, task_id, "completed");
                 break;
@@ -306,17 +275,6 @@ pub async fn run_task(
         };
 
         let mode = plan_json["mode"].as_str().unwrap_or("command");
-        append_trace_step(
-            db_path,
-            task_id,
-            "parse_response",
-            &current_response,
-            mode,
-            "Parsed structured runtime plan",
-            0,
-            0.0,
-            0,
-        );
         info!(task_id, turn, mode, "Processing turn");
 
         match mode {
@@ -326,14 +284,19 @@ pub async fn run_task(
                 let mut all_outputs = Vec::new();
 
                 for (i, step_def) in steps.iter().enumerate() {
-                    if kill_switch.load(Ordering::Relaxed) { break; }
+                    if kill_switch.load(Ordering::Relaxed) {
+                        break;
+                    }
 
-                    let cmds = step_def["commands"].as_array()
+                    let cmds = step_def["commands"]
+                        .as_array()
                         .map(|a| a.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
                         .unwrap_or_default();
                     let expl = step_def["explanation"].as_str().unwrap_or("");
 
-                    if cmds.is_empty() { continue; }
+                    if cmds.is_empty() {
+                        continue;
+                    }
 
                     let script = cmds.join("; ");
                     let step_num = (turn * 10 + i as u32) + 1;
@@ -343,12 +306,22 @@ pub async fn run_task(
                     if opens > 0 {
                         browser_opens += opens;
                         if browser_opens > MAX_BROWSER_OPENS {
-                            warn!(task_id, browser_opens, "Browser open limit reached, aborting to prevent spam loop");
+                            warn!(
+                                task_id,
+                                browser_opens,
+                                "Browser open limit reached, aborting to prevent spam loop"
+                            );
                             accumulated_output = format!("Stopped: opened {} browser windows (limit is {}). Use Invoke-WebRequest instead of opening browser windows.", browser_opens, MAX_BROWSER_OPENS);
                             update_task_status(db_path, task_id, "failed");
                             break;
                         }
-                        info!(task_id, browser_opens, "Browser window opened ({}/{})", browser_opens, MAX_BROWSER_OPENS);
+                        info!(
+                            task_id,
+                            browser_opens,
+                            "Browser window opened ({}/{})",
+                            browser_opens,
+                            MAX_BROWSER_OPENS
+                        );
                     }
 
                     emit(app_handle, "agent:step_started", task_id, step_num, expl);
@@ -356,32 +329,65 @@ pub async fn run_task(
 
                     let is_gui = script.to_lowercase().contains("start-process");
                     let timeout = if is_gui { 30 } else { settings.cli_timeout };
-                    let step_started_at = Instant::now();
 
                     let (success, output) = execute_with_retry(
-                        &script, timeout, description, &gateway, settings, task_id,
-                    ).await;
+                        &script,
+                        timeout,
+                        description,
+                        &gateway,
+                        settings,
+                        task_id,
+                    )
+                    .await;
 
-                    if is_gui { tokio::time::sleep(std::time::Duration::from_millis(1500)).await; }
+                    if is_gui {
+                        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                    }
 
                     let sp = take_screenshot(screenshots_dir).await;
                     let sp_str = sp.as_ref().map(|p| p.to_string_lossy().to_string());
 
-                    let action = AgentAction::RunCommand { command: script.clone(), shell: ShellType::PowerShell };
-                    let result = ExecutionResult {
-                        method: ExecutionMethod::Terminal, success,
-                        output: Some(output.clone()), screenshot_path: sp_str.clone(),
-                        duration_ms: step_started_at.elapsed().as_millis() as u64,
+                    let action = AgentAction::RunCommand {
+                        command: script.clone(),
+                        shell: ShellType::PowerShell,
                     };
-                    save_step(db_path, task_id, step_num, &action, &sp.unwrap_or_default(), &result);
+                    let result = ExecutionResult {
+                        method: ExecutionMethod::Terminal,
+                        success,
+                        output: Some(output.clone()),
+                        screenshot_path: sp_str.clone(),
+                        duration_ms: start.elapsed().as_millis() as u64,
+                    };
+                    save_step(
+                        db_path,
+                        task_id,
+                        step_num,
+                        &action,
+                        &sp.unwrap_or_default(),
+                        &result,
+                    );
 
-                    emit(app_handle, "agent:step_completed", task_id, step_num, &format!("success={}", success));
+                    emit(
+                        app_handle,
+                        "agent:step_completed",
+                        task_id,
+                        step_num,
+                        &format!("success={}", success),
+                    );
 
                     step_history.push(StepRecord {
-                        step_number: step_num, action, result, screenshot_path: sp_str,
+                        step_number: step_num,
+                        action,
+                        result,
+                        screenshot_path: sp_str,
                     });
 
-                    all_outputs.push(format!("Step {} ({}): {}", i + 1, expl, if success { &output } else { "FAILED" }));
+                    all_outputs.push(format!(
+                        "Step {} ({}): {}",
+                        i + 1,
+                        expl,
+                        if success { &output } else { "FAILED" }
+                    ));
 
                     if !success {
                         // Step failed — ask LLM to handle
@@ -391,23 +397,10 @@ pub async fn run_task(
                         );
                         conversation.push(("user".into(), followup.clone()));
 
-                        if let Ok(fix) = gateway.complete_as_agent(&followup, SYSTEM_PROMPT, settings).await {
-                            absorb_llm_metrics(
-                                &fix,
-                                &mut total_cost,
-                                &mut total_tokens_in,
-                                &mut total_tokens_out,
-                                &mut primary_model,
-                                &mut primary_provider,
-                            );
-                            record_llm_response(
-                                db_path,
-                                task_id,
-                                "llm_replan",
-                                &followup,
-                                "Planner generated retry/skip guidance after multi-step failure",
-                                &fix,
-                            );
+                        if let Ok(fix) = gateway
+                            .complete_as_agent(&followup, SYSTEM_PROMPT, settings)
+                            .await
+                        {
                             current_response = fix.content.trim().to_string();
                             conversation.push(("assistant".into(), current_response.clone()));
                             // Will be processed in the next turn
@@ -419,20 +412,29 @@ pub async fn run_task(
                 accumulated_output = all_outputs.join("\n\n");
 
                 // If all steps completed successfully, we're done
-                if step_history.last().map(|s| s.result.success).unwrap_or(false) {
+                if step_history
+                    .last()
+                    .map(|s| s.result.success)
+                    .unwrap_or(false)
+                {
                     update_task_status(db_path, task_id, "completed");
                     break;
                 }
             }
 
             "command" => {
-                let cmds = plan_json["commands"].as_array()
+                let cmds = plan_json["commands"]
+                    .as_array()
                     .map(|a| a.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
                     .unwrap_or_default();
                 let expl = plan_json["explanation"].as_str().unwrap_or("");
 
                 if cmds.is_empty() {
-                    accumulated_output = if !expl.is_empty() { expl.to_string() } else { "No commands".to_string() };
+                    accumulated_output = if !expl.is_empty() {
+                        expl.to_string()
+                    } else {
+                        "No commands".to_string()
+                    };
                     update_task_status(db_path, task_id, "completed");
                     break;
                 }
@@ -445,15 +447,25 @@ pub async fn run_task(
                 if opens > 0 {
                     browser_opens += opens;
                     if browser_opens > MAX_BROWSER_OPENS {
-                        warn!(task_id, browser_opens, "Browser open limit reached in command mode");
+                        warn!(
+                            task_id,
+                            browser_opens, "Browser open limit reached in command mode"
+                        );
                         accumulated_output = format!("Stopped: opened {} browser windows (limit is {}). Use Invoke-WebRequest instead.", browser_opens, MAX_BROWSER_OPENS);
                         update_task_status(db_path, task_id, "failed");
                         break;
                     }
-                    info!(task_id, browser_opens, "Browser window opened ({}/{})", browser_opens, MAX_BROWSER_OPENS);
+                    info!(
+                        task_id,
+                        browser_opens,
+                        "Browser window opened ({}/{})",
+                        browser_opens,
+                        MAX_BROWSER_OPENS
+                    );
                     // Add delay between browser opens to let pages load
                     if browser_opens > 1 {
-                        tokio::time::sleep(std::time::Duration::from_millis(BROWSER_OPEN_DELAY_MS)).await;
+                        tokio::time::sleep(std::time::Duration::from_millis(BROWSER_OPEN_DELAY_MS))
+                            .await;
                     }
                 }
 
@@ -461,28 +473,50 @@ pub async fn run_task(
 
                 let is_gui = script.to_lowercase().contains("start-process");
                 let timeout = if is_gui { 30 } else { settings.cli_timeout };
-                let step_started_at = Instant::now();
 
-                let (success, output) = execute_with_retry(
-                    &script, timeout, description, &gateway, settings, task_id,
-                ).await;
+                let (success, output) =
+                    execute_with_retry(&script, timeout, description, &gateway, settings, task_id)
+                        .await;
 
-                if is_gui { tokio::time::sleep(std::time::Duration::from_millis(1500)).await; }
+                if is_gui {
+                    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                }
 
                 let sp = take_screenshot(screenshots_dir).await;
                 let sp_str = sp.as_ref().map(|p| p.to_string_lossy().to_string());
 
-                let action = AgentAction::RunCommand { command: script.clone(), shell: ShellType::PowerShell };
-                let result = ExecutionResult {
-                    method: ExecutionMethod::Terminal, success,
-                    output: Some(output.clone()), screenshot_path: sp_str.clone(),
-                    duration_ms: step_started_at.elapsed().as_millis() as u64,
+                let action = AgentAction::RunCommand {
+                    command: script.clone(),
+                    shell: ShellType::PowerShell,
                 };
-                save_step(db_path, task_id, step_num, &action, &sp.unwrap_or_default(), &result);
-                emit(app_handle, "agent:step_completed", task_id, step_num, &format!("success={}", success));
+                let result = ExecutionResult {
+                    method: ExecutionMethod::Terminal,
+                    success,
+                    output: Some(output.clone()),
+                    screenshot_path: sp_str.clone(),
+                    duration_ms: start.elapsed().as_millis() as u64,
+                };
+                save_step(
+                    db_path,
+                    task_id,
+                    step_num,
+                    &action,
+                    &sp.unwrap_or_default(),
+                    &result,
+                );
+                emit(
+                    app_handle,
+                    "agent:step_completed",
+                    task_id,
+                    step_num,
+                    &format!("success={}", success),
+                );
 
                 step_history.push(StepRecord {
-                    step_number: step_num, action, result, screenshot_path: sp_str,
+                    step_number: step_num,
+                    action,
+                    result,
+                    screenshot_path: sp_str,
                 });
 
                 // Decide if we need a follow-up turn
@@ -505,23 +539,10 @@ pub async fn run_task(
 
                     conversation.push(("user".into(), followup.clone()));
 
-                    if let Ok(next) = gateway.complete_as_agent(&followup, SYSTEM_PROMPT, settings).await {
-                        absorb_llm_metrics(
-                            &next,
-                            &mut total_cost,
-                            &mut total_tokens_in,
-                            &mut total_tokens_out,
-                            &mut primary_model,
-                            &mut primary_provider,
-                        );
-                        record_llm_response(
-                            db_path,
-                            task_id,
-                            "llm_followup",
-                            &followup,
-                            "Planner evaluated command result and decided next turn",
-                            &next,
-                        );
+                    if let Ok(next) = gateway
+                        .complete_as_agent(&followup, SYSTEM_PROMPT, settings)
+                        .await
+                    {
                         current_response = next.content.trim().to_string();
                         conversation.push(("assistant".into(), current_response.clone()));
                         continue; // Next turn
@@ -529,13 +550,18 @@ pub async fn run_task(
                 }
 
                 accumulated_output = output;
-                update_task_status(db_path, task_id, if success { "completed" } else { "failed" });
+                update_task_status(
+                    db_path,
+                    task_id,
+                    if success { "completed" } else { "failed" },
+                );
                 break;
             }
 
             "command_then_screen" => {
                 // Hybrid mode: run commands first, then switch to screen/vision
-                let cmds = plan_json["commands"].as_array()
+                let cmds = plan_json["commands"]
+                    .as_array()
                     .map(|a| a.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
                     .unwrap_or_default();
                 let screen_task = plan_json["screen_task"].as_str().unwrap_or(description);
@@ -550,12 +576,21 @@ pub async fn run_task(
                     if opens > 0 {
                         browser_opens += opens;
                         if browser_opens > MAX_BROWSER_OPENS {
-                            warn!(task_id, browser_opens, "Browser open limit reached in command_then_screen");
+                            warn!(
+                                task_id,
+                                browser_opens, "Browser open limit reached in command_then_screen"
+                            );
                             accumulated_output = format!("Stopped: opened {} browser windows (limit is {}). Use Invoke-WebRequest instead.", browser_opens, MAX_BROWSER_OPENS);
                             update_task_status(db_path, task_id, "failed");
                             break;
                         }
-                        info!(task_id, browser_opens, "Browser window opened ({}/{})", browser_opens, MAX_BROWSER_OPENS);
+                        info!(
+                            task_id,
+                            browser_opens,
+                            "Browser window opened ({}/{})",
+                            browser_opens,
+                            MAX_BROWSER_OPENS
+                        );
                     }
 
                     emit(app_handle, "agent:step_started", task_id, 1, expl);
@@ -563,22 +598,46 @@ pub async fn run_task(
 
                     let is_gui = script.to_lowercase().contains("start-process");
                     let timeout = if is_gui { 30 } else { settings.cli_timeout };
-                    let step_started_at = Instant::now();
-                    let (success, output) = execute_with_retry(&script, timeout, description, &gateway, settings, task_id).await;
+                    let (success, output) = execute_with_retry(
+                        &script,
+                        timeout,
+                        description,
+                        &gateway,
+                        settings,
+                        task_id,
+                    )
+                    .await;
 
-                    if is_gui { tokio::time::sleep(std::time::Duration::from_secs(3)).await; }
+                    if is_gui {
+                        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    }
 
                     let sp = take_screenshot(screenshots_dir).await;
                     let sp_str = sp.as_ref().map(|p| p.to_string_lossy().to_string());
-                    let action = AgentAction::RunCommand { command: script.clone(), shell: ShellType::PowerShell };
-                    let result = ExecutionResult {
-                        method: ExecutionMethod::Terminal, success,
-                        output: Some(output.clone()), screenshot_path: sp_str.clone(),
-                        duration_ms: step_started_at.elapsed().as_millis() as u64,
+                    let action = AgentAction::RunCommand {
+                        command: script.clone(),
+                        shell: ShellType::PowerShell,
                     };
-                    save_step(db_path, task_id, 1, &action, &sp.unwrap_or_default(), &result);
+                    let result = ExecutionResult {
+                        method: ExecutionMethod::Terminal,
+                        success,
+                        output: Some(output.clone()),
+                        screenshot_path: sp_str.clone(),
+                        duration_ms: start.elapsed().as_millis() as u64,
+                    };
+                    save_step(
+                        db_path,
+                        task_id,
+                        1,
+                        &action,
+                        &sp.unwrap_or_default(),
+                        &result,
+                    );
                     step_history.push(StepRecord {
-                        step_number: 1, action, result, screenshot_path: sp_str,
+                        step_number: 1,
+                        action,
+                        result,
+                        screenshot_path: sp_str,
                     });
 
                     if !success {
@@ -590,7 +649,10 @@ pub async fn run_task(
 
                 // Phase 2: Vision-guided screen interaction
                 info!(task_id, screen_task, "command_then_screen: screen phase");
-                let combined_task = format!("{}\n\nThe commands have already run. Now handle the visual part: {}", description, screen_task);
+                let combined_task = format!(
+                    "{}\n\nThe commands have already run. Now handle the visual part: {}",
+                    description, screen_task
+                );
 
                 // Minimize self so we don't capture our own window
                 if let Some(win) = app_handle.get_webview_window("main") {
@@ -601,7 +663,9 @@ pub async fn run_task(
                 let mut recent_actions: Vec<String> = Vec::new();
 
                 for vs in 1..=15u32 {
-                    if kill_switch.load(Ordering::Relaxed) { break; }
+                    if kill_switch.load(Ordering::Relaxed) {
+                        break;
+                    }
 
                     let screenshot = tokio::task::spawn_blocking({
                         let sd = screenshots_dir.to_path_buf();
@@ -609,28 +673,49 @@ pub async fn run_task(
                             let data = capture::capture_full_screen().map_err(|e| e.to_string())?;
                             let cap_w = data.width;
                             let cap_h = data.height;
-                            let path = capture::save_screenshot(&data, &sd).map_err(|e| e.to_string())?;
-                            let (b64, img_w, img_h) = capture::to_base64_jpeg_with_dims(&data, 80).map_err(|e| e.to_string())?;
+                            let path =
+                                capture::save_screenshot(&data, &sd).map_err(|e| e.to_string())?;
+                            let (b64, img_w, img_h) = capture::to_base64_jpeg_with_dims(&data, 80)
+                                .map_err(|e| e.to_string())?;
                             Ok::<_, String>((path, b64, img_w, img_h, cap_w, cap_h))
                         }
-                    }).await.map_err(|e| e.to_string())??;
+                    })
+                    .await
+                    .map_err(|e| e.to_string())??;
 
                     let (sp, b64, img_w, img_h, cap_w, cap_h) = screenshot;
                     let step_num = 10 + vs;
-                    emit(app_handle, "agent:step_started", task_id, step_num, "Screen interaction");
+                    emit(
+                        app_handle,
+                        "agent:step_started",
+                        task_id,
+                        step_num,
+                        "Screen interaction",
+                    );
 
                     // Check for action repetition (before LLM call so warning fires on 2nd repeat)
                     let dedup_warning = recent_actions.len() >= 2
-                        && recent_actions[recent_actions.len() - 1] == recent_actions[recent_actions.len() - 2];
+                        && recent_actions[recent_actions.len() - 1]
+                            == recent_actions[recent_actions.len() - 2];
 
                     let action = match vision::plan_next_action(
-                        &b64, &combined_task, &step_history, settings, &gateway,
-                        Some((img_w, img_h)), dedup_warning,
-                    ).await {
+                        &b64,
+                        &combined_task,
+                        &step_history,
+                        settings,
+                        &gateway,
+                        Some((img_w, img_h)),
+                        dedup_warning,
+                    )
+                    .await
+                    {
                         Ok(a) => a,
                         Err(e) => {
                             warn!(task_id, error = %e, "Vision failed in command_then_screen");
-                            accumulated_output = format!("Commands ran successfully but screen interaction failed: {}", e);
+                            accumulated_output = format!(
+                                "Commands ran successfully but screen interaction failed: {}",
+                                e
+                            );
                             break;
                         }
                     };
@@ -642,9 +727,11 @@ pub async fn run_task(
                         accumulated_output = summary.clone();
                         update_task_status(db_path, task_id, "completed");
                         step_history.push(StepRecord {
-                            step_number: step_num, action,
+                            step_number: step_num,
+                            action,
                             result: ExecutionResult {
-                                method: ExecutionMethod::Screen, success: true,
+                                method: ExecutionMethod::Screen,
+                                success: true,
                                 output: Some(accumulated_output.clone()),
                                 screenshot_path: Some(sp.to_string_lossy().to_string()),
                                 duration_ms: 0,
@@ -658,17 +745,25 @@ pub async fn run_task(
                     let scaled_action = scale_action_coords(action, img_w, img_h, cap_w, cap_h);
                     info!(task_id, step = step_num, action = ?scaled_action, "Vision action (scaled)");
 
-                    let result = match executor::execute(&scaled_action, settings.cli_timeout, kill_switch).await {
-                        Ok(r) => r,
-                        Err(e) => ExecutionResult {
-                            method: ExecutionMethod::Screen, success: false,
-                            output: Some(e), screenshot_path: None, duration_ms: 0,
-                        },
-                    };
+                    let result =
+                        match executor::execute(&scaled_action, settings.cli_timeout, kill_switch)
+                            .await
+                        {
+                            Ok(r) => r,
+                            Err(e) => ExecutionResult {
+                                method: ExecutionMethod::Screen,
+                                success: false,
+                                output: Some(e),
+                                screenshot_path: None,
+                                duration_ms: 0,
+                            },
+                        };
 
                     save_step(db_path, task_id, step_num, &scaled_action, &sp, &result);
                     step_history.push(StepRecord {
-                        step_number: step_num, action: scaled_action, result,
+                        step_number: step_num,
+                        action: scaled_action,
+                        result,
                         screenshot_path: Some(sp.to_string_lossy().to_string()),
                     });
 
@@ -683,7 +778,8 @@ pub async fn run_task(
                 }
 
                 if accumulated_output.is_empty() {
-                    accumulated_output = "Task completed (command + screen interaction)".to_string();
+                    accumulated_output =
+                        "Task completed (command + screen interaction)".to_string();
                     update_task_status(db_path, task_id, "completed");
                 }
             }
@@ -701,7 +797,9 @@ pub async fn run_task(
                 let mut recent_actions: Vec<String> = Vec::new();
 
                 for vs in 1..=15u32 {
-                    if kill_switch.load(Ordering::Relaxed) { break; }
+                    if kill_switch.load(Ordering::Relaxed) {
+                        break;
+                    }
 
                     let screenshot = tokio::task::spawn_blocking({
                         let sd = screenshots_dir.to_path_buf();
@@ -709,24 +807,39 @@ pub async fn run_task(
                             let data = capture::capture_full_screen().map_err(|e| e.to_string())?;
                             let cap_w = data.width;
                             let cap_h = data.height;
-                            let path = capture::save_screenshot(&data, &sd).map_err(|e| e.to_string())?;
-                            let (b64, img_w, img_h) = capture::to_base64_jpeg_with_dims(&data, 80).map_err(|e| e.to_string())?;
+                            let path =
+                                capture::save_screenshot(&data, &sd).map_err(|e| e.to_string())?;
+                            let (b64, img_w, img_h) = capture::to_base64_jpeg_with_dims(&data, 80)
+                                .map_err(|e| e.to_string())?;
                             Ok::<_, String>((path, b64, img_w, img_h, cap_w, cap_h))
                         }
-                    }).await.map_err(|e| e.to_string())??;
+                    })
+                    .await
+                    .map_err(|e| e.to_string())??;
 
                     let (sp, b64, img_w, img_h, cap_w, cap_h) = screenshot;
 
                     // Check for action repetition (before LLM call so warning fires on 2nd repeat)
                     let dedup_warning = recent_actions.len() >= 2
-                        && recent_actions[recent_actions.len() - 1] == recent_actions[recent_actions.len() - 2];
+                        && recent_actions[recent_actions.len() - 1]
+                            == recent_actions[recent_actions.len() - 2];
 
                     let action = match vision::plan_next_action(
-                        &b64, description, &step_history, settings, &gateway,
-                        Some((img_w, img_h)), dedup_warning,
-                    ).await {
+                        &b64,
+                        description,
+                        &step_history,
+                        settings,
+                        &gateway,
+                        Some((img_w, img_h)),
+                        dedup_warning,
+                    )
+                    .await
+                    {
                         Ok(a) => a,
-                        Err(e) => { accumulated_output = format!("Vision error: {}", e); break; }
+                        Err(e) => {
+                            accumulated_output = format!("Vision error: {}", e);
+                            break;
+                        }
                     };
 
                     // Track action for dedup BEFORE execution so warning fires earlier
@@ -742,17 +855,32 @@ pub async fn run_task(
                     let scaled_action = scale_action_coords(action, img_w, img_h, cap_w, cap_h);
                     info!(task_id, step = vs, action = ?scaled_action, "Vision action (scaled)");
 
-                    let result = match executor::execute(&scaled_action, settings.cli_timeout, kill_switch).await {
-                        Ok(r) => r,
-                        Err(e) => ExecutionResult {
-                            method: ExecutionMethod::Screen, success: false,
-                            output: Some(e), screenshot_path: None, duration_ms: 0,
-                        },
-                    };
+                    let result =
+                        match executor::execute(&scaled_action, settings.cli_timeout, kill_switch)
+                            .await
+                        {
+                            Ok(r) => r,
+                            Err(e) => ExecutionResult {
+                                method: ExecutionMethod::Screen,
+                                success: false,
+                                output: Some(e),
+                                screenshot_path: None,
+                                duration_ms: 0,
+                            },
+                        };
 
-                    save_step(db_path, task_id, turn * 10 + vs, &scaled_action, &sp, &result);
+                    save_step(
+                        db_path,
+                        task_id,
+                        turn * 10 + vs,
+                        &scaled_action,
+                        &sp,
+                        &result,
+                    );
                     step_history.push(StepRecord {
-                        step_number: turn * 10 + vs, action: scaled_action, result,
+                        step_number: turn * 10 + vs,
+                        action: scaled_action,
+                        result,
                         screenshot_path: Some(sp.to_string_lossy().to_string()),
                     });
 
@@ -776,7 +904,9 @@ pub async fn run_task(
             "browse" => {
                 let url = plan_json["url"].as_str().unwrap_or("");
                 let browse_task = plan_json["task"].as_str().unwrap_or(description);
-                let expl = plan_json["explanation"].as_str().unwrap_or("Browsing web page");
+                let expl = plan_json["explanation"]
+                    .as_str()
+                    .unwrap_or("Browsing web page");
 
                 if url.is_empty() {
                     accumulated_output = "No URL provided for browse mode".to_string();
@@ -787,7 +917,6 @@ pub async fn run_task(
                 let step_num = (turn + 1) as u32;
                 emit(app_handle, "agent:step_started", task_id, step_num, expl);
                 info!(task_id, url, "Browse mode: fetching page");
-                let step_started_at = Instant::now();
 
                 match web::browser::fetch_page(url).await {
                     Ok(page) => {
@@ -797,26 +926,16 @@ pub async fn run_task(
                             url, page.title, page.status, page_text, browse_task
                         );
 
-                        if let Ok(analysis) = gateway.complete_as_agent(&prompt, SYSTEM_PROMPT, settings).await {
-                            absorb_llm_metrics(
-                                &analysis,
-                                &mut total_cost,
-                                &mut total_tokens_in,
-                                &mut total_tokens_out,
-                                &mut primary_model,
-                                &mut primary_provider,
-                            );
-                            record_llm_response(
-                                db_path,
-                                task_id,
-                                "llm_browse_analysis",
-                                &prompt,
-                                "Summarized fetched page content for the task",
-                                &analysis,
-                            );
+                        if let Ok(analysis) = gateway
+                            .complete_as_agent(&prompt, SYSTEM_PROMPT, settings)
+                            .await
+                        {
                             accumulated_output = analysis.content;
                         } else {
-                            accumulated_output = format!("Page content from {} (title: {}):\n{}", url, page.title, page_text);
+                            accumulated_output = format!(
+                                "Page content from {} (title: {}):\n{}",
+                                url, page.title, page_text
+                            );
                         }
 
                         let action = AgentAction::RunCommand {
@@ -824,13 +943,27 @@ pub async fn run_task(
                             shell: ShellType::PowerShell,
                         };
                         let result = ExecutionResult {
-                            method: ExecutionMethod::Terminal, success: true,
+                            method: ExecutionMethod::Terminal,
+                            success: true,
                             output: Some(accumulated_output.clone()),
                             screenshot_path: None,
-                            duration_ms: step_started_at.elapsed().as_millis() as u64,
+                            duration_ms: start.elapsed().as_millis() as u64,
                         };
-                        save_step(db_path, task_id, step_num, &action, &std::path::PathBuf::new(), &result);
-                        emit(app_handle, "agent:step_completed", task_id, step_num, "success=true");
+                        save_step(
+                            db_path,
+                            task_id,
+                            step_num,
+                            &action,
+                            &std::path::PathBuf::new(),
+                            &result,
+                        );
+                        emit(
+                            app_handle,
+                            "agent:step_completed",
+                            task_id,
+                            step_num,
+                            "success=true",
+                        );
 
                         update_task_status(db_path, task_id, "completed");
                     }
@@ -846,7 +979,9 @@ pub async fn run_task(
             "search_web" => {
                 let query = plan_json["query"].as_str().unwrap_or("");
                 let search_task = plan_json["task"].as_str().unwrap_or(description);
-                let expl = plan_json["explanation"].as_str().unwrap_or("Searching the web");
+                let expl = plan_json["explanation"]
+                    .as_str()
+                    .unwrap_or("Searching the web");
 
                 if query.is_empty() {
                     accumulated_output = "No query provided for search_web mode".to_string();
@@ -857,39 +992,31 @@ pub async fn run_task(
                 let step_num = (turn + 1) as u32;
                 emit(app_handle, "agent:step_started", task_id, step_num, expl);
                 info!(task_id, query, "Search_web mode: searching");
-                let step_started_at = Instant::now();
 
                 match web::browser::web_search(query).await {
                     Ok(results) => {
-                        let results_text: String = results.iter().enumerate().map(|(i, r)| {
-                            format!("{}. {} ({})\n   {}", i + 1, r.title, r.url, r.snippet)
-                        }).collect::<Vec<_>>().join("\n\n");
+                        let results_text: String = results
+                            .iter()
+                            .enumerate()
+                            .map(|(i, r)| {
+                                format!("{}. {} ({})\n   {}", i + 1, r.title, r.url, r.snippet)
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n\n");
 
                         let prompt = format!(
                             "I searched the web for \"{}\" and got these results:\n\n{}\n\nBased on these search results, answer the user's task: {}",
                             query, results_text, search_task
                         );
 
-                        if let Ok(analysis) = gateway.complete_as_agent(&prompt, SYSTEM_PROMPT, settings).await {
-                            absorb_llm_metrics(
-                                &analysis,
-                                &mut total_cost,
-                                &mut total_tokens_in,
-                                &mut total_tokens_out,
-                                &mut primary_model,
-                                &mut primary_provider,
-                            );
-                            record_llm_response(
-                                db_path,
-                                task_id,
-                                "llm_search_analysis",
-                                &prompt,
-                                "Summarized search results for the task",
-                                &analysis,
-                            );
+                        if let Ok(analysis) = gateway
+                            .complete_as_agent(&prompt, SYSTEM_PROMPT, settings)
+                            .await
+                        {
                             accumulated_output = analysis.content;
                         } else {
-                            accumulated_output = format!("Search results for \"{}\":\n{}", query, results_text);
+                            accumulated_output =
+                                format!("Search results for \"{}\":\n{}", query, results_text);
                         }
 
                         let action = AgentAction::RunCommand {
@@ -897,13 +1024,27 @@ pub async fn run_task(
                             shell: ShellType::PowerShell,
                         };
                         let result = ExecutionResult {
-                            method: ExecutionMethod::Terminal, success: true,
+                            method: ExecutionMethod::Terminal,
+                            success: true,
                             output: Some(accumulated_output.clone()),
                             screenshot_path: None,
-                            duration_ms: step_started_at.elapsed().as_millis() as u64,
+                            duration_ms: start.elapsed().as_millis() as u64,
                         };
-                        save_step(db_path, task_id, step_num, &action, &std::path::PathBuf::new(), &result);
-                        emit(app_handle, "agent:step_completed", task_id, step_num, "success=true");
+                        save_step(
+                            db_path,
+                            task_id,
+                            step_num,
+                            &action,
+                            &std::path::PathBuf::new(),
+                            &result,
+                        );
+                        emit(
+                            app_handle,
+                            "agent:step_completed",
+                            task_id,
+                            step_num,
+                            "success=true",
+                        );
 
                         update_task_status(db_path, task_id, "completed");
                     }
@@ -917,23 +1058,26 @@ pub async fn run_task(
             }
 
             "done" => {
-                accumulated_output = plan_json["output"].as_str()
+                accumulated_output = plan_json["output"]
+                    .as_str()
                     .or(plan_json["summary"].as_str())
-                    .unwrap_or("Task completed").to_string();
+                    .unwrap_or("Task completed")
+                    .to_string();
                 update_task_status(db_path, task_id, "completed");
                 break;
             }
 
             "chat" => {
-                accumulated_output = plan_json["response"].as_str()
-                    .unwrap_or("").to_string();
+                accumulated_output = plan_json["response"].as_str().unwrap_or("").to_string();
                 update_task_status(db_path, task_id, "completed");
                 break;
             }
 
             "need_info" => {
-                accumulated_output = plan_json["question"].as_str()
-                    .unwrap_or("I need more information").to_string();
+                accumulated_output = plan_json["question"]
+                    .as_str()
+                    .unwrap_or("I need more information")
+                    .to_string();
                 update_task_status(db_path, task_id, "completed");
                 break;
             }
@@ -952,45 +1096,25 @@ pub async fn run_task(
     }
 
     let duration_ms = start.elapsed().as_millis() as u64;
-    let success = step_history.last().map(|s| s.result.success).unwrap_or(!accumulated_output.is_empty());
-    append_trace_step(
-        db_path,
-        task_id,
-        "verify",
-        description,
-        &accumulated_output,
-        if success { "Task finished successfully" } else { "Task finished with errors" },
-        0,
-        0.0,
-        0,
-    );
-    update_task_metrics(
-        db_path,
-        task_id,
-        primary_model.as_deref(),
-        primary_provider.as_deref(),
-        total_tokens_in,
-        total_tokens_out,
-        total_cost,
-        duration_ms,
-    );
-    finish_trace(
-        db_path,
-        task_id,
-        if success { "completed" } else { "failed" },
-        duration_ms,
-        total_cost,
-        total_tokens_in + total_tokens_out,
-    );
+    let success = step_history
+        .last()
+        .map(|s| s.result.success)
+        .unwrap_or(!accumulated_output.is_empty());
 
-    let _ = app_handle.emit("agent:task_completed", serde_json::json!({
-        "task_id": task_id, "success": success, "output": accumulated_output,
-        "steps": step_history.len(), "duration_ms": duration_ms,
-    }));
+    let _ = app_handle.emit(
+        "agent:task_completed",
+        serde_json::json!({
+            "task_id": task_id, "success": success, "output": accumulated_output,
+            "steps": step_history.len(), "duration_ms": duration_ms,
+        }),
+    );
 
     Ok(TaskExecutionResult {
-        task_id: task_id.to_string(), success,
-        steps: step_history, total_cost, duration_ms,
+        task_id: task_id.to_string(),
+        success,
+        steps: step_history,
+        total_cost: 0.0,
+        duration_ms,
     })
 }
 
@@ -999,45 +1123,112 @@ pub async fn run_task(
 // ═══════════════════════════════════════════════════════════════════
 
 async fn execute_with_retry(
-    script: &str, timeout: u64, task: &str,
-    gateway: &Gateway, settings: &Settings, task_id: &str,
+    script: &str,
+    timeout: u64,
+    task: &str,
+    gateway: &Gateway,
+    settings: &Settings,
+    task_id: &str,
 ) -> (bool, String) {
     let mut current = script.to_string();
+    let max_retries = settings.cli_retry_attempts.min(5);
+    let backoff_ms = settings.cli_retry_backoff_ms.min(30_000);
 
-    for attempt in 0..=MAX_RETRIES {
+    for attempt in 0..=max_retries {
         match hands::cli::run_powershell(&current, timeout).await {
             Ok(out) => {
                 if out.exit_code == 0 {
-                    let text = if !out.stdout.trim().is_empty() { out.stdout }
-                        else { "Command executed successfully.".into() };
+                    let text = if !out.stdout.trim().is_empty() {
+                        out.stdout
+                    } else {
+                        "Command executed successfully.".into()
+                    };
                     return (true, text);
                 }
 
-                let err = if !out.stderr.trim().is_empty() { out.stderr.clone() }
-                    else { format!("Exit code: {}", out.exit_code) };
+                let err = if !out.stderr.trim().is_empty() {
+                    out.stderr.clone()
+                } else {
+                    format!("Exit code: {}", out.exit_code)
+                };
+                let recoverable = is_recoverable_failure(&err);
 
-                if attempt < MAX_RETRIES {
+                if recoverable && attempt < max_retries {
                     info!(task_id, attempt, "Auto-correcting failed command");
-                    let prompt = format!("Original task: \"{}\"\n\n{}",
-                        task, RETRY_PROMPT.replace("{ERROR}", &err).replace("{COMMAND}", &current));
+                    let prompt = format!(
+                        "Original task: \"{}\"\n\n{}",
+                        task,
+                        RETRY_PROMPT
+                            .replace("{ERROR}", &err)
+                            .replace("{COMMAND}", &current)
+                    );
 
-                    if let Ok(fix) = gateway.complete_as_agent(&prompt, SYSTEM_PROMPT, settings).await {
+                    if let Ok(fix) = gateway
+                        .complete_as_agent(&prompt, SYSTEM_PROMPT, settings)
+                        .await
+                    {
                         if let Some(j) = extract_json(fix.content.trim()) {
                             if let Some(cmds) = j["commands"].as_array() {
-                                let new: Vec<&str> = cmds.iter().filter_map(|v| v.as_str()).collect();
-                                if !new.is_empty() { current = new.join("; "); continue; }
+                                let new: Vec<&str> =
+                                    cmds.iter().filter_map(|v| v.as_str()).collect();
+                                if !new.is_empty() {
+                                    current = new.join("; ");
+                                    tokio::time::sleep(std::time::Duration::from_millis(backoff_ms))
+                                        .await;
+                                    continue;
+                                }
                             }
                         }
                     }
                 }
-                return (false, format!("Error: {}", err));
+                let kind = if recoverable { "recoverable" } else { "fatal" };
+                return (false, format!("{} error: {}", kind, err));
             }
             Err(e) => {
-                if attempt >= MAX_RETRIES { return (false, format!("Execution error: {}", e)); }
+                let err = e.to_string();
+                let recoverable = is_recoverable_failure(&err);
+                if !recoverable || attempt >= max_retries {
+                    let kind = if recoverable { "recoverable" } else { "fatal" };
+                    return (false, format!("{} execution error: {}", kind, err));
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
             }
         }
     }
     (false, "Failed after retries".into())
+}
+
+fn is_recoverable_failure(error: &str) -> bool {
+    let lower = error.to_lowercase();
+    let recoverable_patterns = [
+        "timed out",
+        "timeout",
+        "temporarily",
+        "network",
+        "connection reset",
+        "connection aborted",
+        "connection refused",
+        "failed to fetch",
+        "service unavailable",
+        "rate limit",
+        "429",
+        "try again",
+        "access is denied",
+    ];
+    let fatal_patterns = [
+        "syntax error",
+        "not recognized as the name of a cmdlet",
+        "parameter cannot be found",
+        "missing argument",
+        "wrong password",
+        "corrupted vault",
+    ];
+    if fatal_patterns.iter().any(|pattern| lower.contains(pattern)) {
+        return false;
+    }
+    recoverable_patterns
+        .iter()
+        .any(|pattern| lower.contains(pattern))
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1049,101 +1240,23 @@ fn count_browser_opens(script: &str) -> u32 {
     let lower = script.to_lowercase();
     let mut count = 0;
     // Start-Process with URLs
-    for pattern in ["start-process 'http", "start-process \"http", "start-process http",
-                     "start 'http", "start \"http", "start http",
-                     "invoke-item 'http", "invoke-item \"http"] {
+    for pattern in [
+        "start-process 'http",
+        "start-process \"http",
+        "start-process http",
+        "start 'http",
+        "start \"http",
+        "start http",
+        "invoke-item 'http",
+        "invoke-item \"http",
+    ] {
         count += lower.matches(pattern).count() as u32;
     }
     count
 }
 
-fn absorb_llm_metrics(
-    response: &LLMResponse,
-    total_cost: &mut f64,
-    total_tokens_in: &mut u32,
-    total_tokens_out: &mut u32,
-    primary_model: &mut Option<String>,
-    primary_provider: &mut Option<String>,
-) {
-    *total_cost += response.cost;
-    *total_tokens_in += response.tokens_in;
-    *total_tokens_out += response.tokens_out;
-    if primary_model.is_none() {
-        *primary_model = Some(response.model.clone());
-    }
-    if primary_provider.is_none() {
-        *primary_provider = Some(response.provider.clone());
-    }
-}
-
-fn ensure_execution_trace(p: &Path, task_id: &str, input_text: &str, source: &str) {
-    if let Ok(db) = Database::new(p) {
-        let _ = db.ensure_execution_trace(task_id, input_text, source);
-    }
-}
-
-fn append_trace_step(
-    p: &Path,
-    task_id: &str,
-    phase: &str,
-    input: &str,
-    output: &str,
-    decision: &str,
-    duration_ms: u64,
-    cost: f64,
-    tokens: u32,
-) {
-    if let Ok(db) = Database::new(p) {
-        let _ = db.append_execution_trace_step(
-            task_id,
-            phase,
-            input,
-            output,
-            decision,
-            duration_ms,
-            cost,
-            tokens,
-        );
-    }
-}
-
-fn record_llm_response(
-    p: &Path,
-    task_id: &str,
-    phase: &str,
-    input: &str,
-    decision: &str,
-    response: &LLMResponse,
-) {
-    if let Ok(db) = Database::new(p) {
-        let _ = db.insert_llm_call(
-            task_id,
-            &response.provider,
-            &response.model,
-            response.tokens_in,
-            response.tokens_out,
-            response.cost,
-            response.duration_ms,
-        );
-    }
-    append_trace_step(
-        p,
-        task_id,
-        phase,
-        input,
-        &response.content,
-        decision,
-        response.duration_ms,
-        response.cost,
-        response.tokens_in + response.tokens_out,
-    );
-}
-
 /// Decompose a complex task into subtasks using LLM
-pub async fn decompose_task(
-    description: &str,
-    settings: &Settings,
-) -> Result<Vec<String>, String> {
+pub async fn decompose_task(description: &str, settings: &Settings) -> Result<Vec<String>, String> {
     let gateway = Gateway::new(settings);
     let prompt = format!(
         "Break this task into 2-5 concrete subtasks. Return ONLY a JSON array of strings, each being one subtask.\n\nTask: \"{}\"\n\nExample: [\"Research topic X\", \"Create comparison table\", \"Write summary\"]\n\nReturn ONLY the JSON array, nothing else.",
@@ -1155,7 +1268,10 @@ pub async fn decompose_task(
 
     // Parse JSON array
     if let Some(arr) = extract_json(content).and_then(|v| v.as_array().cloned()) {
-        let subtasks: Vec<String> = arr.iter().filter_map(|v| v.as_str().map(String::from)).collect();
+        let subtasks: Vec<String> = arr
+            .iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect();
         if !subtasks.is_empty() {
             return Ok(subtasks);
         }
@@ -1181,85 +1297,86 @@ pub fn extract_json(text: &str) -> Option<serde_json::Value> {
 }
 
 fn emit(app: &tauri::AppHandle, event: &str, task_id: &str, step: u32, desc: &str) {
-    let _ = app.emit(event, serde_json::json!({
-        "task_id": task_id, "step_number": step, "description": desc,
-    }));
+    let _ = app.emit(
+        event,
+        serde_json::json!({
+            "task_id": task_id, "step_number": step, "description": desc,
+        }),
+    );
 }
 
 fn fail(db_path: &Path, task_id: &str, error: &str) {
     save_task_output(db_path, task_id, &format!("Error: {}", error));
-    append_trace_step(
-        db_path,
-        task_id,
-        "verify",
-        task_id,
-        error,
-        "Pipeline failed before completion",
-        0,
-        0.0,
-        0,
-    );
     update_task_status(db_path, task_id, "failed");
 }
 
 async fn take_screenshot(dir: &Path) -> Option<std::path::PathBuf> {
     let d = dir.to_path_buf();
     tokio::task::spawn_blocking(move || {
-        capture::capture_full_screen().ok().and_then(|data| capture::save_screenshot(&data, &d).ok())
-    }).await.ok().flatten()
+        capture::capture_full_screen()
+            .ok()
+            .and_then(|data| capture::save_screenshot(&data, &d).ok())
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 fn update_task_status(p: &Path, id: &str, s: &str) {
-    if let Ok(db) = Database::new(p) { let _ = db.update_task_status(id, s); }
-}
-
-fn save_task_output(p: &Path, id: &str, o: &str) {
-    if let Ok(db) = Database::new(p) { let _ = db.update_task_output(id, o); }
-}
-
-fn update_task_metrics(
-    p: &Path,
-    id: &str,
-    model_used: Option<&str>,
-    provider: Option<&str>,
-    tokens_in: u32,
-    tokens_out: u32,
-    cost: f64,
-    duration_ms: u64,
-) {
     if let Ok(db) = Database::new(p) {
-        let _ = db.update_task_metrics(id, model_used, provider, tokens_in, tokens_out, cost, duration_ms);
+        let _ = db.update_task_status(id, s);
     }
 }
 
-fn finish_trace(p: &Path, id: &str, status: &str, total_duration_ms: u64, total_cost: f64, total_tokens: u32) {
+fn save_task_output(p: &Path, id: &str, o: &str) {
     if let Ok(db) = Database::new(p) {
-        let _ = db.finish_execution_trace(id, status, total_duration_ms, total_cost, total_tokens);
+        let _ = db.update_task_output(id, o);
     }
 }
 
 fn save_step(p: &Path, id: &str, n: u32, a: &AgentAction, sp: &Path, r: &ExecutionResult) {
     if let Ok(db) = Database::new(p) {
         let at = match a {
-            AgentAction::Click{..}=>"click", AgentAction::DoubleClick{..}=>"double_click",
-            AgentAction::RightClick{..}=>"right_click", AgentAction::Type{..}=>"type",
-            AgentAction::KeyCombo{..}=>"key_combo", AgentAction::Scroll{..}=>"scroll",
-            AgentAction::RunCommand{..}=>"run_command", AgentAction::Wait{..}=>"wait",
-            AgentAction::Screenshot=>"screenshot", AgentAction::TaskComplete{..}=>"task_complete",
+            AgentAction::Click { .. } => "click",
+            AgentAction::DoubleClick { .. } => "double_click",
+            AgentAction::RightClick { .. } => "right_click",
+            AgentAction::Type { .. } => "type",
+            AgentAction::KeyCombo { .. } => "key_combo",
+            AgentAction::Scroll { .. } => "scroll",
+            AgentAction::RunCommand { .. } => "run_command",
+            AgentAction::Wait { .. } => "wait",
+            AgentAction::Screenshot => "screenshot",
+            AgentAction::TaskComplete { .. } => "task_complete",
         };
-        let em = match r.method { ExecutionMethod::Api=>"api", ExecutionMethod::Terminal=>"terminal", ExecutionMethod::Screen=>"screen" };
-        let _ = db.insert_task_step(id, n, at, &serde_json::to_string(a).unwrap_or_default(),
-            &sp.to_string_lossy(), em, r.success, r.duration_ms);
+        let em = match r.method {
+            ExecutionMethod::Api => "api",
+            ExecutionMethod::Terminal => "terminal",
+            ExecutionMethod::Screen => "screen",
+        };
+        let _ = db.insert_task_step(
+            id,
+            n,
+            at,
+            &serde_json::to_string(a).unwrap_or_default(),
+            &sp.to_string_lossy(),
+            em,
+            r.success,
+            r.duration_ms,
+        );
     }
-    append_trace_step(
-        p,
-        id,
-        "execute",
-        &serde_json::to_string(a).unwrap_or_default(),
-        &r.output.clone().unwrap_or_default(),
-        if r.success { "Execution succeeded" } else { "Execution failed" },
-        r.duration_ms,
-        0.0,
-        0,
-    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_recoverable_failure;
+
+    #[test]
+    fn classifies_recoverable_failures_honestly() {
+        assert!(is_recoverable_failure("network timeout while fetching"));
+        assert!(is_recoverable_failure("429 rate limit"));
+        assert!(is_recoverable_failure("service unavailable"));
+        assert!(!is_recoverable_failure("syntax error near unexpected token"));
+        assert!(!is_recoverable_failure("The term 'foo' is not recognized as the name of a cmdlet"));
+        assert!(!is_recoverable_failure("wrong password or corrupted vault"));
+    }
 }

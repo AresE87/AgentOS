@@ -19,9 +19,7 @@ pub struct AutoCompliance {
 
 impl AutoCompliance {
     pub fn new() -> Self {
-        Self {
-            tasks: Vec::new(),
-        }
+        Self { tasks: Vec::new() }
     }
 
     /// Register a new compliance requirement
@@ -50,7 +48,9 @@ impl AutoCompliance {
             // In production, this would execute the actual check command
             if task.check_command.is_empty() {
                 task.status = "pending".to_string();
-            } else if task.check_command.contains("fail") || task.check_command.contains("non_compliant") {
+            } else if task.check_command.contains("fail")
+                || task.check_command.contains("non_compliant")
+            {
                 task.status = "non_compliant".to_string();
             } else {
                 task.status = "compliant".to_string();

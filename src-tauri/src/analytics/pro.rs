@@ -84,9 +84,21 @@ impl AnalyticsPro {
 
         Ok(FunnelData {
             stages: vec![
-                FunnelStage { name: "Tasks Created".into(), count: total, percentage: 100.0 },
-                FunnelStage { name: "Got Response".into(), count: responded, percentage: pct(responded) },
-                FunnelStage { name: "Completed".into(), count: completed, percentage: pct(completed) },
+                FunnelStage {
+                    name: "Tasks Created".into(),
+                    count: total,
+                    percentage: 100.0,
+                },
+                FunnelStage {
+                    name: "Got Response".into(),
+                    count: responded,
+                    percentage: pct(responded),
+                },
+                FunnelStage {
+                    name: "Completed".into(),
+                    count: completed,
+                    percentage: pct(completed),
+                },
             ],
         })
     }
@@ -118,7 +130,9 @@ impl AnalyticsPro {
             })
             .map_err(|e| e.to_string())?;
 
-        let cohorts: Vec<CohortRow> = rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+        let cohorts: Vec<CohortRow> = rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
         Ok(RetentionData { cohorts })
     }
 
@@ -170,9 +184,7 @@ impl AnalyticsPro {
     /// Compare performance across different LLM models.
     pub fn compare_models(conn: &Connection) -> Result<Vec<ModelScore>, String> {
         // Check if model column exists; fall back gracefully
-        let has_model = conn
-            .prepare("SELECT model FROM tasks LIMIT 0")
-            .is_ok();
+        let has_model = conn.prepare("SELECT model FROM tasks LIMIT 0").is_ok();
 
         if !has_model {
             // No model column — return a single aggregate
@@ -180,12 +192,24 @@ impl AnalyticsPro {
                 .query_row("SELECT COUNT(*) FROM tasks", [], |r| r.get(0))
                 .unwrap_or(0);
             let completed: u64 = conn
-                .query_row("SELECT COUNT(*) FROM tasks WHERE status = 'completed'", [], |r| r.get(0))
+                .query_row(
+                    "SELECT COUNT(*) FROM tasks WHERE status = 'completed'",
+                    [],
+                    |r| r.get(0),
+                )
                 .unwrap_or(0);
             let avg_cost: f64 = conn
-                .query_row("SELECT COALESCE(AVG(CAST(cost AS REAL)), 0) FROM tasks", [], |r| r.get(0))
+                .query_row(
+                    "SELECT COALESCE(AVG(CAST(cost AS REAL)), 0) FROM tasks",
+                    [],
+                    |r| r.get(0),
+                )
                 .unwrap_or(0.0);
-            let success_rate = if total == 0 { 0.0 } else { completed as f64 / total as f64 * 100.0 };
+            let success_rate = if total == 0 {
+                0.0
+            } else {
+                completed as f64 / total as f64 * 100.0
+            };
 
             return Ok(vec![ModelScore {
                 model: "default".to_string(),
@@ -214,7 +238,11 @@ impl AnalyticsPro {
                 let tasks: u64 = row.get(1)?;
                 let ok: u64 = row.get(2)?;
                 let avg_cost: f64 = row.get(3)?;
-                let success_rate = if tasks == 0 { 0.0 } else { ok as f64 / tasks as f64 * 100.0 };
+                let success_rate = if tasks == 0 {
+                    0.0
+                } else {
+                    ok as f64 / tasks as f64 * 100.0
+                };
                 Ok(ModelScore {
                     model,
                     tasks,
@@ -225,6 +253,7 @@ impl AnalyticsPro {
             })
             .map_err(|e| e.to_string())?;
 
-        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
     }
 }

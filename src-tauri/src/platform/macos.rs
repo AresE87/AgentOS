@@ -57,3 +57,21 @@ impl PlatformProvider for MacosPlatform {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn macos_platform_reports_honest_capabilities() {
+        let platform = MacosPlatform::new();
+        assert_eq!(platform.name(), "macos");
+        assert_eq!(platform.default_shell(), "zsh");
+        assert!(!platform.can_capture_screen());
+        assert!(!platform.can_control_input());
+        assert!(platform
+            .app_data_dir()
+            .to_string_lossy()
+            .contains("Application Support"));
+    }
+}

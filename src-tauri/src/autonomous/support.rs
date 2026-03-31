@@ -113,10 +113,19 @@ impl AutoSupport {
         }
         let issue_lower = ticket.issue.to_lowercase();
         let escalation_keywords = [
-            "legal", "lawsuit", "fraud", "security breach", "data leak",
-            "urgent", "emergency", "ceo", "executive",
+            "legal",
+            "lawsuit",
+            "fraud",
+            "security breach",
+            "data leak",
+            "urgent",
+            "emergency",
+            "ceo",
+            "executive",
         ];
-        escalation_keywords.iter().any(|kw| issue_lower.contains(kw))
+        escalation_keywords
+            .iter()
+            .any(|kw| issue_lower.contains(kw))
     }
 
     /// List all tickets
@@ -138,10 +147,26 @@ impl AutoSupport {
     /// Get support stats
     pub fn stats(&self) -> serde_json::Value {
         let total = self.tickets.len();
-        let resolved = self.tickets.iter().filter(|t| t.status == "resolved").count();
-        let escalated = self.tickets.iter().filter(|t| t.status == "escalated").count();
-        let open = self.tickets.iter().filter(|t| t.status == "open" || t.status == "in_progress").count();
-        let auto_resolved = self.tickets.iter().filter(|t| t.auto_response.is_some() && t.status == "resolved").count();
+        let resolved = self
+            .tickets
+            .iter()
+            .filter(|t| t.status == "resolved")
+            .count();
+        let escalated = self
+            .tickets
+            .iter()
+            .filter(|t| t.status == "escalated")
+            .count();
+        let open = self
+            .tickets
+            .iter()
+            .filter(|t| t.status == "open" || t.status == "in_progress")
+            .count();
+        let auto_resolved = self
+            .tickets
+            .iter()
+            .filter(|t| t.auto_response.is_some() && t.status == "resolved")
+            .count();
 
         serde_json::json!({
             "total": total,

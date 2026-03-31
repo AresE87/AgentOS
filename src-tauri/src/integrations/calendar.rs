@@ -71,11 +71,7 @@ pub trait CalendarProvider: Send + Sync {
 
     fn delete_event(&mut self, id: &str) -> Result<bool, String>;
 
-    fn free_slots(
-        &self,
-        date: NaiveDate,
-        duration_minutes: u32,
-    ) -> Result<Vec<TimeSlot>, String>;
+    fn free_slots(&self, date: NaiveDate, duration_minutes: u32) -> Result<Vec<TimeSlot>, String>;
 }
 
 // ── Google Calendar OAuth provider ─────────────────────────────────────
@@ -379,7 +375,10 @@ impl GoogleCalendarProvider {
         if let Some(ref att) = update.attendees {
             body.insert(
                 "attendees".to_string(),
-                serde_json::json!(att.iter().map(|e| serde_json::json!({"email": e})).collect::<Vec<_>>()),
+                serde_json::json!(att
+                    .iter()
+                    .map(|e| serde_json::json!({"email": e}))
+                    .collect::<Vec<_>>()),
             );
         }
 
@@ -700,11 +699,7 @@ impl CalendarProvider for CalendarManager {
         Ok(self.events.remove(id).is_some())
     }
 
-    fn free_slots(
-        &self,
-        date: NaiveDate,
-        duration_minutes: u32,
-    ) -> Result<Vec<TimeSlot>, String> {
+    fn free_slots(&self, date: NaiveDate, duration_minutes: u32) -> Result<Vec<TimeSlot>, String> {
         let day_start = date.and_time(NaiveTime::from_hms_opt(8, 0, 0).unwrap());
         let day_end = date.and_time(NaiveTime::from_hms_opt(18, 0, 0).unwrap());
         let duration = chrono::Duration::minutes(duration_minutes as i64);
@@ -756,6 +751,7 @@ impl CalendarProvider for CalendarManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Timelike;
 
     #[test]
     fn test_create_and_list() {
@@ -876,7 +872,10 @@ mod tests {
 
     #[test]
     fn test_format_rfc3339() {
-        assert_eq!(format_rfc3339("2026-04-01T09:00:00"), "2026-04-01T09:00:00Z");
+        assert_eq!(
+            format_rfc3339("2026-04-01T09:00:00"),
+            "2026-04-01T09:00:00Z"
+        );
         assert_eq!(
             format_rfc3339("2026-04-01T09:00:00Z"),
             "2026-04-01T09:00:00Z"

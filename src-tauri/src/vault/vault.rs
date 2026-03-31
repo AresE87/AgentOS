@@ -57,8 +57,8 @@ impl SecureVault {
 
     /// Unlock existing vault with master password
     pub fn unlock(&mut self, master_password: &str) -> Result<(), String> {
-        let data = std::fs::read(&self.vault_path)
-            .map_err(|e| format!("Cannot read vault: {}", e))?;
+        let data =
+            std::fs::read(&self.vault_path).map_err(|e| format!("Cannot read vault: {}", e))?;
         if data.len() < SALT_LEN + NONCE_LEN + 1 {
             return Err("Vault file too small".into());
         }
@@ -182,8 +182,7 @@ impl SecureVault {
     fn save(&self, salt: &[u8; SALT_LEN]) -> Result<(), String> {
         let key = self.derived_key.as_ref().ok_or("Vault locked")?;
 
-        let json =
-            serde_json::to_string(&self.entries).map_err(|e| e.to_string())?;
+        let json = serde_json::to_string(&self.entries).map_err(|e| e.to_string())?;
 
         let mut nonce_bytes = [0u8; NONCE_LEN];
         rand::thread_rng().fill(&mut nonce_bytes);
@@ -195,8 +194,7 @@ impl SecureVault {
             .encrypt(nonce, json.as_bytes())
             .map_err(|e| format!("Encryption failed: {}", e))?;
 
-        let mut file_data =
-            Vec::with_capacity(SALT_LEN + NONCE_LEN + ciphertext.len());
+        let mut file_data = Vec::with_capacity(SALT_LEN + NONCE_LEN + ciphertext.len());
         file_data.extend_from_slice(salt);
         file_data.extend_from_slice(&nonce_bytes);
         file_data.extend_from_slice(&ciphertext);
@@ -204,8 +202,7 @@ impl SecureVault {
         if let Some(parent) = self.vault_path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
-        std::fs::write(&self.vault_path, &file_data)
-            .map_err(|e| e.to_string())?;
+        std::fs::write(&self.vault_path, &file_data).map_err(|e| e.to_string())?;
 
         Ok(())
     }

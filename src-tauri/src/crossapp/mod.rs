@@ -1,3 +1,5 @@
 pub mod bridge;
 
-pub use bridge::{AppConnection, CrossAppBridge};
+pub use bridge::{
+    AppActionResult, AppConnection, CrossAppBridge, CrossAppHop, CrossAppWorkflowRun,
+};

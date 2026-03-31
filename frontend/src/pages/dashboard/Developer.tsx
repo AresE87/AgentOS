@@ -1,167 +1,244 @@
-import { useCallback, useEffect, useState } from 'react';
-import {
-  Bot,
-  Camera,
-  Eye,
-  FileCode2,
-  Keyboard,
-  MousePointer,
-  Radar,
-  Route,
-  ScanSearch,
-  Terminal,
-} from 'lucide-react';
+import { useEffect, useState } from 'react';
 import Card from '../../components/Card';
 import Button from '../../components/Button';
-import EmptyState from '../../components/EmptyState';
 import { useAgent } from '../../hooks/useAgent';
+import {
+  Bug,
+  Camera,
+  Eye,
+  FolderOpen,
+  Keyboard,
+  MousePointer,
+  RefreshCw,
+  Terminal,
+} from 'lucide-react';
 
-interface TraceSummary {
+interface DebugTraceStep {
+  id: string;
+  timestamp: string;
+  phase: string;
+  planned_action: string;
+  agent_name: string;
+  model: string;
+  input_summary: string;
+  output_summary: string;
+  status: string;
+  error?: string | null;
+  duration_ms: number;
+  cost: number;
+  evidence: string[];
+}
+
+interface DebugTrace {
   id: string;
   task_id: string;
-  input_text: string;
+  agent_name: string;
+  model: string;
   status: string;
+  created_at: string;
+  updated_at: string;
   total_duration_ms: number;
   total_cost: number;
-  created_at: string;
-  finished: boolean;
+  steps: DebugTraceStep[];
 }
 
-interface TraceDetail extends TraceSummary {
-  output_text?: string;
-  steps: Array<{
-    phase: string;
-    input: string;
-    output: string;
-    decision: string;
-    duration_ms: number;
-    cost: number;
-    tokens: number;
-  }>;
+interface ShellRegistrationStatus {
+  platform: string;
+  supported: boolean;
+  installed: boolean;
+  menu_label: string;
+  command_preview?: string | null;
+  issues: string[];
 }
 
-interface SwarmTask {
-  id: string;
-  description: string;
-  assigned_agents: string[];
-  strategy: string;
-  status: string;
-  consensus?: {
-    agent_name: string;
-    rationale: string;
-    model: string;
-  } | null;
-  results: Array<{
-    agent_name: string;
-    output: string;
-    model: string;
-    status: string;
-    cost: number;
-    duration_ms: number;
-  }>;
+interface ShellInvocation {
+  action_id: string;
+  target_path: string;
+  target_kind: string;
+  received_at: string;
 }
 
-interface TestSuite {
-  id: string;
-  name: string;
-  created_at: string;
-  test_cases: Array<{
-    id: string;
-    name: string;
-    description: string;
-  }>;
+interface ShellExecutionRecord {
+  invocation: ShellInvocation;
+  context_summary: string;
+  prompt: string;
+  agent_status?: string | null;
+  agent_output?: string | null;
+  error?: string | null;
+  completed_at: string;
 }
 
 export default function Developer() {
   const {
-    runPCTask,
-    workflowList,
-    testListSuites,
-    testRunSuite,
-    swarmCreate,
-    swarmExecute,
-    swarmResults,
-    swarmList,
-    debuggerGetTrace,
     debuggerListTraces,
+    debuggerGetTrace,
+    getShellRegistrationStatus,
+    installWindowsContextMenu,
+    uninstallWindowsContextMenu,
+    getPendingShellInvocation,
+    getLastShellExecution,
+    consumePendingShellInvocation,
   } = useAgent();
 
   const [log, setLog] = useState<string[]>([]);
   const [loading, setLoading] = useState<string | null>(null);
-  const [workflows, setWorkflows] = useState<any[]>([]);
-  const [suites, setSuites] = useState<TestSuite[]>([]);
-  const [suiteResults, setSuiteResults] = useState<Record<string, any[]>>({});
-  const [swarmTasks, setSwarmTasks] = useState<SwarmTask[]>([]);
-  const [traces, setTraces] = useState<TraceSummary[]>([]);
-  const [selectedTrace, setSelectedTrace] = useState<TraceDetail | null>(null);
-  const [traceTaskId, setTraceTaskId] = useState(
-    "Use one PowerShell command to print DEBUGGER_RUNTIME_OK and then finish the task.",
-  );
-  const [swarmDescription, setSwarmDescription] = useState(
-    'Audit launch readiness across docs, frontend, and partner ops',
-  );
-  const [swarmAgents, setSwarmAgents] = useState('planner, operator, qa');
-  const [swarmStrategy, setSwarmStrategy] = useState('vote');
+  const [traceLoading, setTraceLoading] = useState(false);
+  const [shellLoading, setShellLoading] = useState<string | null>(null);
+  const [traceFilter, setTraceFilter] = useState({
+    taskId: '',
+    agentName: '',
+    status: '',
+  });
+  const [traces, setTraces] = useState<DebugTrace[]>([]);
+  const [selectedTraceId, setSelectedTraceId] = useState<string | null>(null);
+  const [selectedTrace, setSelectedTrace] = useState<DebugTrace | null>(null);
+  const [shellStatus, setShellStatus] = useState<ShellRegistrationStatus | null>(null);
+  const [pendingInvocation, setPendingInvocation] = useState<ShellInvocation | null>(null);
+  const [lastShellExecution, setLastShellExecution] = useState<ShellExecutionRecord | null>(null);
+  const [shellRunResult, setShellRunResult] = useState<any | null>(null);
 
-  const addLog = useCallback((message: string) => {
-    const timestamp = new Date().toLocaleTimeString();
-    setLog((previous) => [...previous.slice(-24), `[${timestamp}] ${message}`]);
-  }, []);
+  const addLog = (msg: string) =>
+    setLog((prev) => [...prev.slice(-20), `[${new Date().toLocaleTimeString()}] ${msg}`]);
 
   const callBackend = async (cmd: string, args?: Record<string, unknown>) => {
     setLoading(cmd);
     try {
       const isTauri = '__TAURI_INTERNALS__' in window || '__TAURI__' in window;
       if (!isTauri) {
-        addLog(`[MOCK] ${cmd} requires the Tauri runtime.`);
+        addLog(`[MOCK] ${cmd} requires Tauri backend`);
+        setLoading(null);
         return null;
       }
       const { invoke } = await import('@tauri-apps/api/core');
       const result = await invoke<any>(`cmd_${cmd}`, args);
       addLog(`${cmd}: OK`);
-      return result;
-    } catch (error: any) {
-      addLog(`${cmd}: ERROR - ${error?.message || error}`);
-      return null;
-    } finally {
       setLoading(null);
+      return result;
+    } catch (e: any) {
+      addLog(`${cmd}: ERROR ${e?.message || e}`);
+      setLoading(null);
+      return null;
     }
   };
 
-  const refreshLab = useCallback(async () => {
-    setLoading('refresh_lab');
+  const refreshTraces = async (keepSelection = true) => {
+    setTraceLoading(true);
     try {
-      const [workflowResult, suiteResult, swarmResult, traceResult] = await Promise.all([
-        workflowList().catch(() => ({ workflows: [] })),
-        testListSuites().catch(() => []),
-        swarmList().catch(() => []),
-        debuggerListTraces(20).catch(() => []),
-      ]);
+      const items = await debuggerListTraces(
+        20,
+        traceFilter.taskId.trim() || undefined,
+        traceFilter.agentName.trim() || undefined,
+        traceFilter.status.trim() || undefined,
+      );
+      setTraces(items);
 
-      setWorkflows(Array.isArray(workflowResult?.workflows) ? workflowResult.workflows : []);
-      setSuites(Array.isArray(suiteResult) ? suiteResult : []);
-      setSwarmTasks(Array.isArray(swarmResult) ? swarmResult : []);
-      setTraces(Array.isArray(traceResult) ? traceResult : []);
+      const nextId =
+        keepSelection && selectedTraceId && items.some((item: DebugTrace) => item.id === selectedTraceId)
+          ? selectedTraceId
+          : items[0]?.id ?? null;
+
+      setSelectedTraceId(nextId);
+      if (nextId) {
+        const trace = await debuggerGetTrace(nextId);
+        setSelectedTrace(trace);
+      } else {
+        setSelectedTrace(null);
+      }
     } finally {
-      setLoading(null);
+      setTraceLoading(false);
     }
-  }, [debuggerListTraces, swarmList, testListSuites, workflowList]);
+  };
+
+  const refreshShell = async (autoConsume = false) => {
+    setShellLoading((current) => current ?? 'refresh');
+    try {
+      const [status, pending, last] = await Promise.all([
+        getShellRegistrationStatus(),
+        getPendingShellInvocation(),
+        getLastShellExecution(),
+      ]);
+      setShellStatus(status);
+      setPendingInvocation(pending);
+      setLastShellExecution(last);
+
+      if (autoConsume && pending) {
+        await runPendingShellInvocation();
+      }
+    } finally {
+      setShellLoading(null);
+    }
+  };
 
   useEffect(() => {
-    refreshLab();
+    refreshTraces(false);
+    refreshShell(true);
   }, []);
+
+  const selectTrace = async (traceId: string) => {
+    setSelectedTraceId(traceId);
+    const trace = await debuggerGetTrace(traceId);
+    setSelectedTrace(trace);
+  };
+
+  const runPendingShellInvocation = async () => {
+    setShellLoading('consume');
+    try {
+      const result = await consumePendingShellInvocation();
+      if (!result) {
+        setPendingInvocation(null);
+        return;
+      }
+      setShellRunResult(result);
+      setPendingInvocation(null);
+      addLog(`Shell invocation processed: ${result.invocation.target_path}`);
+      await refreshTraces(false);
+      const last = await getLastShellExecution();
+      setLastShellExecution(last);
+    } catch (e: any) {
+      addLog(`shell invocation: ERROR ${e?.message || e}`);
+    } finally {
+      setShellLoading(null);
+    }
+  };
+
+  const handleInstallShell = async () => {
+    setShellLoading('install');
+    try {
+      const status = await installWindowsContextMenu();
+      setShellStatus(status);
+      addLog('Windows context menu installed');
+    } catch (e: any) {
+      addLog(`install_windows_context_menu: ERROR ${e?.message || e}`);
+    } finally {
+      setShellLoading(null);
+    }
+  };
+
+  const handleUninstallShell = async () => {
+    setShellLoading('uninstall');
+    try {
+      const status = await uninstallWindowsContextMenu();
+      setShellStatus(status);
+      addLog('Windows context menu removed');
+    } catch (e: any) {
+      addLog(`uninstall_windows_context_menu: ERROR ${e?.message || e}`);
+    } finally {
+      setShellLoading(null);
+    }
+  };
 
   const handleCapture = async () => {
     const result = await callBackend('capture_screenshot');
     if (result) {
-      addLog(`Screenshot saved to ${result.path}`);
+      addLog(`Screenshot saved: ${result.path}`);
     }
   };
 
   const handleVision = async () => {
     const result = await callBackend('test_vision');
     if (result) {
-      addLog(`Vision model ${result.model || 'unknown'} returned analysis.`);
+      addLog(`Vision analysis (${result.model}):`);
+      addLog((result.analysis || '').substring(0, 200) + '...');
     }
   };
 
@@ -180,465 +257,329 @@ export default function Developer() {
     }
   };
 
-  const handleStartTrace = async () => {
-    if (!traceTaskId.trim()) {
-      addLog('Provide a task description before running a traced task.');
-      return;
-    }
-
-    setLoading('start_trace');
-    try {
-      const result = await runPCTask(traceTaskId.trim());
-      addLog(`Real traced task started: ${result.task_id}`);
-      const traceList = await debuggerListTraces(20);
-      setTraces(Array.isArray(traceList) ? traceList : []);
-      const detail = await debuggerGetTrace(result.task_id).catch(() => null);
-      setSelectedTrace(detail);
-    } catch (error: any) {
-      addLog(`Trace error - ${error?.message || error}`);
-    } finally {
-      setLoading(null);
-    }
-  };
-
-  const handleSelectTrace = async (traceId: string) => {
-    setLoading(traceId);
-    try {
-      const detail = await debuggerGetTrace(traceId);
-      setSelectedTrace(detail);
-    } catch (error: any) {
-      addLog(`Load trace failed - ${error?.message || error}`);
-    } finally {
-      setLoading(null);
-    }
-  };
-
-  const handleCreateSwarm = async () => {
-    setLoading('swarm_create');
-    try {
-      const result = await swarmCreate(
-        swarmDescription,
-        swarmAgents
-          .split(',')
-          .map((item) => item.trim())
-          .filter(Boolean),
-        swarmStrategy,
-      );
-      addLog(`Swarm task created: ${result.id}`);
-      const taskList = await swarmList();
-      setSwarmTasks(Array.isArray(taskList) ? taskList : []);
-    } catch (error: any) {
-      addLog(`Swarm create failed - ${error?.message || error}`);
-    } finally {
-      setLoading(null);
-    }
-  };
-
-  const handleExecuteSwarm = async (taskId: string) => {
-    setLoading(taskId);
-    try {
-      await swarmExecute(taskId);
-      const [taskList, result] = await Promise.all([
-        swarmList(),
-        swarmResults(taskId).catch(() => null),
-      ]);
-      setSwarmTasks(Array.isArray(taskList) ? taskList : []);
-      if (result?.consensus) {
-        addLog(`Swarm ${taskId} consensus: ${result.consensus.agent_name}`);
-      } else {
-        addLog(`Swarm ${taskId} executed.`);
-      }
-    } catch (error: any) {
-      addLog(`Swarm execute failed - ${error?.message || error}`);
-    } finally {
-      setLoading(null);
-    }
-  };
-
-  const handleRunSuite = async (suite: TestSuite) => {
-    setLoading(suite.id);
-    try {
-      const results = await testRunSuite(JSON.stringify(suite));
-      setSuiteResults((previous) => ({
-        ...previous,
-        [suite.id]: Array.isArray(results) ? results : [],
-      }));
-      addLog(`Suite ${suite.name} completed.`);
-    } catch (error: any) {
-      addLog(`Suite ${suite.name} failed - ${error?.message || error}`);
-    } finally {
-      setLoading(null);
-    }
-  };
-
   return (
-    <div className="p-6 space-y-6 max-w-7xl">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="space-y-2">
-          <div className="inline-flex items-center gap-2 rounded-full border border-[#1A1E26] bg-[#0D1117] px-3 py-1 text-[11px] uppercase tracking-[0.28em] text-[#8FA3B8]">
-            <ScanSearch size={12} className="text-[#00E5E5]" />
-            D14-D16
-          </div>
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-[#E6EDF3]">
-              Developer and verification lab
-            </h1>
-            <p className="max-w-3xl text-sm leading-6 text-[#8FA3B8]">
-              Debugger traces, swarm execution, test suites, workflow inventory, and device probes. This page only
-              exposes backends that already exist in the Rust runtime.
-            </p>
-          </div>
+    <div className="p-6 space-y-6 max-w-6xl">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-bold text-[#E6EDF3]">Developer Tools</h1>
+          <p className="text-sm text-[#3D4F5F] mt-1">
+            Inspect execution traces, validate Windows shell integration, and run low-level PC checks.
+          </p>
         </div>
-        <Button variant="secondary" onClick={refreshLab} loading={loading === 'refresh_lab'}>
-          Refresh lab
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="secondary" size="sm" onClick={() => refreshShell(false)} loading={shellLoading === 'refresh'}>
+            <RefreshCw size={14} />
+            Refresh Shell
+          </Button>
+          <Button variant="secondary" size="sm" onClick={() => refreshTraces()} loading={traceLoading}>
+            <RefreshCw size={14} />
+            Refresh Traces
+          </Button>
+        </div>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[1.08fr_0.92fr]">
-        <Card
-          header={
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-semibold text-[#E6EDF3]">Debugger traces</h3>
-                <p className="mt-1 text-xs text-[#5F7389]">
-                  Run or inspect real pipeline tasks and review the persisted execution phases.
-                </p>
-              </div>
-              <Radar size={16} className="text-[#00E5E5]" />
+      <Card header="OS Integration (C23)">
+        <div className="space-y-4">
+          <div className="grid grid-cols-3 gap-3">
+            <div className="rounded-lg border border-[#1A1E26] bg-[#11161D] p-3">
+              <p className="text-[11px] uppercase tracking-wide text-[#3D4F5F]">Platform</p>
+              <p className="mt-2 text-sm font-semibold text-[#E6EDF3]">{shellStatus?.platform ?? 'loading'}</p>
             </div>
-          }
-        >
-          <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
-            <div className="space-y-3">
-              <input
-                value={traceTaskId}
-                onChange={(event) => setTraceTaskId(event.target.value)}
-                placeholder="Task description"
-                className="w-full rounded-lg border border-[#1A1E26] bg-[#0A0E14] px-3 py-2 text-sm text-[#E6EDF3] outline-none placeholder:text-[#4C6075]"
-              />
-              <Button onClick={handleStartTrace} loading={loading === 'start_trace'}>
-                Run traced task
-              </Button>
-
-              <div className="space-y-2">
-                {traces.length === 0 ? (
-                  <EmptyState
-                    icon={<Radar size={32} />}
-                    title="No traces yet"
-                    description="Run a traced task or refresh to inspect persisted executions from the real pipeline."
-                  />
-                ) : (
-                  traces.map((trace) => (
-                    <button
-                      key={trace.id}
-                      onClick={() => handleSelectTrace(trace.id)}
-                      className="w-full rounded-xl border border-[#1A1E26] bg-[#0A0E14] p-3 text-left transition-colors hover:bg-[#11161D]"
-                    >
-                      <p className="text-sm font-medium text-[#E6EDF3]">{trace.input_text}</p>
-                      <p className="mt-1 text-xs text-[#5F7389]">{trace.task_id}</p>
-                      <p className="mt-2 text-[11px] uppercase tracking-[0.16em] text-[#5F7389]">{trace.status}</p>
-                    </button>
-                  ))
-                )}
-              </div>
-            </div>
-
-            <div>
-              {!selectedTrace ? (
-                <EmptyState
-                  icon={<Radar size={32} />}
-                  title="Select a trace"
-                  description="Trace details will appear here with phase timing, cost, and token summary."
-                />
-              ) : (
-                <div className="space-y-3">
-                  <div className="rounded-xl border border-[#1A1E26] bg-[#0A0E14] p-4">
-                    <div className="grid gap-3 md:grid-cols-3">
-                      <Metric label="Steps" value={`${selectedTrace.steps.length}`} />
-                      <Metric label="Duration" value={`${selectedTrace.total_duration_ms} ms`} />
-                      <Metric label="Cost" value={`$${selectedTrace.total_cost.toFixed(4)}`} />
-                    </div>
-                    {selectedTrace.output_text && (
-                      <p className="mt-3 text-sm text-[#C5D0DC]">{selectedTrace.output_text}</p>
-                    )}
-                  </div>
-                  <div className="space-y-2">
-                    {selectedTrace.steps.length === 0 ? (
-                      <p className="rounded-xl border border-dashed border-[#1A1E26] px-4 py-4 text-sm text-[#5F7389]">
-                        This trace is open but has no steps recorded yet.
-                      </p>
-                    ) : (
-                      selectedTrace.steps.map((step, index) => (
-                        <div
-                          key={`${step.phase}-${index}`}
-                          className="rounded-xl border border-[#1A1E26] bg-[#0A0E14] p-4"
-                        >
-                          <div className="flex items-center justify-between gap-4">
-                            <p className="text-sm font-medium text-[#E6EDF3]">{step.phase}</p>
-                            <span className="text-xs text-[#5F7389]">{step.duration_ms} ms</span>
-                          </div>
-                          <p className="mt-2 text-xs text-[#5F7389]">{step.decision}</p>
-                          <p className="mt-3 text-sm text-[#C5D0DC]">{step.output}</p>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </Card>
-
-        <Card
-          header={
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-semibold text-[#E6EDF3]">Workflow and testing surface</h3>
-                <p className="mt-1 text-xs text-[#5F7389]">
-                  Run verification suites against live executor, pipeline, and swarm runtime paths.
-                </p>
-              </div>
-              <FileCode2 size={16} className="text-[#00E5E5]" />
-            </div>
-          }
-        >
-          <div className="space-y-4">
-            <div className="rounded-xl border border-[#1A1E26] bg-[#0A0E14] p-4">
-              <p className="text-[11px] uppercase tracking-[0.22em] text-[#5F7389]">Workflow inventory</p>
-              <p className="mt-2 text-2xl font-semibold text-[#E6EDF3]">{workflows.length}</p>
-              <p className="mt-1 text-xs text-[#5F7389]">
-                Persisted workflow definitions in the current database.
+            <div className="rounded-lg border border-[#1A1E26] bg-[#11161D] p-3">
+              <p className="text-[11px] uppercase tracking-wide text-[#3D4F5F]">Support</p>
+              <p className="mt-2 text-sm font-semibold text-[#E6EDF3]">
+                {shellStatus?.supported ? 'context-menu ready' : 'not supported'}
               </p>
             </div>
-
-            <div className="space-y-2">
-              {suites.length === 0 ? (
-                <EmptyState
-                  icon={<Route size={32} />}
-                  title="No suites reported"
-                  description="The backend did not return any runtime suites."
-                />
-              ) : (
-                suites.map((suite) => {
-                  const results = suiteResults[suite.id] || [];
-                  const passed = results.filter((result) => result.passed).length;
-                  return (
-                    <div key={suite.id} className="rounded-xl border border-[#1A1E26] bg-[#0A0E14] p-4">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-medium text-[#E6EDF3]">{suite.name}</p>
-                          <p className="mt-1 text-xs text-[#5F7389]">
-                            {suite.test_cases.length} tests - created {suite.created_at}
-                          </p>
-                        </div>
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={() => handleRunSuite(suite)}
-                          loading={loading === suite.id}
-                        >
-                          Run suite
-                        </Button>
-                      </div>
-
-                      {results.length > 0 && (
-                        <div className="mt-3 rounded-lg border border-[#1A1E26] px-3 py-3 text-sm text-[#C5D0DC]">
-                          {passed}/{results.length} passing
-                        </div>
-                      )}
-                    </div>
-                  );
-                })
-              )}
+            <div className="rounded-lg border border-[#1A1E26] bg-[#11161D] p-3">
+              <p className="text-[11px] uppercase tracking-wide text-[#3D4F5F]">Install State</p>
+              <p className="mt-2 text-sm font-semibold text-[#E6EDF3]">
+                {shellStatus?.installed ? 'installed' : 'not installed'}
+              </p>
             </div>
           </div>
-        </Card>
-      </div>
 
-      <div className="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
-        <Card
-          header={
-            <div className="flex items-center justify-between">
+          {shellStatus?.command_preview && (
+            <div className="rounded-lg border border-[#1A1E26] bg-[#11161D] p-3">
+              <p className="text-[11px] uppercase tracking-wide text-[#3D4F5F]">Explorer command</p>
+              <p className="mt-2 break-all font-mono text-xs text-[#C5D0DC]">{shellStatus.command_preview}</p>
+            </div>
+          )}
+
+          {shellStatus?.issues?.length ? (
+            <div className="rounded-lg border border-[#F39C12]/30 bg-[#F39C12]/10 px-3 py-2 text-xs text-[#F7C97C]">
+              {shellStatus.issues.join(' ')}
+            </div>
+          ) : null}
+
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="secondary" onClick={handleInstallShell} loading={shellLoading === 'install'}>
+              <FolderOpen size={14} />
+              Install Explorer Menu
+            </Button>
+            <Button size="sm" variant="secondary" onClick={handleUninstallShell} loading={shellLoading === 'uninstall'}>
+              <FolderOpen size={14} />
+              Remove Explorer Menu
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={runPendingShellInvocation}
+              loading={shellLoading === 'consume'}
+              disabled={!pendingInvocation}
+            >
+              <FolderOpen size={14} />
+              Process Pending Invocation
+            </Button>
+          </div>
+
+          {pendingInvocation ? (
+            <div className="rounded-lg border border-[#00E5E5]/30 bg-[rgba(0,229,229,0.06)] p-4">
+              <p className="text-sm font-medium text-[#E6EDF3]">Pending Explorer launch</p>
+              <p className="mt-1 text-xs text-[#3D4F5F]">
+                {pendingInvocation.action_id} · {pendingInvocation.target_kind}
+              </p>
+              <p className="mt-2 font-mono text-xs text-[#C5D0DC] break-all">{pendingInvocation.target_path}</p>
+            </div>
+          ) : (
+            <p className="text-sm text-[#3D4F5F]">
+              No pending shell invocation. Right-click a file or folder and choose <span className="text-[#E6EDF3]">Ask AgentOS</span>.
+            </p>
+          )}
+
+          {shellRunResult && (
+            <div className="rounded-lg border border-[#1A1E26] bg-[#11161D] p-4 space-y-3">
               <div>
-                <h3 className="text-sm font-semibold text-[#E6EDF3]">Swarm and voting lab</h3>
-                <p className="mt-1 text-xs text-[#5F7389]">
-                  Execute real named-agent subtasks and inspect persisted runtime results.
+                <p className="text-sm font-medium text-[#E6EDF3]">Latest OS-triggered run</p>
+                <p className="mt-1 text-xs text-[#3D4F5F]">
+                  {shellRunResult.invocation?.target_kind} · {shellRunResult.agent_response?.status ?? 'unknown'}
                 </p>
               </div>
-              <Bot size={16} className="text-[#00E5E5]" />
+              <p className="font-mono text-xs text-[#C5D0DC] break-all">{shellRunResult.invocation?.target_path}</p>
+              <div>
+                <p className="text-[11px] uppercase tracking-wide text-[#3D4F5F]">Context sent to AgentOS</p>
+                <p className="mt-2 whitespace-pre-wrap text-xs text-[#C5D0DC]">{shellRunResult.action?.context_summary}</p>
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-wide text-[#3D4F5F]">Agent response</p>
+                <p className="mt-2 whitespace-pre-wrap text-xs text-[#C5D0DC]">
+                  {shellRunResult.agent_response?.output || shellRunResult.record?.agent_output || '-'}
+                </p>
+              </div>
             </div>
-          }
-        >
-          <div className="grid gap-4 lg:grid-cols-[0.92fr_1.08fr]">
-            <div className="space-y-3">
-              <textarea
-                value={swarmDescription}
-                onChange={(event) => setSwarmDescription(event.target.value)}
-                rows={4}
-                className="w-full rounded-lg border border-[#1A1E26] bg-[#0A0E14] px-3 py-2 text-sm text-[#E6EDF3] outline-none"
+          )}
+
+          {lastShellExecution && !shellRunResult && (
+            <div className="rounded-lg border border-[#1A1E26] bg-[#11161D] p-4">
+              <p className="text-sm font-medium text-[#E6EDF3]">Last completed shell execution</p>
+              <p className="mt-2 font-mono text-xs text-[#C5D0DC] break-all">
+                {lastShellExecution.invocation.target_path}
+              </p>
+              <p className="mt-2 text-xs text-[#3D4F5F]">
+                {lastShellExecution.agent_status ?? 'unknown'} · {new Date(lastShellExecution.completed_at).toLocaleString()}
+              </p>
+            </div>
+          )}
+        </div>
+      </Card>
+
+      <Card header="Agent Debugger (R96)">
+        <div className="grid grid-cols-[280px,1fr] gap-5">
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <input
+                className="w-full rounded-lg border border-[#1A1E26] bg-[#11161D] px-3 py-2 text-sm text-[#E6EDF3]"
+                placeholder="Filter by task id"
+                value={traceFilter.taskId}
+                onChange={(e) => setTraceFilter((prev) => ({ ...prev, taskId: e.target.value }))}
               />
               <input
-                value={swarmAgents}
-                onChange={(event) => setSwarmAgents(event.target.value)}
-                className="w-full rounded-lg border border-[#1A1E26] bg-[#0A0E14] px-3 py-2 text-sm text-[#E6EDF3] outline-none"
+                className="w-full rounded-lg border border-[#1A1E26] bg-[#11161D] px-3 py-2 text-sm text-[#E6EDF3]"
+                placeholder="Filter by agent"
+                value={traceFilter.agentName}
+                onChange={(e) => setTraceFilter((prev) => ({ ...prev, agentName: e.target.value }))}
               />
-              <select
-                value={swarmStrategy}
-                onChange={(event) => setSwarmStrategy(event.target.value)}
-                className="w-full rounded-lg border border-[#1A1E26] bg-[#0A0E14] px-3 py-2 text-sm text-[#E6EDF3] outline-none"
-              >
-                <option value="vote">vote</option>
-                <option value="parallel">parallel</option>
-                <option value="sequential">sequential</option>
-              </select>
-              <Button onClick={handleCreateSwarm} loading={loading === 'swarm_create'}>
-                Create swarm task
+              <input
+                className="w-full rounded-lg border border-[#1A1E26] bg-[#11161D] px-3 py-2 text-sm text-[#E6EDF3]"
+                placeholder="Filter by status"
+                value={traceFilter.status}
+                onChange={(e) => setTraceFilter((prev) => ({ ...prev, status: e.target.value }))}
+              />
+              <Button size="sm" variant="secondary" onClick={() => refreshTraces(false)} loading={traceLoading}>
+                Apply Filters
               </Button>
             </div>
 
-            <div className="space-y-2">
-              {swarmTasks.length === 0 ? (
-                <EmptyState
-                  icon={<Bot size={32} />}
-                  title="No swarm tasks"
-                  description="Create a task to run real agent responses through the swarm runtime."
-                />
+            <div className="space-y-2 max-h-[520px] overflow-y-auto">
+              {traces.length === 0 ? (
+                <p className="text-sm text-[#3D4F5F]">No traces captured yet. Run a PC task or Explorer action and return here.</p>
               ) : (
-                swarmTasks.map((task) => (
-                  <div key={task.id} className="rounded-xl border border-[#1A1E26] bg-[#0A0E14] p-4">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-medium text-[#E6EDF3]">{task.description}</p>
-                        <p className="mt-1 text-xs text-[#5F7389]">
-                          {task.assigned_agents.join(', ')} - {task.strategy}
-                        </p>
-                      </div>
-                      <div className="space-y-2 text-right">
-                        <span className="text-xs text-[#8FA3B8]">{task.status}</span>
-                        {task.status === 'pending' && (
-                          <div>
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              onClick={() => handleExecuteSwarm(task.id)}
-                              loading={loading === task.id}
-                            >
-                              Execute
-                            </Button>
-                          </div>
-                        )}
-                      </div>
+                traces.map((trace) => (
+                  <button
+                    key={trace.id}
+                    type="button"
+                    onClick={() => selectTrace(trace.id)}
+                    className={`w-full rounded-lg border p-3 text-left transition-colors ${
+                      selectedTraceId === trace.id
+                        ? 'border-[#00E5E5] bg-[rgba(0,229,229,0.06)]'
+                        : 'border-[#1A1E26] hover:bg-[#11161D]'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Bug size={14} className="text-[#00E5E5]" />
+                      <span className="text-sm font-medium text-[#E6EDF3]">{trace.task_id}</span>
                     </div>
-                    {task.results.length > 0 && (
-                      <div className="mt-3 space-y-2">
-                        {task.consensus && (
-                          <div className="rounded-lg border border-[#1A1E26] px-3 py-3">
-                            <p className="text-sm font-medium text-[#E6EDF3]">Consensus: {task.consensus.agent_name}</p>
-                            <p className="mt-1 text-xs text-[#5F7389]">{task.consensus.rationale}</p>
-                          </div>
-                        )}
-                        {task.results.map((result) => (
-                          <div key={`${task.id}-${result.agent_name}`} className="rounded-lg border border-[#1A1E26] px-3 py-3">
-                            <div className="flex items-center justify-between gap-3">
-                              <p className="text-sm font-medium text-[#E6EDF3]">{result.agent_name}</p>
-                              <p className="text-xs text-[#5F7389]">
-                                {result.status} - {result.model || 'no-model'} - {result.duration_ms} ms
-                              </p>
-                            </div>
-                            <p className="mt-2 text-sm text-[#C5D0DC]">{result.output}</p>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                    <p className="mt-1 text-xs text-[#3D4F5F]">
+                      {trace.agent_name} · {trace.model}
+                    </p>
+                    <p className="mt-1 text-xs text-[#3D4F5F]">
+                      {trace.steps.length} steps · {trace.status}
+                    </p>
+                  </button>
                 ))
               )}
             </div>
           </div>
-        </Card>
 
-        <Card
-          header={
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-semibold text-[#E6EDF3]">Vision probes and command shelf</h3>
-                <p className="mt-1 text-xs text-[#5F7389]">
-                  The existing E2E probes are kept here as low-level operator tools.
-                </p>
-              </div>
-              <ScanSearch size={16} className="text-[#00E5E5]" />
-            </div>
-          }
-        >
-          <div className="space-y-4">
-            <div className="flex flex-wrap gap-2">
-              <Button size="sm" variant="secondary" onClick={handleCapture} loading={loading === 'capture_screenshot'}>
-                <Camera size={14} />
-                Capture screen
-              </Button>
-              <Button size="sm" variant="secondary" onClick={handleVision} loading={loading === 'test_vision'}>
-                <Eye size={14} />
-                Vision analyze
-              </Button>
-              <Button size="sm" variant="secondary" onClick={handleClick} loading={loading === 'test_click'}>
-                <MousePointer size={14} />
-                Test click
-              </Button>
-              <Button size="sm" variant="secondary" onClick={handleType} loading={loading === 'test_type'}>
-                <Keyboard size={14} />
-                Test type
-              </Button>
-            </div>
+          <div>
+            {!selectedTrace ? (
+              <p className="text-sm text-[#3D4F5F]">Select a trace to inspect execution steps.</p>
+            ) : (
+              <div className="space-y-4">
+                <div className="grid grid-cols-4 gap-3">
+                  <div className="rounded-lg border border-[#1A1E26] bg-[#11161D] p-3">
+                    <p className="text-[11px] uppercase tracking-wide text-[#3D4F5F]">Task</p>
+                    <p className="mt-2 text-sm font-semibold text-[#E6EDF3]">{selectedTrace.task_id}</p>
+                  </div>
+                  <div className="rounded-lg border border-[#1A1E26] bg-[#11161D] p-3">
+                    <p className="text-[11px] uppercase tracking-wide text-[#3D4F5F]">Agent</p>
+                    <p className="mt-2 text-sm font-semibold text-[#E6EDF3]">{selectedTrace.agent_name}</p>
+                  </div>
+                  <div className="rounded-lg border border-[#1A1E26] bg-[#11161D] p-3">
+                    <p className="text-[11px] uppercase tracking-wide text-[#3D4F5F]">Status</p>
+                    <p className="mt-2 text-sm font-semibold text-[#E6EDF3]">{selectedTrace.status}</p>
+                  </div>
+                  <div className="rounded-lg border border-[#1A1E26] bg-[#11161D] p-3">
+                    <p className="text-[11px] uppercase tracking-wide text-[#3D4F5F]">Duration</p>
+                    <p className="mt-2 text-sm font-semibold text-[#E6EDF3]">{selectedTrace.total_duration_ms} ms</p>
+                  </div>
+                </div>
 
-            <div className="rounded-xl border border-[#1A1E26] bg-[#0A0E14] p-4">
-              <p className="text-[11px] uppercase tracking-[0.22em] text-[#5F7389]">Command shelf</p>
-              <div className="mt-3 grid gap-2 text-xs font-mono text-[#8FA3B8] md:grid-cols-2">
-                <div className="flex items-center gap-2"><Terminal size={12} /> cmd_capture_screenshot</div>
-                <div className="flex items-center gap-2"><Terminal size={12} /> cmd_test_vision</div>
-                <div className="flex items-center gap-2"><Terminal size={12} /> cmd_test_click</div>
-                <div className="flex items-center gap-2"><Terminal size={12} /> cmd_test_type</div>
-                <div className="flex items-center gap-2"><Terminal size={12} /> cmd_workflow_list</div>
-                <div className="flex items-center gap-2"><Terminal size={12} /> cmd_test_list_suites</div>
-                <div className="flex items-center gap-2"><Terminal size={12} /> cmd_swarm_create</div>
-                <div className="flex items-center gap-2"><Terminal size={12} /> cmd_debugger_list_traces</div>
+                <Card header="Execution Steps">
+                  <div className="space-y-3 max-h-[520px] overflow-y-auto">
+                    {selectedTrace.steps.map((step, index) => (
+                      <div key={step.id} className="rounded-lg border border-[#1A1E26] bg-[#11161D] p-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-medium text-[#E6EDF3]">
+                              {index + 1}. {step.planned_action}
+                            </p>
+                            <p className="mt-1 text-xs text-[#3D4F5F]">
+                              {new Date(step.timestamp).toLocaleString()} · {step.phase} · {step.agent_name} · {step.model}
+                            </p>
+                          </div>
+                          <span
+                            className={`rounded-full px-2 py-1 text-[11px] font-medium ${
+                              step.status === 'completed'
+                                ? 'bg-[#2ECC71]/10 text-[#2ECC71]'
+                                : 'bg-[#E74C3C]/10 text-[#E74C3C]'
+                            }`}
+                          >
+                            {step.status}
+                          </span>
+                        </div>
+                        <div className="mt-3 grid grid-cols-2 gap-4 text-xs">
+                          <div>
+                            <p className="uppercase tracking-wide text-[#3D4F5F] mb-1">Input Summary</p>
+                            <p className="text-[#C5D0DC] whitespace-pre-wrap">{step.input_summary}</p>
+                          </div>
+                          <div>
+                            <p className="uppercase tracking-wide text-[#3D4F5F] mb-1">Output Summary</p>
+                            <p className="text-[#C5D0DC] whitespace-pre-wrap">{step.output_summary || '-'}</p>
+                          </div>
+                        </div>
+                        {step.error && (
+                          <div className="mt-3 rounded-lg border border-[#E74C3C]/30 bg-[#E74C3C]/10 px-3 py-2 text-xs text-[#F6C0BA]">
+                            {step.error}
+                          </div>
+                        )}
+                        {step.evidence.length > 0 && (
+                          <div className="mt-3">
+                            <p className="uppercase tracking-wide text-[#3D4F5F] mb-1 text-xs">Evidence</p>
+                            <ul className="space-y-1 text-xs text-[#C5D0DC]">
+                              {step.evidence.map((item, idx) => (
+                                <li key={`${step.id}-evidence-${idx}`} className="rounded bg-[#0D1117] px-2 py-1">
+                                  {item}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </Card>
               </div>
-            </div>
-
-            <div className="rounded-xl border border-[#1A1E26] bg-[#0A0E14] p-4">
-              <p className="text-[11px] uppercase tracking-[0.22em] text-[#5F7389]">Session log</p>
-              <div className="mt-3 max-h-[260px] space-y-1 overflow-y-auto font-mono text-xs">
-                {log.length === 0 ? (
-                  <p className="text-[#5F7389]">Run a probe or a lab action to populate this log.</p>
-                ) : (
-                  log.map((line) => (
-                    <div
-                      key={line}
-                      className={
-                        line.includes('ERROR')
-                          ? 'text-[#E74C3C]'
-                          : line.includes('OK')
-                            ? 'text-[#2ECC71]'
-                            : 'text-[#C5D0DC]'
-                      }
-                    >
-                      {line}
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
+            )}
           </div>
-        </Card>
-      </div>
-    </div>
-  );
-}
+        </div>
+      </Card>
 
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <p className="text-[11px] uppercase tracking-[0.22em] text-[#5F7389]">{label}</p>
-      <p className="mt-2 text-xl font-semibold text-[#E6EDF3]">{value}</p>
+      <Card header="Vision E2E Tests (R2)">
+        <p className="text-xs text-[#3D4F5F] mb-4">
+          Test individual vision pipeline components. Requires Tauri backend running.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" variant="secondary" onClick={handleCapture} loading={loading === 'capture_screenshot'}>
+            <Camera size={14} /> Capture Screen
+          </Button>
+          <Button size="sm" variant="secondary" onClick={handleVision} loading={loading === 'test_vision'}>
+            <Eye size={14} /> Vision Analyze
+          </Button>
+          <Button size="sm" variant="secondary" onClick={handleClick} loading={loading === 'test_click'}>
+            <MousePointer size={14} /> Test Click
+          </Button>
+          <Button size="sm" variant="secondary" onClick={handleType} loading={loading === 'test_type'}>
+            <Keyboard size={14} /> Test Type
+          </Button>
+        </div>
+      </Card>
+
+      <Card header="Log">
+        <div className="font-mono text-xs space-y-1 max-h-[220px] overflow-y-auto">
+          {log.length === 0 ? (
+            <p className="text-[#3D4F5F]">Run a test to see output here.</p>
+          ) : (
+            log.map((line, i) => (
+              <div
+                key={i}
+                className={`${
+                  line.includes('ERROR')
+                    ? 'text-[#E74C3C]'
+                    : line.includes('OK')
+                      ? 'text-[#2ECC71]'
+                      : 'text-[#C5D0DC]'
+                }`}
+              >
+                {line}
+              </div>
+            ))
+          )}
+        </div>
+      </Card>
+
+      <Card header="IPC Commands">
+        <div className="grid grid-cols-2 gap-2 text-xs font-mono text-[#3D4F5F]">
+          <div className="flex items-center gap-2"><Terminal size={12} /> cmd_install_windows_context_menu</div>
+          <div className="flex items-center gap-2"><Terminal size={12} /> cmd_consume_pending_shell_invocation</div>
+          <div className="flex items-center gap-2"><Terminal size={12} /> cmd_capture_screenshot</div>
+          <div className="flex items-center gap-2"><Terminal size={12} /> cmd_test_vision</div>
+          <div className="flex items-center gap-2"><Terminal size={12} /> cmd_test_click</div>
+          <div className="flex items-center gap-2"><Terminal size={12} /> cmd_test_type</div>
+          <div className="flex items-center gap-2"><Terminal size={12} /> cmd_run_pc_task</div>
+          <div className="flex items-center gap-2"><Terminal size={12} /> cmd_debugger_list_traces</div>
+        </div>
+      </Card>
     </div>
   );
 }

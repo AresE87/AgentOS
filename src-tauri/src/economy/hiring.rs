@@ -75,13 +75,22 @@ impl HiringManager {
     }
 
     pub fn list_jobs(&self, status_filter: Option<JobStatus>) -> Vec<&AgentJob> {
-        self.jobs.iter().filter(|j| {
-            status_filter.as_ref().map_or(true, |s| &j.status == s)
-        }).collect()
+        self.jobs
+            .iter()
+            .filter(|j| status_filter.as_ref().map_or(true, |s| &j.status == s))
+            .collect()
     }
 
-    pub fn apply_to_job(&mut self, job_id: &str, agent_id: String, cover_note: String) -> Result<(), String> {
-        let job = self.jobs.iter_mut().find(|j| j.id == job_id)
+    pub fn apply_to_job(
+        &mut self,
+        job_id: &str,
+        agent_id: String,
+        cover_note: String,
+    ) -> Result<(), String> {
+        let job = self
+            .jobs
+            .iter_mut()
+            .find(|j| j.id == job_id)
             .ok_or_else(|| "Job not found".to_string())?;
         if job.status != JobStatus::Open {
             return Err("Job is not open for applications".to_string());
@@ -98,7 +107,10 @@ impl HiringManager {
     }
 
     pub fn hire_agent(&mut self, job_id: &str, agent_id: &str) -> Result<AgentJob, String> {
-        let job = self.jobs.iter_mut().find(|j| j.id == job_id)
+        let job = self
+            .jobs
+            .iter_mut()
+            .find(|j| j.id == job_id)
             .ok_or_else(|| "Job not found".to_string())?;
         if !job.applicants.iter().any(|a| a.agent_id == agent_id) {
             return Err("Agent has not applied to this job".to_string());

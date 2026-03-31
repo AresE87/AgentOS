@@ -25,8 +25,8 @@ const CATALOG_JSON: &str = include_str!("../../marketplace/index.json");
 impl MarketplaceCatalog {
     /// Load catalog from the embedded JSON string (compile-time embedded).
     pub fn load() -> Result<Self, String> {
-        let entries: Vec<CatalogEntry> =
-            serde_json::from_str(CATALOG_JSON).map_err(|e| format!("Failed to parse catalog: {}", e))?;
+        let entries: Vec<CatalogEntry> = serde_json::from_str(CATALOG_JSON)
+            .map_err(|e| format!("Failed to parse catalog: {}", e))?;
         Ok(Self { entries })
     }
 

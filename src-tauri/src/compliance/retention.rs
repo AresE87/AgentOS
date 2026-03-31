@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use rusqlite::Connection;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RetentionPolicy {

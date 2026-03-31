@@ -131,7 +131,10 @@ impl APIRegistry {
             req = req.header("Content-Type", "application/json").body(body);
         }
 
-        let resp = req.send().await.map_err(|e| format!("HTTP request failed: {}", e))?;
+        let resp = req
+            .send()
+            .await
+            .map_err(|e| format!("HTTP request failed: {}", e))?;
 
         let status = resp.status().as_u16();
         let body_text = resp
@@ -140,9 +143,8 @@ impl APIRegistry {
             .map_err(|e| format!("Failed to read response body: {}", e))?;
 
         // Try to parse as JSON, fall back to wrapping in a string value
-        let body_json: serde_json::Value = serde_json::from_str(&body_text).unwrap_or_else(|_| {
-            serde_json::json!({ "raw": body_text })
-        });
+        let body_json: serde_json::Value = serde_json::from_str(&body_text)
+            .unwrap_or_else(|_| serde_json::json!({ "raw": body_text }));
 
         Ok(serde_json::json!({
             "status": status,
@@ -164,7 +166,10 @@ pub fn get_templates() -> Vec<APIConnection> {
             auth_token: String::new(),
             headers: {
                 let mut h = HashMap::new();
-                h.insert("Accept".to_string(), "application/vnd.github+json".to_string());
+                h.insert(
+                    "Accept".to_string(),
+                    "application/vnd.github+json".to_string(),
+                );
                 h.insert("User-Agent".to_string(), "AgentOS".to_string());
                 h
             },
@@ -193,17 +198,13 @@ pub fn get_templates() -> Vec<APIConnection> {
             auth_type: "bearer".to_string(),
             auth_token: String::new(),
             headers: HashMap::new(),
-            endpoints: vec![
-                APIEndpoint {
-                    name: "post_message".to_string(),
-                    method: "POST".to_string(),
-                    path: "/chat.postMessage".to_string(),
-                    description: "Post a message to a Slack channel".to_string(),
-                    body_template: Some(
-                        r#"{"channel":"{channel}","text":"{text}"}"#.to_string(),
-                    ),
-                },
-            ],
+            endpoints: vec![APIEndpoint {
+                name: "post_message".to_string(),
+                method: "POST".to_string(),
+                path: "/chat.postMessage".to_string(),
+                description: "Post a message to a Slack channel".to_string(),
+                body_template: Some(r#"{"channel":"{channel}","text":"{text}"}"#.to_string()),
+            }],
         },
         // 3. Jira
         APIConnection {
@@ -217,17 +218,13 @@ pub fn get_templates() -> Vec<APIConnection> {
                 h.insert("Accept".to_string(), "application/json".to_string());
                 h
             },
-            endpoints: vec![
-                APIEndpoint {
-                    name: "search_issues".to_string(),
-                    method: "POST".to_string(),
-                    path: "/search".to_string(),
-                    description: "Search Jira issues using JQL".to_string(),
-                    body_template: Some(
-                        r#"{"jql":"{jql}","maxResults":50}"#.to_string(),
-                    ),
-                },
-            ],
+            endpoints: vec![APIEndpoint {
+                name: "search_issues".to_string(),
+                method: "POST".to_string(),
+                path: "/search".to_string(),
+                description: "Search Jira issues using JQL".to_string(),
+                body_template: Some(r#"{"jql":"{jql}","maxResults":50}"#.to_string()),
+            }],
         },
         // 4. Notion
         APIConnection {
@@ -241,15 +238,13 @@ pub fn get_templates() -> Vec<APIConnection> {
                 h.insert("Notion-Version".to_string(), "2022-06-28".to_string());
                 h
             },
-            endpoints: vec![
-                APIEndpoint {
-                    name: "query_database".to_string(),
-                    method: "POST".to_string(),
-                    path: "/databases/{database_id}/query".to_string(),
-                    description: "Query a Notion database".to_string(),
-                    body_template: Some(r#"{}"#.to_string()),
-                },
-            ],
+            endpoints: vec![APIEndpoint {
+                name: "query_database".to_string(),
+                method: "POST".to_string(),
+                path: "/databases/{database_id}/query".to_string(),
+                description: "Query a Notion database".to_string(),
+                body_template: Some(r#"{}"#.to_string()),
+            }],
         },
         // 5. Generic REST
         APIConnection {

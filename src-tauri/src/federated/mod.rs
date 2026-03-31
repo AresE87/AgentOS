@@ -1,3 +1,3 @@
 pub mod client;
 
-pub use client::{FederatedClient, FederatedConfig, WeightDelta};
+pub use client::{FederatedClient, FederatedConfig, FederatedPayload, FederatedSignal};

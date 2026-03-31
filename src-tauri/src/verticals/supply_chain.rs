@@ -90,11 +90,7 @@ impl SupplyChainManager {
     }
 
     /// Forecast demand based on historical pattern (stub).
-    pub fn forecast_demand(
-        &self,
-        product: &str,
-        period_months: u32,
-    ) -> serde_json::Value {
+    pub fn forecast_demand(&self, product: &str, period_months: u32) -> serde_json::Value {
         let base_demand = 100.0;
         let forecasts: Vec<serde_json::Value> = (1..=period_months)
             .map(|m| {

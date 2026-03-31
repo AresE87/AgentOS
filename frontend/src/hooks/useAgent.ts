@@ -79,17 +79,23 @@
 // Translation:     translate, detectLanguage, supportedLanguages
 // Accessibility:   getAccessibility, setAccessibility, getAccessibilityCss
 // Verticals:       listVerticals, getVertical, activateVertical, getActiveVertical
-// Offline:         checkConnectivity, getOfflineStatus, syncOffline, getCachedResponse
+// Offline:         checkConnectivity, getOfflineStatus, syncOffline, getCachedResponse,
+//                  setConnectivityOverride
 // On-Device AI:    ondeviceList, ondeviceLoad, ondeviceUnload, ondeviceInfer, ondeviceStatus
 // Multimodal:      processMultimodal, captureClipboardInput, detectInputType
 // Predictions:     getPredictions, getPredictionSuggestions, dismissPrediction
-// Cross-App:       crossappRegister, crossappList, crossappSend, crossappStatus
+// Cross-App:       crossappRegister, crossappList, crossappSend, crossappStatus,
+//                  crossappRunCsvWorkflow, crossappHistory
 // Swarm:           swarmCreate, swarmExecute, swarmResults, swarmList
 // Debugger:        debuggerStartTrace, debuggerGetTrace, debuggerListTraces
 // Revenue:         getRevenueMetrics, getChurnPredictions, getUpsellCandidates
 // Infra:           getInfraStatus, infraCheckRegions
 // IPO:             getInvestorMetrics, getDataRoom, getFinancialProjections
-// OS Integration:  getFileActions, getTextActions, processFileAction, processTextAction
+// OS Integration:  getFileActions, getTextActions, getShellRegistrationStatus,
+//                  installWindowsContextMenu, uninstallWindowsContextMenu,
+//                  getPendingShellInvocation, getLastShellExecution,
+//                  processFileAction, processTextAction, consumePendingShellInvocation
+// Platform:        getPlatformSupport
 // Federated:       federatedTrain, federatedSubmit, federatedStatus, federatedConfig
 // Human Handoff:   listEscalations, resolveEscalation, createEscalation, getEscalation
 // Compliance Auto: runComplianceCheck, getComplianceReports, getComplianceScore
@@ -180,6 +186,7 @@ async function callInvoke<T>(cmd: string, args?: Record<string, unknown>): Promi
 
 export function useAgent() {
     const getStatus = () => callInvoke<AgentStatus>('get_status');
+    const getPlatformSupport = () => callInvoke<any>('get_platform_support');
 
     const processMessage = (text: string) =>
         callInvoke<TaskResult>('process_message', { text });
@@ -354,10 +361,10 @@ export function useAgent() {
     const getRelayStatus = () => callInvoke<any>('get_relay_status');
 
     // R45: White-Label / OEM Branding
-    const getBranding = () => callInvoke<any>('get_branding');
-    const updateBranding = (config: any) => callInvoke<any>('update_branding', { config });
-    const getCssVariables = () => callInvoke<{ css: string }>('get_css_variables');
-    const resetBranding = () => callInvoke<any>('reset_branding');
+    const getBranding = (orgId?: string) => callInvoke<any>('get_branding', { org_id: orgId });
+    const updateBranding = (config: any, orgId?: string) => callInvoke<any>('update_branding', { config, org_id: orgId });
+    const getCssVariables = (orgId?: string) => callInvoke<{ css: string }>('get_css_variables', { org_id: orgId });
+    const resetBranding = (orgId?: string) => callInvoke<any>('reset_branding', { org_id: orgId });
 
     // R46: Observability
     const getLogs = (limit?: number, level?: string, module?: string) =>
@@ -496,6 +503,8 @@ export function useAgent() {
         callInvoke<any>('respond_approval', { id, status });
     const classifyRisk = (command: string) =>
         callInvoke<{ command: string; risk: string }>('classify_risk', { command });
+    const classifyTask = (text: string) =>
+        callInvoke<any>('classify_task', { text });
     const listApprovalHistory = () => callInvoke<{ approvals: any[] }>('list_approval_history');
 
     // R63: Calendar Integration
@@ -715,6 +724,48 @@ export function useAgent() {
         callInvoke<any>('set_accessibility', { config });
     const getAccessibilityCss = () =>
         callInvoke<{ css: string }>('get_accessibility_css');
+    const accessibilityDescribeScreen = (speakFeedback = false) =>
+        callInvoke<{
+            summary: {
+                primary_window?: string | null;
+                total_windows: number;
+                focus_elements: string[];
+                narration: string;
+                suggested_actions: string[];
+            };
+            spoken: boolean;
+        }>('accessibility_describe_screen', { speakFeedback });
+    const accessibilityRunVoiceCommand = (command: string, speakFeedback = false) =>
+        callInvoke<{
+            plan: {
+                transcript: string;
+                normalized_command: string;
+                action: string;
+                confirmation: string;
+            };
+            response: string;
+            spoken: boolean;
+        }>('accessibility_run_voice_command', { command, speakFeedback });
+    const accessibilityRunVoiceCommandAudio = (
+        audioBase64: string,
+        language?: string,
+        speakFeedback = false,
+    ) =>
+        callInvoke<{
+            transcript: string;
+            plan: {
+                transcript: string;
+                normalized_command: string;
+                action: string;
+                confirmation: string;
+            };
+            response: string;
+            spoken: boolean;
+        }>('accessibility_run_voice_command_audio', {
+            audioBase64,
+            language,
+            speakFeedback,
+        });
 
     // R88: Industry Verticals
     const listVerticals = () =>
@@ -730,11 +781,13 @@ export function useAgent() {
     const checkConnectivity = () =>
         callInvoke<{ is_online: boolean }>('check_connectivity');
     const getOfflineStatus = () =>
-        callInvoke<{ is_online: boolean; cached_responses: number; pending_sync: number; last_online: string | null }>('get_offline_status');
+        callInvoke<{ is_online: boolean; cached_responses: number; pending_sync: number; last_online: string | null; sync_state: string; last_sync_at: string | null; last_sync_error: string | null; connectivity_source: string }>('get_offline_status');
     const syncOffline = () =>
         callInvoke<{ synced: number; status: any }>('sync_offline');
     const getCachedResponse = (task: string) =>
         callInvoke<any>('get_cached_response', { task });
+    const setConnectivityOverride = (forcedOnline?: boolean | null) =>
+        callInvoke<any>('set_connectivity_override', { forced_online: forcedOnline ?? null });
 
     // R81: On-Device AI
     const ondeviceList = () => callInvoke<any[]>('ondevice_list');
@@ -745,8 +798,8 @@ export function useAgent() {
     const ondeviceStatus = () => callInvoke<any>('ondevice_status');
 
     // R82: Multimodal Input
-    const processMultimodal = (inputType: string, data?: string) =>
-        callInvoke<any>('process_multimodal', { input_type: inputType, data });
+    const processMultimodal = (inputType: string, data?: string, task?: string) =>
+        callInvoke<any>('process_multimodal', { input_type: inputType, data, task });
     const captureClipboardInput = () => callInvoke<any>('capture_clipboard');
     const detectInputType = (dataBase64: string) =>
         callInvoke<{ mime_type: string; size_bytes: number }>('detect_input_type', { data_base64: dataBase64 });
@@ -767,6 +820,10 @@ export function useAgent() {
         callInvoke<any>('crossapp_send', { app_id: appId, action, data });
     const crossappStatus = (appId: string) =>
         callInvoke<any>('crossapp_status', { app_id: appId });
+    const crossappRunCsvWorkflow = (csvText: string) =>
+        callInvoke<any>('crossapp_run_csv_workflow', { csv_text: csvText });
+    const crossappHistory = () =>
+        callInvoke<any[]>('crossapp_history');
 
     // R85: Agent Swarm
     const swarmCreate = (description: string, agents: string[], strategy: string) =>
@@ -778,12 +835,26 @@ export function useAgent() {
     const swarmList = () => callInvoke<any[]>('swarm_list');
 
     // R96: Agent Debugger
-    const debuggerStartTrace = (taskId: string) =>
-        callInvoke<{ trace_id: string; task_id: string }>('debugger_start_trace', { task_id: taskId });
+    const debuggerStartTrace = (taskId: string, agentName?: string, model?: string) =>
+        callInvoke<{ trace_id: string; task_id: string }>('debugger_start_trace', {
+            task_id: taskId,
+            agent_name: agentName,
+            model,
+        });
     const debuggerGetTrace = (traceId: string) =>
         callInvoke<any>('debugger_get_trace', { trace_id: traceId });
-    const debuggerListTraces = (limit?: number) =>
-        callInvoke<any>('debugger_list_traces', { limit });
+    const debuggerListTraces = (
+        limit?: number,
+        taskId?: string,
+        agentName?: string,
+        status?: string,
+    ) =>
+        callInvoke<any>('debugger_list_traces', {
+            limit,
+            task_id: taskId,
+            agent_name: agentName,
+            status,
+        });
 
     // R97: Revenue Optimization
     const getRevenueMetrics = () => callInvoke<any>('revenue_metrics');
@@ -804,10 +875,16 @@ export function useAgent() {
     // R91: OS Integration
     const getFileActions = () => callInvoke<any[]>('get_file_actions');
     const getTextActions = () => callInvoke<any[]>('get_text_actions');
+    const getShellRegistrationStatus = () => callInvoke<any>('get_shell_registration_status');
+    const installWindowsContextMenu = () => callInvoke<any>('install_windows_context_menu');
+    const uninstallWindowsContextMenu = () => callInvoke<any>('uninstall_windows_context_menu');
+    const getPendingShellInvocation = () => callInvoke<any | null>('get_pending_shell_invocation');
+    const getLastShellExecution = () => callInvoke<any | null>('get_last_shell_execution');
     const processFileAction = (filePath: string, actionId: string) =>
         callInvoke<any>('process_file_action', { file_path: filePath, action_id: actionId });
     const processTextAction = (text: string, actionId: string) =>
         callInvoke<any>('process_text_action', { text, action_id: actionId });
+    const consumePendingShellInvocation = () => callInvoke<any | null>('consume_pending_shell_invocation');
 
     // R92: Federated Learning
     const federatedTrain = () => callInvoke<any>('federated_train');
@@ -817,13 +894,39 @@ export function useAgent() {
         callInvoke<any>('federated_config', { server_url: serverUrl, model_name: modelName, privacy_budget: privacyBudget, min_samples: minSamples });
 
     // R93: Human Handoff
-    const listEscalations = () => callInvoke<any[]>('list_escalations');
+    const listEscalations = (status?: string) => callInvoke<any[]>('list_escalations', { status });
     const resolveEscalation = (id: string) =>
-        callInvoke<{ ok: boolean }>('resolve_escalation', { id });
-    const createEscalation = (confidence: number, retries: number, taskType: string, taskDescription: string, attempts: string[]) =>
-        callInvoke<any>('create_escalation', { confidence, retries, task_type: taskType, task_description: taskDescription, attempts });
+        callInvoke<any>('resolve_escalation', { id });
+    const createEscalation = (
+        confidence: number,
+        retries: number,
+        taskType: string,
+        taskDescription: string,
+        attempts: string[],
+        taskId?: string,
+        chainId?: string,
+        evidence?: string[],
+    ) =>
+        callInvoke<any>('create_escalation', {
+            confidence,
+            retries,
+            task_type: taskType,
+            task_description: taskDescription,
+            attempts,
+            task_id: taskId,
+            chain_id: chainId,
+            evidence,
+        });
     const getEscalation = (id: string) =>
         callInvoke<any>('get_escalation', { id });
+    const assignEscalation = (id: string, assignee: string, actor?: string, note?: string) =>
+        callInvoke<any>('assign_escalation', { id, assignee, actor, note });
+    const addEscalationNote = (id: string, author: string, note: string) =>
+        callInvoke<any>('add_escalation_note', { id, author, note });
+    const resumeEscalation = (id: string, author: string, note: string) =>
+        callInvoke<any>('resume_escalation', { id, author, note });
+    const completeEscalationByHuman = (id: string, author: string, note: string) =>
+        callInvoke<any>('complete_escalation_by_human', { id, author, note });
 
     // R94: Compliance Automation
     const runComplianceCheck = (framework: string) =>
@@ -836,6 +939,8 @@ export function useAgent() {
         callInvoke<any>('org_marketplace_publish', { org_id: orgId, resource_type: resourceType, resource_id: resourceId, visibility });
     const orgMarketplaceList = (orgId: string) =>
         callInvoke<any[]>('org_marketplace_list', { org_id: orgId });
+    const orgMarketplaceView = (orgId: string) =>
+        callInvoke<any>('org_marketplace_view', { org_id: orgId });
     const orgMarketplaceApprove = (listingId: string) =>
         callInvoke<{ ok: boolean }>('org_marketplace_approve', { listing_id: listingId });
     const orgMarketplaceRemove = (listingId: string) =>
@@ -1279,7 +1384,7 @@ export function useAgent() {
     const getCurrentVersion = () => callInvoke<{ version: string }>('get_current_version');
 
     return {
-        getStatus, processMessage, getTasks, getPlaybooks, setActivePlaybook,
+        getStatus, getPlatformSupport, processMessage, getTasks, getPlaybooks, setActivePlaybook,
         getSettings, updateSettings, healthCheck, getActiveChain, getChainHistory,
         sendChainMessage, getAnalytics, getUsageSummary,
         // Playbooks
@@ -1357,7 +1462,7 @@ export function useAgent() {
         // R61: Multi-User
         listUsers, createUser, getCurrentUser, switchUser, loginUser, logoutUser,
         // R62: Approval Workflows
-        getPendingApprovals, respondApproval, classifyRisk, listApprovalHistory,
+        getPendingApprovals, respondApproval, classifyRisk, classifyTask, listApprovalHistory,
         // R63: Calendar Integration
         calendarListEvents, calendarCreateEvent, calendarUpdateEvent, calendarDeleteEvent, calendarFreeSlots, calendarGetEvent,
         // C3: Google Calendar OAuth
@@ -1400,10 +1505,11 @@ export function useAgent() {
         translate, detectLanguage, supportedLanguages,
         // R87: Accessibility
         getAccessibility, setAccessibility, getAccessibilityCss,
+        accessibilityDescribeScreen, accessibilityRunVoiceCommand, accessibilityRunVoiceCommandAudio,
         // R88: Industry Verticals
         listVerticals, getVertical, activateVertical, getActiveVertical,
         // R89: Offline First
-        checkConnectivity, getOfflineStatus, syncOffline, getCachedResponse,
+        checkConnectivity, getOfflineStatus, syncOffline, getCachedResponse, setConnectivityOverride,
         // R81: On-Device AI
         ondeviceList, ondeviceLoad, ondeviceUnload, ondeviceInfer, ondeviceStatus,
         // R82: Multimodal Input
@@ -1411,7 +1517,7 @@ export function useAgent() {
         // R83: Predictive Actions
         getPredictions, getPredictionSuggestions, dismissPrediction,
         // R84: Cross-App Automation
-        crossappRegister, crossappList, crossappSend, crossappStatus,
+        crossappRegister, crossappList, crossappSend, crossappStatus, crossappRunCsvWorkflow, crossappHistory,
         // R85: Agent Swarm
         swarmCreate, swarmExecute, swarmResults, swarmList,
         // R96: Agent Debugger
@@ -1423,15 +1529,19 @@ export function useAgent() {
         // R99: IPO Readiness
         getInvestorMetrics, getDataRoom, getFinancialProjections, getReadinessArtifacts,
         // R91: OS Integration
-        getFileActions, getTextActions, processFileAction, processTextAction,
+        getFileActions, getTextActions, getShellRegistrationStatus,
+        installWindowsContextMenu, uninstallWindowsContextMenu,
+        getPendingShellInvocation, getLastShellExecution,
+        processFileAction, processTextAction, consumePendingShellInvocation,
         // R92: Federated Learning
         federatedTrain, federatedSubmit, federatedStatus, federatedConfig,
         // R93: Human Handoff
         listEscalations, resolveEscalation, createEscalation, getEscalation,
+        assignEscalation, addEscalationNote, resumeEscalation, completeEscalationByHuman,
         // R94: Compliance Automation
         runComplianceCheck, getComplianceReports, getComplianceScore,
         // R95: White-Label Org Marketplace
-        orgMarketplacePublish, orgMarketplaceList, orgMarketplaceApprove, orgMarketplaceRemove, orgMarketplaceSearch,
+        orgMarketplacePublish, orgMarketplaceList, orgMarketplaceView, orgMarketplaceApprove, orgMarketplaceRemove, orgMarketplaceSearch,
         // R101: AR/VR Agent
         arvrConnect, arvrDisconnect, arvrStatus, arvrOverlay, arvrCommand,
         // R102: Wearable Integration

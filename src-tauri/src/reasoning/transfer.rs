@@ -38,15 +38,24 @@ impl TransferEngine {
 
     /// Find patterns applicable to a target domain
     pub fn find_applicable(&self, domain: &str) -> Vec<&LearnedPattern> {
-        self.patterns.values()
-            .filter(|p| p.applicable_domains.iter().any(|d| d == domain) || p.source_domain != domain)
+        self.patterns
+            .values()
+            .filter(|p| {
+                p.applicable_domains.iter().any(|d| d == domain) || p.source_domain != domain
+            })
             .filter(|p| p.confidence > 0.3)
             .collect()
     }
 
     /// Apply a pattern to a new domain, updating usage stats
-    pub fn apply_pattern(&mut self, pattern_id: &str, new_domain: &str) -> Result<LearnedPattern, String> {
-        let pattern = self.patterns.get_mut(pattern_id)
+    pub fn apply_pattern(
+        &mut self,
+        pattern_id: &str,
+        new_domain: &str,
+    ) -> Result<LearnedPattern, String> {
+        let pattern = self
+            .patterns
+            .get_mut(pattern_id)
             .ok_or_else(|| format!("Pattern {} not found", pattern_id))?;
         pattern.times_applied += 1;
         if !pattern.applicable_domains.contains(&new_domain.to_string()) {

@@ -16,11 +16,7 @@ use super::protocol::MeshMessage;
 ///
 /// Listens on `0.0.0.0:{port}` and handles each connection in a spawned task.
 /// The server runs until `kill_switch` is set to true.
-pub async fn start_mesh_server(
-    port: u16,
-    settings: Settings,
-    kill_switch: Arc<AtomicBool>,
-) {
+pub async fn start_mesh_server(port: u16, settings: Settings, kill_switch: Arc<AtomicBool>) {
     let listener = match TcpListener::bind(format!("0.0.0.0:{}", port)).await {
         Ok(l) => {
             tracing::info!("Mesh server listening on port {}", port);
@@ -98,8 +94,7 @@ async fn handle_connection(
             Ok(msg) => {
                 let response = process_message(msg, settings).await;
                 if let Some(resp) = response {
-                    let mut json =
-                        serde_json::to_string(&resp).map_err(|e| e.to_string())?;
+                    let mut json = serde_json::to_string(&resp).map_err(|e| e.to_string())?;
                     json.push('\n');
                     writer
                         .write_all(json.as_bytes())
@@ -189,7 +184,11 @@ async fn process_message(msg: MeshMessage, settings: &Settings) -> Option<MeshMe
 /// Returns the output string on success.
 pub async fn send_task(ip: &str, port: u16, description: &str) -> Result<String, String> {
     let addr = format!("{}:{}", ip, port);
-    tracing::info!("Sending mesh task to {}: {}", addr, &description[..description.len().min(80)]);
+    tracing::info!(
+        "Sending mesh task to {}: {}",
+        addr,
+        &description[..description.len().min(80)]
+    );
 
     let stream = TcpStream::connect(&addr)
         .await
@@ -233,8 +232,8 @@ pub async fn send_task(ip: &str, port: u16, description: &str) -> Result<String,
         return Err("Remote node closed connection without response".to_string());
     }
 
-    let resp: MeshMessage =
-        serde_json::from_str(response_line.trim()).map_err(|e| format!("Invalid response: {}", e))?;
+    let resp: MeshMessage = serde_json::from_str(response_line.trim())
+        .map_err(|e| format!("Invalid response: {}", e))?;
 
     match resp {
         MeshMessage::TaskResult {

@@ -1,6 +1,6 @@
-use serde::{Deserialize, Serialize};
-use rusqlite::Connection;
 use chrono::{Datelike, Timelike};
+use rusqlite::Connection;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HeatmapData {

@@ -1,9 +1,7 @@
+pub mod linux;
+pub mod macos;
 pub mod traits;
 pub mod windows;
-#[cfg(target_os = "macos")]
-pub mod macos;
-#[cfg(target_os = "linux")]
-pub mod linux;
 
 pub use traits::PlatformProvider;
 

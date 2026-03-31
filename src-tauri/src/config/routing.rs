@@ -166,7 +166,12 @@ mod tests {
         for (tier, chains) in &config.routing {
             for chain in chains {
                 for id in chain {
-                    assert!(config.get_model(id).is_some(), "Tier {} references unknown model {}", tier, id);
+                    assert!(
+                        config.get_model(id).is_some(),
+                        "Tier {} references unknown model {}",
+                        tier,
+                        id
+                    );
                 }
             }
         }

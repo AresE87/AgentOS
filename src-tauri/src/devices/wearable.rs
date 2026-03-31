@@ -81,7 +81,10 @@ impl WearableManager {
 
     /// Disconnect a wearable device by ID
     pub fn disconnect(&mut self, id: &str) -> Result<(), String> {
-        let idx = self.devices.iter().position(|d| d.id == id)
+        let idx = self
+            .devices
+            .iter()
+            .position(|d| d.id == id)
             .ok_or_else(|| format!("Device {} not connected", id))?;
         self.devices.remove(idx);
         Ok(())

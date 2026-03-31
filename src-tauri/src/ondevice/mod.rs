@@ -1,3 +1,3 @@
 pub mod engine;
 
-pub use engine::{OnDeviceEngine, OnDeviceModel, ModelStatus};
+pub use engine::{ModelStatus, OnDeviceEngine, OnDeviceModel};

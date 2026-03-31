@@ -1,3 +1,3 @@
 pub mod power;
 
-pub use power::{SmartTerminal, TerminalOutput, ErrorExplanation};
+pub use power::{ErrorExplanation, SmartTerminal, TerminalOutput};

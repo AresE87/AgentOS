@@ -45,7 +45,10 @@ impl TabletMode {
     /// Enable tablet mode with the given configuration
     pub fn enable(&mut self, config: TabletConfig) -> Result<TabletStatus, String> {
         if !["compact", "regular", "expanded"].contains(&config.layout.as_str()) {
-            return Err(format!("Invalid layout '{}'. Must be compact, regular, or expanded", config.layout));
+            return Err(format!(
+                "Invalid layout '{}'. Must be compact, regular, or expanded",
+                config.layout
+            ));
         }
         if config.font_scale < 0.5 || config.font_scale > 3.0 {
             return Err("font_scale must be between 0.5 and 3.0".into());
@@ -76,7 +79,10 @@ impl TabletMode {
             return Err("Tablet mode is not enabled".into());
         }
         if !["compact", "regular", "expanded"].contains(&layout) {
-            return Err(format!("Invalid layout '{}'. Must be compact, regular, or expanded", layout));
+            return Err(format!(
+                "Invalid layout '{}'. Must be compact, regular, or expanded",
+                layout
+            ));
         }
         if let Some(ref mut cfg) = self.config {
             cfg.layout = layout.to_string();

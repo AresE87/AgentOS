@@ -1,89 +1,209 @@
 #![recursion_limit = "256"]
 
+pub mod accessibility;
 pub mod agents;
 pub mod analytics;
 pub mod api;
+pub mod approvals;
 pub mod automation;
+pub mod autonomous;
 pub mod billing;
 pub mod brain;
+pub mod branding;
+pub mod browser_ext;
 pub mod cache;
+pub mod chains;
 mod channels;
+pub mod compliance;
 pub mod config;
+pub mod conversations;
+pub mod crossapp;
+pub mod debugger;
+pub mod devices;
+pub mod economy;
+pub mod email_client;
 pub mod enterprise;
+pub mod escalation;
 mod eyes;
+pub mod federated;
 pub mod feedback;
+pub mod files;
+pub mod growth;
 pub mod hands;
+pub mod infrastructure;
+pub mod integrations;
+pub mod ipo;
+pub mod knowledge;
 pub mod marketplace;
 pub mod memory;
 mod mesh;
+pub mod metrics;
+pub mod monitors;
+pub mod multimodal;
+pub mod observability;
+pub mod offline;
+pub mod ondevice;
+pub mod os_integration;
+pub mod partnerships;
+pub mod personas;
 pub mod pipeline;
 pub mod platform;
 mod playbooks;
 pub mod plugins;
-pub mod security;
-pub mod types;
-pub mod metrics;
-pub mod vault;
-pub mod compliance;
-pub mod voice;
-pub mod protocol;
-pub mod web;
-pub mod branding;
-pub mod observability;
-pub mod training;
-pub mod widgets;
-pub mod recording;
-pub mod chains;
-pub mod conversations;
-pub mod monitors;
-pub mod files;
-pub mod personas;
-pub mod templates;
-pub mod growth;
-pub mod integrations;
-pub mod users;
-pub mod approvals;
-pub mod sandbox;
-pub mod teams;
-pub mod workflows;
-pub mod webhooks;
-pub mod testing;
-pub mod widget;
-pub mod terminal;
-pub mod translation;
-pub mod accessibility;
-pub mod verticals;
-pub mod offline;
-pub mod ondevice;
-pub mod multimodal;
 pub mod predictions;
-pub mod crossapp;
-pub mod swarm;
-pub mod debugger;
-pub mod revenue;
-pub mod infrastructure;
-pub mod ipo;
-pub mod os_integration;
-pub mod federated;
-pub mod escalation;
-pub mod devices;
-pub mod browser_ext;
-pub mod email_client;
-pub mod partnerships;
-pub mod autonomous;
+pub mod protocol;
 pub mod reasoning;
-pub mod knowledge;
-pub mod economy;
+pub mod recording;
+pub mod revenue;
+pub mod sandbox;
+pub mod security;
+pub mod swarm;
+pub mod teams;
+pub mod templates;
+pub mod terminal;
+pub mod testing;
+pub mod training;
+pub mod translation;
+pub mod types;
 pub mod updater;
+pub mod users;
+pub mod vault;
+pub mod verticals;
+pub mod voice;
+pub mod web;
+pub mod webhooks;
+pub mod widget;
+pub mod widgets;
+pub mod workflows;
 
 use base64::Engine as _;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::{Emitter, Manager};
-use tauri::tray::{TrayIconBuilder, MouseButton, MouseButtonState};
 use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder};
+use tauri::{Emitter, Manager};
+
+fn enforce_permission(
+    state: &tauri::State<'_, AppState>,
+    capability: approvals::PermissionCapability,
+    agent_name: Option<&str>,
+) -> Result<approvals::PermissionDecision, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    approvals::ApprovalManager::ensure_permission_tables(db.conn())?;
+    approvals::ApprovalManager::seed_default_permissions(db.conn())?;
+    let decision =
+        approvals::ApprovalManager::check_current_permission(db.conn(), capability, agent_name)?;
+    let _ = enterprise::AuditLog::ensure_table(db.conn());
+    let _ = enterprise::AuditLog::log(
+        db.conn(),
+        "permission_enforced",
+        serde_json::json!({
+            "capability": capability.as_str(),
+            "agent_name": agent_name,
+            "allowed": decision.allowed,
+            "source": decision.source,
+            "reason": decision.reason,
+        }),
+    );
+    if decision.allowed {
+        Ok(decision)
+    } else {
+        Err(format!(
+            "Permission denied for capability '{}' (source: {})",
+            capability.as_str(),
+            decision.source
+        ))
+    }
+}
+
+fn is_secret_setting_key(key: &str) -> bool {
+    matches!(
+        key,
+        "anthropic_api_key"
+            | "openai_api_key"
+            | "google_api_key"
+            | "telegram_bot_token"
+            | "whatsapp_access_token"
+            | "relay_auth_token"
+            | "stripe_secret_key"
+            | "stripe_webhook_secret"
+            | "google_client_secret"
+            | "google_refresh_token"
+            | "discord_bot_token"
+    )
+}
+
+fn secret_setting_to_vault_key(key: &str) -> Option<&'static str> {
+    match key {
+        "anthropic_api_key" => Some("ANTHROPIC_API_KEY"),
+        "openai_api_key" => Some("OPENAI_API_KEY"),
+        "google_api_key" => Some("GOOGLE_API_KEY"),
+        "telegram_bot_token" => Some("TELEGRAM_BOT_TOKEN"),
+        "whatsapp_access_token" => Some("WHATSAPP_ACCESS_TOKEN"),
+        "relay_auth_token" => Some("RELAY_AUTH_TOKEN"),
+        "stripe_secret_key" => Some("STRIPE_SECRET_KEY"),
+        "stripe_webhook_secret" => Some("STRIPE_WEBHOOK_SECRET"),
+        "google_client_secret" => Some("GOOGLE_CLIENT_SECRET"),
+        "google_refresh_token" => Some("GOOGLE_REFRESH_TOKEN"),
+        "discord_bot_token" => Some("DISCORD_BOT_TOKEN"),
+        _ => None,
+    }
+}
+
+fn scrub_persisted_secrets(settings: &mut config::Settings) {
+    settings.anthropic_api_key.clear();
+    settings.openai_api_key.clear();
+    settings.google_api_key.clear();
+    settings.telegram_bot_token.clear();
+    settings.whatsapp_access_token.clear();
+    settings.relay_auth_token.clear();
+    settings.stripe_secret_key.clear();
+    settings.stripe_webhook_secret.clear();
+    settings.google_client_secret.clear();
+    settings.google_refresh_token.clear();
+    settings.discord_bot_token.clear();
+}
+
+fn load_secret_from_vault(vault: &vault::SecureVault, key: &str) -> String {
+    vault.retrieve(key).ok().flatten().unwrap_or_default()
+}
+
+fn hydrate_settings_from_vault(
+    settings: &mut config::Settings,
+    vault: &vault::SecureVault,
+) -> Result<(), String> {
+    if !vault.is_unlocked() {
+        return Err("Vault locked".to_string());
+    }
+    settings.anthropic_api_key = load_secret_from_vault(vault, "ANTHROPIC_API_KEY");
+    settings.openai_api_key = load_secret_from_vault(vault, "OPENAI_API_KEY");
+    settings.google_api_key = load_secret_from_vault(vault, "GOOGLE_API_KEY");
+    settings.telegram_bot_token = load_secret_from_vault(vault, "TELEGRAM_BOT_TOKEN");
+    settings.whatsapp_access_token = load_secret_from_vault(vault, "WHATSAPP_ACCESS_TOKEN");
+    settings.relay_auth_token = load_secret_from_vault(vault, "RELAY_AUTH_TOKEN");
+    settings.stripe_secret_key = load_secret_from_vault(vault, "STRIPE_SECRET_KEY");
+    settings.stripe_webhook_secret = load_secret_from_vault(vault, "STRIPE_WEBHOOK_SECRET");
+    settings.google_client_secret = load_secret_from_vault(vault, "GOOGLE_CLIENT_SECRET");
+    settings.google_refresh_token = load_secret_from_vault(vault, "GOOGLE_REFRESH_TOKEN");
+    settings.discord_bot_token = load_secret_from_vault(vault, "DISCORD_BOT_TOKEN");
+    Ok(())
+}
+
+fn audit_vault_event(
+    state: &tauri::State<'_, AppState>,
+    event_type: &str,
+    details: serde_json::Value,
+) {
+    state
+        .structured_logger
+        .log("info", "vault", event_type, None, Some(details.clone()));
+    if let Ok(conn) = rusqlite::Connection::open(&state.db_path) {
+        let _ = enterprise::AuditLog::ensure_table(&conn);
+        let _ = enterprise::AuditLog::log(&conn, event_type, details);
+    }
+}
 
 pub struct AppState {
     pub db: std::sync::Mutex<memory::Database>,
@@ -275,7 +395,8 @@ pub struct AppState {
     /// R147: Creator Studio
     pub creator_studio: Arc<tokio::sync::Mutex<economy::creator_studio::CreatorStudio>>,
     /// R148: Creator Analytics
-    pub creator_analytics: Arc<tokio::sync::Mutex<economy::creator_analytics::CreatorAnalyticsEngine>>,
+    pub creator_analytics:
+        Arc<tokio::sync::Mutex<economy::creator_analytics::CreatorAnalyticsEngine>>,
     /// R149: Affiliate Program
     pub affiliate_program: Arc<tokio::sync::Mutex<economy::affiliate::AffiliateProgram>>,
 }
@@ -404,45 +525,77 @@ async fn cmd_get_relay_status(
 
 #[tauri::command]
 async fn cmd_get_branding(
+    org_id: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let branding = state.branding.read().await;
-    serde_json::to_value(&*branding).map_err(|e| e.to_string())
+    let branding = state.branding.read().await.clone();
+    let conn = open_enterprise_conn(&state.db_path)?;
+    if let Some(org_id) = resolve_org_scope(&conn, org_id.as_deref())? {
+        let marketplace = state.org_marketplace.lock().await;
+        let tenant_branding = marketplace.get_branding(&org_id)?.unwrap_or(branding);
+        serde_json::to_value(&tenant_branding).map_err(|e| e.to_string())
+    } else {
+        serde_json::to_value(&branding).map_err(|e| e.to_string())
+    }
 }
 
 #[tauri::command]
 async fn cmd_update_branding(
     config: serde_json::Value,
+    org_id: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let new_config: branding::BrandingConfig =
         serde_json::from_value(config).map_err(|e| format!("Invalid branding config: {}", e))?;
-    let mut branding = state.branding.write().await;
-    // Save to disk next to settings
-    let branding_path = state.db_path.parent().unwrap().join("branding.json");
-    new_config.save(&branding_path)?;
-    *branding = new_config;
-    serde_json::to_value(&*branding).map_err(|e| e.to_string())
+    let conn = open_enterprise_conn(&state.db_path)?;
+    if let Some(org_id) = resolve_org_scope(&conn, org_id.as_deref())? {
+        let marketplace = state.org_marketplace.lock().await;
+        let saved = marketplace.set_branding(&org_id, &new_config)?;
+        serde_json::to_value(&saved).map_err(|e| e.to_string())
+    } else {
+        let mut branding = state.branding.write().await;
+        let branding_path = state.db_path.parent().unwrap().join("branding.json");
+        new_config.save(&branding_path)?;
+        *branding = new_config;
+        serde_json::to_value(&*branding).map_err(|e| e.to_string())
+    }
 }
 
 #[tauri::command]
 async fn cmd_get_css_variables(
+    org_id: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let branding = state.branding.read().await;
-    Ok(serde_json::json!({ "css": branding.to_css_variables() }))
+    let branding = state.branding.read().await.clone();
+    let conn = open_enterprise_conn(&state.db_path)?;
+    if let Some(org_id) = resolve_org_scope(&conn, org_id.as_deref())? {
+        let marketplace = state.org_marketplace.lock().await;
+        let tenant_branding = marketplace.get_branding(&org_id)?.unwrap_or(branding);
+        Ok(serde_json::json!({ "css": tenant_branding.to_css_variables() }))
+    } else {
+        Ok(serde_json::json!({ "css": branding.to_css_variables() }))
+    }
 }
 
 #[tauri::command]
 async fn cmd_reset_branding(
+    org_id: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let default_config = branding::BrandingConfig::default();
-    let branding_path = state.db_path.parent().unwrap().join("branding.json");
-    default_config.save(&branding_path)?;
-    let mut branding = state.branding.write().await;
-    *branding = default_config;
-    serde_json::to_value(&*branding).map_err(|e| e.to_string())
+    let conn = open_enterprise_conn(&state.db_path)?;
+    if let Some(org_id) = resolve_org_scope(&conn, org_id.as_deref())? {
+        let default_config = state.branding.read().await.clone();
+        let marketplace = state.org_marketplace.lock().await;
+        marketplace.reset_branding(&org_id)?;
+        serde_json::to_value(&default_config).map_err(|e| e.to_string())
+    } else {
+        let default_config = branding::BrandingConfig::default();
+        let branding_path = state.db_path.parent().unwrap().join("branding.json");
+        default_config.save(&branding_path)?;
+        let mut branding = state.branding.write().await;
+        *branding = default_config;
+        serde_json::to_value(&*branding).map_err(|e| e.to_string())
+    }
 }
 
 #[tauri::command]
@@ -461,6 +614,13 @@ async fn cmd_get_status(state: tauri::State<'_, AppState>) -> Result<serde_json:
             "state": "running",
             "providers": providers,
             "active_playbook": null,
+            "platform": {
+                "name": state.platform.name(),
+                "os_version": state.platform.os_version(),
+                "default_shell": state.platform.default_shell(),
+                "can_capture_screen": state.platform.can_capture_screen(),
+                "can_control_input": state.platform.can_control_input(),
+            },
             "session_stats": {
                 "tasks": analytics["total_tasks"],
                 "cost": analytics["total_cost"],
@@ -468,7 +628,10 @@ async fn cmd_get_status(state: tauri::State<'_, AppState>) -> Result<serde_json:
             }
         })
     };
-    state.app_cache.set("status", result.clone(), Duration::from_secs(10)).await;
+    state
+        .app_cache
+        .set("status", result.clone(), Duration::from_secs(10))
+        .await;
     Ok(result)
 }
 
@@ -509,8 +672,34 @@ async fn cmd_process_message(
             (t, tk)
         };
 
-        limiter.can_run_task(tasks_today)?;
-        limiter.can_use_tokens(tokens_today)?;
+        if let Err(err) = limiter.can_run_task(tasks_today) {
+            log_revenue_event(
+                &state.db_path,
+                "billing_limit_blocked",
+                serde_json::json!({
+                    "plan_type": settings.plan_type,
+                    "kind": "task_limit",
+                    "tasks_today": tasks_today,
+                    "tokens_today": tokens_today,
+                    "error": err,
+                }),
+            );
+            return Err(err);
+        }
+        if let Err(err) = limiter.can_use_tokens(tokens_today) {
+            log_revenue_event(
+                &state.db_path,
+                "billing_limit_blocked",
+                serde_json::json!({
+                    "plan_type": settings.plan_type,
+                    "kind": "token_limit",
+                    "tasks_today": tasks_today,
+                    "tokens_today": tokens_today,
+                    "error": err,
+                }),
+            );
+            return Err(err);
+        }
     }
 
     // Detect if this is a PC action task (open apps, calculate, install, navigate, etc.)
@@ -521,17 +710,22 @@ async fn cmd_process_message(
     let is_complex = is_complex_task(&lower);
 
     if is_complex {
-        tracing::info!("Routing to chain orchestrator: {}", &text[..text.len().min(80)]);
+        tracing::info!(
+            "Routing to chain orchestrator: {}",
+            &text[..text.len().min(80)]
+        );
         let chain_id = uuid::Uuid::new_v4().to_string();
 
         // Create chain in DB
         {
             let db = state.db.lock().map_err(|e| e.to_string())?;
-            db.create_chain(&chain_id, &text).map_err(|e| e.to_string())?;
+            db.create_chain(&chain_id, &text)
+                .map_err(|e| e.to_string())?;
         }
 
         // Decompose
-        let subtasks = pipeline::engine::decompose_task(&text, &settings).await
+        let subtasks = pipeline::engine::decompose_task(&text, &settings)
+            .await
             .map_err(|e| e.to_string())?;
 
         // C1: Count this task dispatch in daily_usage
@@ -548,9 +742,15 @@ async fn cmd_process_message(
         // Spawn chain execution in background
         tauri::async_runtime::spawn(async move {
             let result = pipeline::orchestrator::execute_chain(
-                &cid, &desc, subtasks, &settings, &kill_switch,
-                &db_path, &app_handle,
-            ).await;
+                &cid,
+                &desc,
+                subtasks,
+                &settings,
+                &kill_switch,
+                &db_path,
+                &app_handle,
+            )
+            .await;
 
             match result {
                 Ok(_output) => {
@@ -576,13 +776,17 @@ async fn cmd_process_message(
     let is_pc_task = is_pc_action_task(&lower);
 
     if is_pc_task {
-        tracing::info!("Routing to PC task pipeline: {}", &text[..text.len().min(80)]);
+        tracing::info!(
+            "Routing to PC task pipeline: {}",
+            &text[..text.len().min(80)]
+        );
         let task_id = uuid::Uuid::new_v4().to_string();
 
         // Create pending task in DB and count in daily usage
         {
             let db = state.db.lock().map_err(|e| e.to_string())?;
-            db.create_task_pending(&task_id, &text).map_err(|e| e.to_string())?;
+            db.create_task_pending(&task_id, &text)
+                .map_err(|e| e.to_string())?;
             // C1: Count this task dispatch in daily_usage
             let _ = db.increment_daily_usage(0);
         }
@@ -590,27 +794,49 @@ async fn cmd_process_message(
         let kill_switch = state.kill_switch.clone();
         let screenshots_dir = state.screenshots_dir.clone();
         let db_path = state.db_path.clone();
+        let debugger = state.agent_debugger.clone();
         let tid = task_id.clone();
         let desc = text.clone();
 
         // Spawn pipeline engine in background
         tauri::async_runtime::spawn(async move {
             let result = pipeline::engine::run_task(
-                &tid, &desc, &settings, &kill_switch,
-                &screenshots_dir, &db_path, &app_handle,
-            ).await;
+                &tid,
+                &desc,
+                &settings,
+                &kill_switch,
+                &screenshots_dir,
+                &db_path,
+                &app_handle,
+            )
+            .await;
 
             match result {
                 Ok(r) => {
-                    let _ = app_handle.emit("agent:task_completed", serde_json::json!({
-                        "task_id": tid, "success": r.success,
-                        "steps": r.steps.len(), "duration_ms": r.duration_ms,
-                    }));
+                    let dbg = debugger.lock().await;
+                    let _ = dbg.record_task_execution(&tid, "PC Controller", "anthropic/sonnet", &r);
+                    let _ = app_handle.emit(
+                        "agent:task_completed",
+                        serde_json::json!({
+                            "task_id": tid, "success": r.success,
+                            "steps": r.steps.len(), "duration_ms": r.duration_ms,
+                        }),
+                    );
                 }
                 Err(e) => {
-                    let _ = app_handle.emit("agent:task_completed", serde_json::json!({
-                        "task_id": tid, "success": false, "error": e,
-                    }));
+                    let dbg = debugger.lock().await;
+                    let _ = dbg.record_runtime_error(
+                        &tid,
+                        "PC Controller",
+                        "anthropic/sonnet",
+                        &e,
+                    );
+                    let _ = app_handle.emit(
+                        "agent:task_completed",
+                        serde_json::json!({
+                            "task_id": tid, "success": false, "error": e,
+                        }),
+                    );
                 }
             }
         });
@@ -656,7 +882,11 @@ async fn cmd_process_message(
 
     // R29: Audit log
     {
-        let preview = if text.len() > 120 { &text[..120] } else { &text };
+        let preview = if text.len() > 120 {
+            &text[..120]
+        } else {
+            &text
+        };
         if let Ok(conn) = rusqlite::Connection::open(&state.db_path) {
             let _ = enterprise::AuditLog::ensure_table(&conn);
             let _ = enterprise::AuditLog::log(
@@ -681,21 +911,42 @@ async fn cmd_process_message(
 /// Detect if a message is a PC action task that needs the pipeline engine
 fn is_pc_action_task(text: &str) -> bool {
     let action_patterns = [
-        "abrí", "abre", "abrir", "open",
-        "calculadora", "calculator", "calc",
-        "calcula", "calculate",
-        "notepad", "bloc de notas",
-        "explorador", "explorer",
-        "instala", "install", "descarga", "download",
-        "wallpaper", "fondo de pantalla",
-        "navega", "navigate",
-        "busca en", "search for",
-        "ejecuta", "execute", "run",
-        "cierra", "close",
-        "escribe en", "type in",
-        "click", "haz click",
-        "captura", "screenshot",
-        "configura", "settings",
+        "abrí",
+        "abre",
+        "abrir",
+        "open",
+        "calculadora",
+        "calculator",
+        "calc",
+        "calcula",
+        "calculate",
+        "notepad",
+        "bloc de notas",
+        "explorador",
+        "explorer",
+        "instala",
+        "install",
+        "descarga",
+        "download",
+        "wallpaper",
+        "fondo de pantalla",
+        "navega",
+        "navigate",
+        "busca en",
+        "search for",
+        "ejecuta",
+        "execute",
+        "run",
+        "cierra",
+        "close",
+        "escribe en",
+        "type in",
+        "click",
+        "haz click",
+        "captura",
+        "screenshot",
+        "configura",
+        "settings",
     ];
     action_patterns.iter().any(|p| text.contains(p))
 }
@@ -709,19 +960,39 @@ fn is_complex_task(text: &str) -> bool {
     }
 
     let multi_step_patterns = [
-        " y luego ", " y después ", " y despues ",
-        " and then ", " after that ",
-        " primero ", " first ",
-        "investiga", "investigate", "research",
-        "compará", "compara", "compare",
-        "analizá", "analiza", "analyze",
-        "hacé un reporte", "write a report", "create a report",
-        "revisá", "review and",
-        "resumí", "resumen", "summarize", "summary",
-        "evalua", "evaluate",
+        " y luego ",
+        " y después ",
+        " y despues ",
+        " and then ",
+        " after that ",
+        " primero ",
+        " first ",
+        "investiga",
+        "investigate",
+        "research",
+        "compará",
+        "compara",
+        "compare",
+        "analizá",
+        "analiza",
+        "analyze",
+        "hacé un reporte",
+        "write a report",
+        "create a report",
+        "revisá",
+        "review and",
+        "resumí",
+        "resumen",
+        "summarize",
+        "summary",
+        "evalua",
+        "evaluate",
     ];
 
-    let matches = multi_step_patterns.iter().filter(|p| text.contains(**p)).count();
+    let matches = multi_step_patterns
+        .iter()
+        .filter(|p| text.contains(**p))
+        .count();
     // Need at least 2 indicators to be considered complex, OR very long text with 1 indicator
     matches >= 2 || (text.split_whitespace().count() > 25 && matches >= 1)
 }
@@ -732,8 +1003,51 @@ async fn cmd_get_tasks(
     limit: Option<u32>,
 ) -> Result<serde_json::Value, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    let tasks = db.get_tasks(limit.unwrap_or(20)).map_err(|e| e.to_string())?;
+    let tasks = db
+        .get_tasks(limit.unwrap_or(20))
+        .map_err(|e| e.to_string())?;
     Ok(serde_json::json!({ "tasks": tasks }))
+}
+
+#[tauri::command]
+async fn cmd_retry_task(
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+    task_id: String,
+) -> Result<serde_json::Value, String> {
+    let (input, status) = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        db.get_task_retry_context(&task_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("Task '{}' not found", task_id))?
+    };
+    if !is_retryable_task_status(&status) {
+        return Err(format!(
+            "Task '{}' is not retryable from status '{}'",
+            task_id, status
+        ));
+    }
+    if let Ok(conn) = rusqlite::Connection::open(&state.db_path) {
+        let _ = enterprise::AuditLog::ensure_table(&conn);
+        let _ = enterprise::AuditLog::log(
+            &conn,
+            "task_retry_requested",
+            serde_json::json!({ "task_id": task_id, "status": status }),
+        );
+        let mgr = state.offline_manager.blocking_lock();
+        let _ = mgr.record_task_retry(&conn, &task_id, &status);
+    }
+    let retried = cmd_process_message(state, app_handle, input).await?;
+    Ok(serde_json::json!({
+        "ok": true,
+        "original_task_id": task_id,
+        "previous_status": status,
+        "retry": retried,
+    }))
+}
+
+fn is_retryable_task_status(status: &str) -> bool {
+    matches!(status, "failed" | "killed" | "timeout")
 }
 
 #[tauri::command]
@@ -748,11 +1062,23 @@ async fn cmd_update_settings(
     key: String,
     value: String,
 ) -> Result<serde_json::Value, String> {
+    let secret_key = is_secret_setting_key(&key);
     let needs_gateway_rebuild = {
         let mut settings = state.settings.lock().map_err(|e| e.to_string())?;
-        settings.set(&key, &value);
-        settings.save().map_err(|e| e.to_string())?;
-        key.ends_with("_api_key")
+        if secret_key {
+            let vault_key = secret_setting_to_vault_key(&key)
+                .ok_or_else(|| format!("Unsupported secret setting '{}'", key))?;
+            let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
+            vault.store(vault_key, &value)?;
+            settings.set(&key, &value);
+            let mut persisted = settings.clone();
+            scrub_persisted_secrets(&mut persisted);
+            persisted.save().map_err(|e| e.to_string())?;
+        } else {
+            settings.set(&key, &value);
+            settings.save().map_err(|e| e.to_string())?;
+        }
+        key.ends_with("_api_key") || secret_key
     }; // MutexGuard dropped here
 
     if needs_gateway_rebuild {
@@ -767,9 +1093,13 @@ async fn cmd_update_settings(
     // R29: Audit log (log the key only, not the value for security)
     if let Ok(conn) = rusqlite::Connection::open(&state.db_path) {
         let _ = enterprise::AuditLog::ensure_table(&conn);
-        let _ = enterprise::AuditLog::log(
-            &conn,
-            "settings_changed",
+        let _ =
+            enterprise::AuditLog::log(&conn, "settings_changed", serde_json::json!({ "key": key }));
+    }
+    if secret_key {
+        audit_vault_event(
+            &state,
+            "vault_secret_updated",
             serde_json::json!({ "key": key }),
         );
     }
@@ -790,9 +1120,7 @@ async fn cmd_set_language(
 }
 
 #[tauri::command]
-async fn cmd_health_check(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+async fn cmd_health_check(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let settings = {
         let s = state.settings.lock().map_err(|e| e.to_string())?;
         s.clone()
@@ -803,9 +1131,21 @@ async fn cmd_health_check(
 }
 
 #[tauri::command]
-async fn cmd_get_analytics(
+async fn cmd_classify_task(
+    text: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    let settings = {
+        let s = state.settings.lock().map_err(|e| e.to_string())?;
+        s.clone()
+    };
+    let gateway = state.gateway.lock().await;
+    let classification = brain::classify_smart(&text, &gateway, &settings).await;
+    serde_json::to_value(&classification).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_get_analytics(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     // R35: Cache for 5 min
     if let Some(cached) = state.app_cache.get("analytics").await {
         return Ok(cached);
@@ -814,7 +1154,10 @@ async fn cmd_get_analytics(
         let db = state.db.lock().map_err(|e| e.to_string())?;
         db.get_analytics().map_err(|e| e.to_string())?
     };
-    state.app_cache.set("analytics", result.clone(), Duration::from_secs(300)).await;
+    state
+        .app_cache
+        .set("analytics", result.clone(), Duration::from_secs(300))
+        .await;
     Ok(result)
 }
 
@@ -830,7 +1173,10 @@ async fn cmd_get_usage_summary(
         let db = state.db.lock().map_err(|e| e.to_string())?;
         db.get_usage_summary().map_err(|e| e.to_string())?
     };
-    state.app_cache.set("usage_summary", result.clone(), Duration::from_secs(60)).await;
+    state
+        .app_cache
+        .set("usage_summary", result.clone(), Duration::from_secs(60))
+        .await;
     Ok(result)
 }
 
@@ -875,9 +1221,7 @@ async fn cmd_get_suggestions(
 // ── Playbook commands ────────────────────────────────────────
 
 #[tauri::command]
-async fn cmd_get_playbooks(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+async fn cmd_get_playbooks(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let dir = state.playbooks_dir.clone();
     let playbooks = playbooks::PlaybookPlayer::list_playbooks(&dir).map_err(|e| e.to_string())?;
     let list: Vec<serde_json::Value> = playbooks
@@ -968,7 +1312,9 @@ async fn cmd_record_step(
     let recorder = recorder_lock.as_mut().ok_or("Not recording")?;
 
     tokio::task::block_in_place(|| {
-        recorder.record_step(action, &description).map_err(|e| e.to_string())
+        recorder
+            .record_step(action, &description)
+            .map_err(|e| e.to_string())
     })?;
 
     Ok(serde_json::json!({ "ok": true }))
@@ -1025,17 +1371,23 @@ async fn cmd_play_playbook(
         match playbooks::PlaybookPlayer::play(&pb, &settings, &kill_switch, &app_handle).await {
             Ok(results) => {
                 let success = results.iter().all(|r| r.success);
-                let _ = app_handle.emit("playbook:completed", serde_json::json!({
-                    "name": name,
-                    "success": success,
-                    "steps_completed": results.len(),
-                }));
+                let _ = app_handle.emit(
+                    "playbook:completed",
+                    serde_json::json!({
+                        "name": name,
+                        "success": success,
+                        "steps_completed": results.len(),
+                    }),
+                );
             }
             Err(e) => {
-                let _ = app_handle.emit("playbook:error", serde_json::json!({
-                    "name": name,
-                    "error": e,
-                }));
+                let _ = app_handle.emit(
+                    "playbook:error",
+                    serde_json::json!({
+                        "name": name,
+                        "error": e,
+                    }),
+                );
             }
         }
     });
@@ -1071,8 +1423,8 @@ async fn cmd_run_smart_playbook(
     playbook_json: String,
     variables: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    let pb: playbooks::SmartPlaybook =
-        serde_json::from_str(&playbook_json).map_err(|e| format!("Invalid playbook JSON: {}", e))?;
+    let pb: playbooks::SmartPlaybook = serde_json::from_str(&playbook_json)
+        .map_err(|e| format!("Invalid playbook JSON: {}", e))?;
 
     let vars: std::collections::HashMap<String, String> = match variables {
         serde_json::Value::Object(map) => map
@@ -1133,7 +1485,9 @@ async fn cmd_get_active_chain(
 
     if let Some(chain) = chain {
         let chain_id = chain["id"].as_str().unwrap_or_default().to_string();
-        let subtasks = db.get_chain_subtasks(&chain_id).map_err(|e| e.to_string())?;
+        let subtasks = db
+            .get_chain_subtasks(&chain_id)
+            .map_err(|e| e.to_string())?;
         let log = db.get_chain_log(&chain_id).map_err(|e| e.to_string())?;
 
         Ok(serde_json::json!({
@@ -1203,7 +1557,9 @@ async fn cmd_kill_switch(state: tauri::State<'_, AppState>) -> Result<serde_json
 }
 
 #[tauri::command]
-async fn cmd_reset_kill_switch(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+async fn cmd_reset_kill_switch(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
     state.kill_switch.store(false, Ordering::SeqCst);
     tracing::info!("Kill switch reset");
     Ok(serde_json::json!({ "ok": true, "status": "reset" }))
@@ -1216,7 +1572,8 @@ async fn cmd_capture_screenshot(
     let screenshots_dir = state.screenshots_dir.clone();
     let (path, b64) = tokio::task::spawn_blocking(move || {
         let data = eyes::capture::capture_full_screen().map_err(|e| e.to_string())?;
-        let path = eyes::capture::save_screenshot(&data, &screenshots_dir).map_err(|e| e.to_string())?;
+        let path =
+            eyes::capture::save_screenshot(&data, &screenshots_dir).map_err(|e| e.to_string())?;
         let b64 = eyes::capture::to_base64_jpeg(&data, 80).map_err(|e| e.to_string())?;
         Ok::<_, String>((path, b64))
     })
@@ -1231,24 +1588,20 @@ async fn cmd_capture_screenshot(
 
 #[tauri::command]
 async fn cmd_get_ui_elements() -> Result<serde_json::Value, String> {
-    let elements = tokio::task::spawn_blocking(|| {
-        eyes::ui_automation::get_foreground_elements()
-    })
-    .await
-    .map_err(|e| e.to_string())?
-    .map_err(|e| e.to_string())?;
+    let elements = tokio::task::spawn_blocking(|| eyes::ui_automation::get_foreground_elements())
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
 
     Ok(serde_json::json!({ "elements": elements }))
 }
 
 #[tauri::command]
 async fn cmd_list_windows() -> Result<serde_json::Value, String> {
-    let windows = tokio::task::spawn_blocking(|| {
-        eyes::ui_automation::list_windows()
-    })
-    .await
-    .map_err(|e| e.to_string())?
-    .map_err(|e| e.to_string())?;
+    let windows = tokio::task::spawn_blocking(|| eyes::ui_automation::list_windows())
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
 
     Ok(serde_json::json!({ "windows": windows }))
 }
@@ -1264,7 +1617,8 @@ async fn cmd_run_pc_task(
     // Create pending task in DB
     {
         let db = state.db.lock().map_err(|e| e.to_string())?;
-        db.create_task_pending(&task_id, &description).map_err(|e| e.to_string())?;
+        db.create_task_pending(&task_id, &description)
+            .map_err(|e| e.to_string())?;
     }
 
     // Clone what the engine needs
@@ -1275,6 +1629,7 @@ async fn cmd_run_pc_task(
     let kill_switch = state.kill_switch.clone();
     let screenshots_dir = state.screenshots_dir.clone();
     let db_path = state.db_path.clone();
+    let debugger = state.agent_debugger.clone();
     let tid = task_id.clone();
 
     // Spawn background task (must use tauri runtime, not raw tokio)
@@ -1292,19 +1647,34 @@ async fn cmd_run_pc_task(
 
         match result {
             Ok(r) => {
-                let _ = app_handle.emit("agent:task_completed", serde_json::json!({
-                    "task_id": tid,
-                    "success": r.success,
-                    "steps": r.steps.len(),
-                    "duration_ms": r.duration_ms,
-                }));
+                let dbg = debugger.lock().await;
+                let _ = dbg.record_task_execution(&tid, "PC Controller", "anthropic/sonnet", &r);
+                let _ = app_handle.emit(
+                    "agent:task_completed",
+                    serde_json::json!({
+                        "task_id": tid,
+                        "success": r.success,
+                        "steps": r.steps.len(),
+                        "duration_ms": r.duration_ms,
+                    }),
+                );
             }
             Err(e) => {
-                let _ = app_handle.emit("agent:task_completed", serde_json::json!({
-                    "task_id": tid,
-                    "success": false,
-                    "error": e,
-                }));
+                let dbg = debugger.lock().await;
+                let _ = dbg.record_runtime_error(
+                    &tid,
+                    "PC Controller",
+                    "anthropic/sonnet",
+                    &e,
+                );
+                let _ = app_handle.emit(
+                    "agent:task_completed",
+                    serde_json::json!({
+                        "task_id": tid,
+                        "success": false,
+                        "error": e,
+                    }),
+                );
             }
         }
     });
@@ -1361,7 +1731,10 @@ async fn cmd_get_mesh_nodes() -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
-async fn cmd_send_mesh_task(node_id: String, description: String) -> Result<serde_json::Value, String> {
+async fn cmd_send_mesh_task(
+    node_id: String,
+    description: String,
+) -> Result<serde_json::Value, String> {
     let nodes = mesh::discovery::get_discovered_nodes();
     let node = nodes
         .iter()
@@ -1370,7 +1743,10 @@ async fn cmd_send_mesh_task(node_id: String, description: String) -> Result<serd
 
     // Extract IP and port from the node address
     let parts: Vec<&str> = node.address.split(':').collect();
-    let ip = parts.first().ok_or("Invalid node address (no IP)")?.to_string();
+    let ip = parts
+        .first()
+        .ok_or("Invalid node address (no IP)")?
+        .to_string();
     let port = node.mesh_port;
 
     let task_id = uuid::Uuid::new_v4().to_string();
@@ -1460,19 +1836,17 @@ async fn cmd_execute_distributed_chain(
     let subtasks: Vec<mesh::orchestrator::SubTask> = parts
         .iter()
         .enumerate()
-        .map(|(i, desc)| {
-            mesh::orchestrator::SubTask {
-                id: format!("sub_{}", i),
-                description: desc.to_string(),
-                suggested_specialist: None,
-                preferred_provider: None,
-                needs_vision: false,
-                depends_on: if i > 0 {
-                    vec![format!("sub_{}", i - 1)]
-                } else {
-                    vec![]
-                },
-            }
+        .map(|(i, desc)| mesh::orchestrator::SubTask {
+            id: format!("sub_{}", i),
+            description: desc.to_string(),
+            suggested_specialist: None,
+            preferred_provider: None,
+            needs_vision: false,
+            depends_on: if i > 0 {
+                vec![format!("sub_{}", i - 1)]
+            } else {
+                vec![]
+            },
         })
         .collect();
 
@@ -1510,15 +1884,14 @@ async fn cmd_execute_distributed_chain(
 // ── R2: Vision E2E Test Commands ─────────────────────────────
 
 #[tauri::command]
-async fn cmd_test_vision(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+async fn cmd_test_vision(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let screenshots_dir = state.screenshots_dir.clone();
 
     // Capture screenshot
     let (path, b64) = tokio::task::spawn_blocking(move || {
         let data = eyes::capture::capture_full_screen().map_err(|e| e.to_string())?;
-        let path = eyes::capture::save_screenshot(&data, &screenshots_dir).map_err(|e| e.to_string())?;
+        let path =
+            eyes::capture::save_screenshot(&data, &screenshots_dir).map_err(|e| e.to_string())?;
         let b64 = eyes::capture::to_base64_jpeg(&data, 80).map_err(|e| e.to_string())?;
         Ok::<_, String>((path, b64))
     })
@@ -1549,33 +1922,27 @@ async fn cmd_test_vision(
 
 #[tauri::command]
 async fn cmd_test_click(x: i32, y: i32) -> Result<serde_json::Value, String> {
-    tokio::task::spawn_blocking(move || {
-        hands::input::click(x, y).map_err(|e| e.to_string())
-    })
-    .await
-    .map_err(|e| e.to_string())??;
+    tokio::task::spawn_blocking(move || hands::input::click(x, y).map_err(|e| e.to_string()))
+        .await
+        .map_err(|e| e.to_string())??;
     Ok(serde_json::json!({ "ok": true, "clicked": [x, y] }))
 }
 
 #[tauri::command]
 async fn cmd_test_type(text: String) -> Result<serde_json::Value, String> {
     let t = text.clone();
-    tokio::task::spawn_blocking(move || {
-        hands::input::type_text(&t).map_err(|e| e.to_string())
-    })
-    .await
-    .map_err(|e| e.to_string())??;
+    tokio::task::spawn_blocking(move || hands::input::type_text(&t).map_err(|e| e.to_string()))
+        .await
+        .map_err(|e| e.to_string())??;
     Ok(serde_json::json!({ "ok": true, "typed": text }))
 }
 
 #[tauri::command]
 async fn cmd_test_key_combo(keys: Vec<String>) -> Result<serde_json::Value, String> {
     let k = keys.clone();
-    tokio::task::spawn_blocking(move || {
-        hands::input::key_combo(&k).map_err(|e| e.to_string())
-    })
-    .await
-    .map_err(|e| e.to_string())??;
+    tokio::task::spawn_blocking(move || hands::input::key_combo(&k).map_err(|e| e.to_string()))
+        .await
+        .map_err(|e| e.to_string())??;
     Ok(serde_json::json!({ "ok": true, "keys": keys }))
 }
 
@@ -1657,9 +2024,7 @@ async fn cmd_whatsapp_setup(
 }
 
 #[tauri::command]
-async fn cmd_whatsapp_test(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+async fn cmd_whatsapp_test(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let config = {
         let settings = state.settings.lock().map_err(|e| e.to_string())?;
         if settings.whatsapp_phone_number_id.is_empty() || settings.whatsapp_access_token.is_empty()
@@ -1731,9 +2096,7 @@ async fn cmd_get_whatsapp_status(
 // ── C5: Discord Bot commands ────────────────────────────────
 
 #[tauri::command]
-async fn cmd_discord_start(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+async fn cmd_discord_start(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let (token, settings_clone) = {
         let settings = state.settings.lock().map_err(|e| e.to_string())?;
         if settings.discord_bot_token.is_empty() {
@@ -1767,9 +2130,7 @@ async fn cmd_discord_stop() -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
-async fn cmd_discord_test(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+async fn cmd_discord_test(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let token = {
         let settings = state.settings.lock().map_err(|e| e.to_string())?;
         if settings.discord_bot_token.is_empty() {
@@ -1905,9 +2266,7 @@ async fn cmd_screenshot_url(
 // ── R18: Trigger / automation commands ──────────────────────
 
 #[tauri::command]
-async fn cmd_get_triggers(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+async fn cmd_get_triggers(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let triggers = db.get_triggers().map_err(|e| e.to_string())?;
     Ok(serde_json::json!({ "triggers": triggers }))
@@ -1966,9 +2325,7 @@ async fn cmd_toggle_trigger(
 // ── R21: Secure Vault commands ──────────────────────────────
 
 #[tauri::command]
-async fn cmd_vault_status(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+async fn cmd_vault_status(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let vault = state.vault.lock().map_err(|e| e.to_string())?;
     Ok(serde_json::json!({
         "exists": vault.exists(),
@@ -1983,9 +2340,11 @@ async fn cmd_vault_store(
     key: String,
     value: String,
 ) -> Result<serde_json::Value, String> {
+    let _decision = enforce_permission(&state, approvals::PermissionCapability::VaultWrite, None)?;
     let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
     vault.store(&key, &value)?;
     tracing::info!(key = %key, "Stored key in vault");
+    audit_vault_event(&state, "vault_store", serde_json::json!({ "key": key }));
     Ok(serde_json::json!({ "ok": true }))
 }
 
@@ -1994,8 +2353,10 @@ async fn cmd_vault_retrieve(
     state: tauri::State<'_, AppState>,
     key: String,
 ) -> Result<serde_json::Value, String> {
+    let _decision = enforce_permission(&state, approvals::PermissionCapability::VaultRead, None)?;
     let vault = state.vault.lock().map_err(|e| e.to_string())?;
     let value = vault.retrieve(&key)?;
+    audit_vault_event(&state, "vault_retrieve", serde_json::json!({ "key": key }));
     Ok(serde_json::json!({ "key": key, "value": value }))
 }
 
@@ -2004,16 +2365,17 @@ async fn cmd_vault_delete(
     state: tauri::State<'_, AppState>,
     key: String,
 ) -> Result<serde_json::Value, String> {
+    let _decision = enforce_permission(&state, approvals::PermissionCapability::VaultWrite, None)?;
     let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
     vault.delete(&key)?;
     tracing::info!(key = %key, "Deleted key from vault");
+    audit_vault_event(&state, "vault_delete", serde_json::json!({ "key": key }));
     Ok(serde_json::json!({ "ok": true }))
 }
 
 #[tauri::command]
-async fn cmd_vault_migrate(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+async fn cmd_vault_migrate(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let _decision = enforce_permission(&state, approvals::PermissionCapability::VaultMigrate, None)?;
     let settings = {
         let s = state.settings.lock().map_err(|e| e.to_string())?;
         s.clone()
@@ -2021,7 +2383,66 @@ async fn cmd_vault_migrate(
     let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
     let count = vault.migrate_from_settings(&settings)?;
     tracing::info!(count = count, "Migrated keys from settings to vault");
+    if count > 0 {
+        let mut persisted = settings.clone();
+        scrub_persisted_secrets(&mut persisted);
+        persisted.save().map_err(|e| e.to_string())?;
+    }
+    audit_vault_event(
+        &state,
+        "vault_migrate",
+        serde_json::json!({ "migrated": count }),
+    );
     Ok(serde_json::json!({ "ok": true, "migrated": count }))
+}
+
+#[tauri::command]
+async fn cmd_vault_rotate(
+    state: tauri::State<'_, AppState>,
+    key: String,
+    value: String,
+) -> Result<serde_json::Value, String> {
+    let _decision = enforce_permission(&state, approvals::PermissionCapability::VaultWrite, None)?;
+    let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
+    vault.store(&key, &value)?;
+    audit_vault_event(&state, "vault_rotate", serde_json::json!({ "key": key }));
+    Ok(serde_json::json!({ "ok": true, "rotated": key }))
+}
+
+#[tauri::command]
+async fn cmd_vault_audit(
+    state: tauri::State<'_, AppState>,
+    limit: Option<usize>,
+) -> Result<serde_json::Value, String> {
+    let conn = rusqlite::Connection::open(&state.db_path).map_err(|e| e.to_string())?;
+    enterprise::AuditLog::ensure_table(&conn)?;
+    let entries = enterprise::AuditLog::get_recent(&conn, limit.unwrap_or(100))?;
+    let vault_entries: Vec<_> = entries
+        .into_iter()
+        .filter(|entry| entry.event_type.starts_with("vault_"))
+        .collect();
+    Ok(serde_json::json!({ "entries": vault_entries, "count": vault_entries.len() }))
+}
+
+#[tauri::command]
+async fn cmd_trust_boundaries(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let api_enabled = *state.api_enabled.lock().map_err(|e| e.to_string())?;
+    let vault_unlocked = state.vault.lock().map_err(|e| e.to_string())?.is_unlocked();
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let boundaries =
+        approvals::ApprovalManager::trust_boundaries(db.conn(), api_enabled, vault_unlocked)?;
+    serde_json::to_value(&boundaries).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_permission_enforcement_audit(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let report = approvals::ApprovalManager::audit_permission_enforcement(db.conn())?;
+    serde_json::to_value(&report).map_err(|e| e.to_string())
 }
 
 // ── R23: Billing commands ────────────────────────────────────
@@ -2054,8 +2475,16 @@ async fn cmd_get_plan(state: tauri::State<'_, AppState>) -> Result<serde_json::V
         )
     };
 
-    let tasks_limit = if plan.tasks_per_day == u32::MAX { serde_json::Value::Null } else { serde_json::json!(plan.tasks_per_day) };
-    let tokens_limit = if plan.tokens_per_day == u64::MAX { serde_json::Value::Null } else { serde_json::json!(plan.tokens_per_day) };
+    let tasks_limit = if plan.tasks_per_day == u32::MAX {
+        serde_json::Value::Null
+    } else {
+        serde_json::json!(plan.tasks_per_day)
+    };
+    let tokens_limit = if plan.tokens_per_day == u64::MAX {
+        serde_json::Value::Null
+    } else {
+        serde_json::json!(plan.tokens_per_day)
+    };
 
     let result = serde_json::json!({
         "plan_type": plan_str,
@@ -2073,7 +2502,10 @@ async fn cmd_get_plan(state: tauri::State<'_, AppState>) -> Result<serde_json::V
             "cost_today": cost_today,
         }
     });
-    state.app_cache.set("plan", result.clone(), Duration::from_secs(120)).await;
+    state
+        .app_cache
+        .set("plan", result.clone(), Duration::from_secs(120))
+        .await;
     Ok(result)
 }
 
@@ -2086,6 +2518,8 @@ async fn cmd_get_checkout_url(
         let s = state.settings.lock().map_err(|e| e.to_string())?;
         s.clone()
     };
+
+    let variant = pricing_copy_variant(&plan);
 
     // If Stripe secret key is configured, create a real checkout session
     if !settings.stripe_secret_key.is_empty() {
@@ -2114,12 +2548,21 @@ async fn cmd_get_checkout_url(
                 "http://localhost:8080/billing/cancel",
             )
             .await?;
-
-        Ok(serde_json::json!({ "url": url, "plan": plan, "real": true }))
+        log_revenue_event(
+            &state.db_path,
+            "upgrade_checkout_requested",
+            serde_json::json!({ "plan": plan, "variant": variant, "real": true }),
+        );
+        Ok(serde_json::json!({ "url": url, "plan": plan, "real": true, "variant": variant }))
     } else {
         // Fallback to placeholder URL when Stripe is not configured
         let url = billing::stripe::get_checkout_url(&plan, "user@example.com");
-        Ok(serde_json::json!({ "url": url, "plan": plan, "real": false }))
+        log_revenue_event(
+            &state.db_path,
+            "upgrade_checkout_requested",
+            serde_json::json!({ "plan": plan, "variant": variant, "real": false }),
+        );
+        Ok(serde_json::json!({ "url": url, "plan": plan, "real": false, "variant": variant }))
     }
 }
 
@@ -2155,7 +2598,10 @@ async fn cmd_set_plan(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     if !matches!(plan_type.as_str(), "free" | "pro" | "team") {
-        return Err(format!("Invalid plan_type '{}'. Must be free, pro, or team.", plan_type));
+        return Err(format!(
+            "Invalid plan_type '{}'. Must be free, pro, or team.",
+            plan_type
+        ));
     }
     {
         let mut settings = state.settings.lock().map_err(|e| e.to_string())?;
@@ -2170,7 +2616,10 @@ async fn cmd_set_plan(
         let _ = enterprise::AuditLog::log(
             &conn,
             "plan_changed",
-            serde_json::json!({ "plan_type": plan_type }),
+            serde_json::json!({
+                "plan_type": plan_type,
+                "variant": pricing_copy_variant(&plan_type),
+            }),
         );
     }
 
@@ -2208,22 +2657,22 @@ async fn cmd_api_create_key(
 }
 
 #[tauri::command]
-async fn cmd_api_list_keys(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+async fn cmd_api_list_keys(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let db_path = state.db_path.clone();
     let conn = rusqlite::Connection::open(&db_path).map_err(|e| e.to_string())?;
     let keys = api::auth::list_api_keys(&conn)?;
     let list: Vec<serde_json::Value> = keys
         .iter()
-        .map(|k| serde_json::json!({
-            "id": k.id,
-            "name": k.name,
-            "key": k.key,
-            "created_at": k.created_at,
-            "last_used": k.last_used,
-            "enabled": k.enabled,
-        }))
+        .map(|k| {
+            serde_json::json!({
+                "id": k.id,
+                "name": k.name,
+                "key": k.key,
+                "created_at": k.created_at,
+                "last_used": k.last_used,
+                "enabled": k.enabled,
+            })
+        })
         .collect();
     Ok(serde_json::json!({ "keys": list }))
 }
@@ -2268,12 +2717,12 @@ async fn cmd_api_set_enabled(
 // ── R22: Marketplace commands ────────────────────────────────
 
 #[tauri::command]
-async fn cmd_marketplace_list(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+async fn cmd_marketplace_list(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
     let catalog = marketplace::MarketplaceCatalog::load()?;
-    let pkg_mgr = marketplace::PackageManager::new(
-        state.db_path.clone(),
-        state.playbooks_dir.clone(),
-    );
+    let pkg_mgr =
+        marketplace::PackageManager::new(state.db_path.clone(), state.playbooks_dir.clone());
     pkg_mgr.ensure_tables()?;
 
     let entries: Vec<serde_json::Value> = catalog
@@ -2307,10 +2756,8 @@ async fn cmd_marketplace_search(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let catalog = marketplace::MarketplaceCatalog::load()?;
-    let pkg_mgr = marketplace::PackageManager::new(
-        state.db_path.clone(),
-        state.playbooks_dir.clone(),
-    );
+    let pkg_mgr =
+        marketplace::PackageManager::new(state.db_path.clone(), state.playbooks_dir.clone());
     pkg_mgr.ensure_tables()?;
 
     let results: Vec<serde_json::Value> = catalog
@@ -2348,10 +2795,8 @@ async fn cmd_marketplace_install(
         .get_by_id(&package_id)
         .ok_or_else(|| format!("Package '{}' not found in catalog", package_id))?;
 
-    let pkg_mgr = marketplace::PackageManager::new(
-        state.db_path.clone(),
-        state.playbooks_dir.clone(),
-    );
+    let pkg_mgr =
+        marketplace::PackageManager::new(state.db_path.clone(), state.playbooks_dir.clone());
     pkg_mgr.ensure_tables()?;
 
     let installed = pkg_mgr.simulate_install(&entry.id, &entry.name, &entry.version)?;
@@ -2373,10 +2818,8 @@ async fn cmd_marketplace_uninstall(
     package_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let pkg_mgr = marketplace::PackageManager::new(
-        state.db_path.clone(),
-        state.playbooks_dir.clone(),
-    );
+    let pkg_mgr =
+        marketplace::PackageManager::new(state.db_path.clone(), state.playbooks_dir.clone());
     pkg_mgr.ensure_tables()?;
     pkg_mgr.uninstall(&package_id)?;
     Ok(serde_json::json!({ "ok": true, "package_id": package_id }))
@@ -2392,10 +2835,8 @@ async fn cmd_marketplace_review(
     if !(1..=5).contains(&rating) {
         return Err("Rating must be between 1 and 5".to_string());
     }
-    let pkg_mgr = marketplace::PackageManager::new(
-        state.db_path.clone(),
-        state.playbooks_dir.clone(),
-    );
+    let pkg_mgr =
+        marketplace::PackageManager::new(state.db_path.clone(), state.playbooks_dir.clone());
     pkg_mgr.ensure_tables()?;
     let review_id = pkg_mgr.add_review(&package_id, rating, comment.as_deref())?;
     Ok(serde_json::json!({ "ok": true, "review_id": review_id }))
@@ -2406,10 +2847,8 @@ async fn cmd_marketplace_get_reviews(
     package_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let pkg_mgr = marketplace::PackageManager::new(
-        state.db_path.clone(),
-        state.playbooks_dir.clone(),
-    );
+    let pkg_mgr =
+        marketplace::PackageManager::new(state.db_path.clone(), state.playbooks_dir.clone());
     pkg_mgr.ensure_tables()?;
     let reviews = pkg_mgr.get_reviews(&package_id)?;
     Ok(serde_json::json!({ "package_id": package_id, "reviews": reviews }))
@@ -2514,8 +2953,7 @@ async fn cmd_get_weekly_insights(
     feedback::collector::FeedbackCollector::ensure_table(&conn)?;
     let records = feedback::collector::FeedbackCollector::get_recent(&conn, 200)?;
     let stats = feedback::collector::FeedbackCollector::get_stats(&conn)?;
-    let insights =
-        feedback::analyzer::InsightAnalyzer::generate_weekly_insights(&records, &stats);
+    let insights = feedback::analyzer::InsightAnalyzer::generate_weekly_insights(&records, &stats);
     let suggestions = feedback::analyzer::InsightAnalyzer::get_routing_suggestions(&records);
     Ok(serde_json::json!({
         "insights": insights,
@@ -2531,8 +2969,7 @@ async fn cmd_get_recent_feedback(
 ) -> Result<serde_json::Value, String> {
     let conn = open_feedback_conn(&state.db_path)?;
     feedback::collector::FeedbackCollector::ensure_table(&conn)?;
-    let records =
-        feedback::collector::FeedbackCollector::get_recent(&conn, limit.unwrap_or(50))?;
+    let records = feedback::collector::FeedbackCollector::get_recent(&conn, limit.unwrap_or(50))?;
     Ok(serde_json::json!({ "feedback": records }))
 }
 
@@ -2540,6 +2977,27 @@ async fn cmd_get_recent_feedback(
 
 fn open_enterprise_conn(db_path: &std::path::Path) -> Result<rusqlite::Connection, String> {
     rusqlite::Connection::open(db_path).map_err(|e| format!("DB open error: {}", e))
+}
+
+fn resolve_org_scope(
+    conn: &rusqlite::Connection,
+    requested_org_id: Option<&str>,
+) -> Result<Option<String>, String> {
+    enterprise::OrgManager::ensure_tables(conn)?;
+    let requested_org_id = requested_org_id
+        .map(str::trim)
+        .filter(|org_id| !org_id.is_empty());
+    let current_org_id = enterprise::OrgManager::get_current_org_id(conn)?;
+
+    match (requested_org_id, current_org_id) {
+        (Some(requested), Some(current)) if requested != current => Err(format!(
+            "Tenant scope violation: current org is '{}' but '{}' was requested",
+            current, requested
+        )),
+        (Some(requested), _) => Ok(Some(requested.to_string())),
+        (None, Some(current)) => Ok(Some(current)),
+        (None, None) => Ok(None),
+    }
 }
 
 #[tauri::command]
@@ -2565,9 +3023,7 @@ async fn cmd_export_audit_log(
 }
 
 #[tauri::command]
-async fn cmd_get_org(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+async fn cmd_get_org(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let conn = open_enterprise_conn(&state.db_path)?;
     enterprise::OrgManager::ensure_tables(&conn)?;
     let org = enterprise::OrgManager::get_current_org(&conn)?;
@@ -2594,6 +3050,26 @@ async fn cmd_create_org(
         serde_json::json!({ "org_name": name, "plan_type": plan_type }),
     )?;
     Ok(serde_json::to_value(&org).map_err(|e| e.to_string())?)
+}
+
+#[tauri::command]
+async fn cmd_list_orgs(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    enterprise::OrgManager::ensure_tables(&conn)?;
+    let orgs = enterprise::OrgManager::list_orgs(&conn)?;
+    Ok(serde_json::json!({ "orgs": orgs }))
+}
+
+#[tauri::command]
+async fn cmd_set_current_org(
+    org_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    enterprise::OrgManager::ensure_tables(&conn)?;
+    enterprise::OrgManager::set_current_org(&conn, &org_id)?;
+    let current = enterprise::OrgManager::get_current_org(&conn)?;
+    Ok(serde_json::json!({ "current_org": current }))
 }
 
 #[tauri::command]
@@ -2671,9 +3147,7 @@ async fn cmd_open_url(
 // ── R34: Plugin system commands ──────────────────────────────
 
 #[tauri::command]
-async fn cmd_plugin_list(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+async fn cmd_plugin_list(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let mgr = state.plugin_manager.lock().await;
     let plugins: Vec<serde_json::Value> = mgr
         .list()
@@ -2687,6 +3161,10 @@ async fn cmd_plugin_list(
                 "author": p.manifest.author,
                 "permissions": p.manifest.permissions,
                 "enabled": p.enabled,
+                "lifecycle_state": p.lifecycle.state,
+                "installed_at": p.lifecycle.installed_at,
+                "last_updated_at": p.lifecycle.last_updated_at,
+                "rollback_version": p.lifecycle.rollback_version,
             })
         })
         .collect();
@@ -2698,6 +3176,7 @@ async fn cmd_plugin_install(
     path: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    let _decision = enforce_permission(&state, approvals::PermissionCapability::PluginManage, None)?;
     let mut mgr = state.plugin_manager.lock().await;
     let source = std::path::PathBuf::from(&path);
     let manifest = mgr.install(&source)?;
@@ -2709,10 +3188,47 @@ async fn cmd_plugin_install(
 }
 
 #[tauri::command]
+async fn cmd_plugin_update(
+    name: String,
+    path: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let _decision =
+        enforce_permission(&state, approvals::PermissionCapability::PluginManage, Some(&name))?;
+    let mut mgr = state.plugin_manager.lock().await;
+    let manifest = mgr.update(&name, &std::path::PathBuf::from(path))?;
+    Ok(serde_json::json!({
+        "ok": true,
+        "name": manifest.name,
+        "version": manifest.version,
+        "state": "updated",
+    }))
+}
+
+#[tauri::command]
+async fn cmd_plugin_rollback(
+    name: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let _decision =
+        enforce_permission(&state, approvals::PermissionCapability::PluginManage, Some(&name))?;
+    let mut mgr = state.plugin_manager.lock().await;
+    let manifest = mgr.rollback(&name)?;
+    Ok(serde_json::json!({
+        "ok": true,
+        "name": manifest.name,
+        "version": manifest.version,
+        "state": "rolled_back",
+    }))
+}
+
+#[tauri::command]
 async fn cmd_plugin_uninstall(
     name: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    let _decision =
+        enforce_permission(&state, approvals::PermissionCapability::PluginManage, Some(&name))?;
     let mut mgr = state.plugin_manager.lock().await;
     mgr.uninstall(&name)?;
     Ok(serde_json::json!({ "ok": true, "name": name }))
@@ -2724,6 +3240,8 @@ async fn cmd_plugin_toggle(
     enabled: bool,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    let _decision =
+        enforce_permission(&state, approvals::PermissionCapability::PluginManage, Some(&name))?;
     let mut mgr = state.plugin_manager.lock().await;
     mgr.set_enabled(&name, enabled)?;
     Ok(serde_json::json!({ "ok": true, "name": name, "enabled": enabled }))
@@ -2735,6 +3253,8 @@ async fn cmd_plugin_execute(
     input: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    let _decision =
+        enforce_permission(&state, approvals::PermissionCapability::PluginExecute, Some(&name))?;
     let mgr = state.plugin_manager.lock().await;
     let output = mgr.execute(&name, &input).await?;
     Ok(serde_json::json!({ "ok": true, "output": output }))
@@ -2765,9 +3285,13 @@ async fn cmd_plugin_discover(
 #[tauri::command]
 async fn cmd_run_benchmarks() -> Result<serde_json::Value, String> {
     let results = cache::benchmarks::Benchmarks::run_all();
+    let mut hot_paths = results.clone();
+    hot_paths.sort_by(|a, b| b.duration_ms.partial_cmp(&a.duration_ms).unwrap_or(std::cmp::Ordering::Equal));
+    let hot_paths: Vec<_> = hot_paths.into_iter().take(3).collect();
     Ok(serde_json::json!({
         "benchmarks": results,
         "all_passed": results.iter().all(|r| r.passed),
+        "hot_paths": hot_paths,
     }))
 }
 
@@ -2784,9 +3308,7 @@ async fn cmd_get_cache_stats(
 }
 
 #[tauri::command]
-async fn cmd_clear_cache(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+async fn cmd_clear_cache(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     state.app_cache.clear().await;
     Ok(serde_json::json!({ "ok": true, "message": "Cache cleared" }))
 }
@@ -2883,7 +3405,9 @@ async fn cmd_security_audit() -> Result<serde_json::Value, String> {
         "details": "HTML special characters are escaped in output",
     }));
 
-    let all_passed = checks.iter().all(|c| c["passed"].as_bool().unwrap_or(false));
+    let all_passed = checks
+        .iter()
+        .all(|c| c["passed"].as_bool().unwrap_or(false));
 
     Ok(serde_json::json!({
         "checks": checks,
@@ -2904,18 +3428,15 @@ async fn cmd_get_roi_report(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let conn = open_analytics_conn(&state.db_path)?;
-    let rate = hourly_rate.unwrap_or_else(|| {
-        state.settings.lock().map(|s| s.hourly_rate).unwrap_or(50.0)
-    });
+    let rate =
+        hourly_rate.unwrap_or_else(|| state.settings.lock().map(|s| s.hourly_rate).unwrap_or(50.0));
     let p = period.as_deref().unwrap_or("all");
     let report = analytics::ROICalculator::calculate(&conn, p, rate, 5.0)?;
     serde_json::to_value(&report).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-async fn cmd_get_heatmap(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+async fn cmd_get_heatmap(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let conn = open_analytics_conn(&state.db_path)?;
     let heatmap = analytics::HeatmapData::generate(&conn)?;
     serde_json::to_value(&heatmap).map_err(|e| e.to_string())
@@ -2931,12 +3452,21 @@ async fn cmd_export_analytics(
     let report = analytics::ROICalculator::calculate(&conn, "all", rate, 5.0)?;
 
     let (content, fmt) = match format.as_str() {
-        "csv" => (analytics::export::AnalyticsExporter::export_csv(&report), "csv"),
+        "csv" => (
+            analytics::export::AnalyticsExporter::export_csv(&report),
+            "csv",
+        ),
         "heatmap_csv" => {
             let heatmap = analytics::HeatmapData::generate(&conn)?;
-            (analytics::export::AnalyticsExporter::export_heatmap_csv(&heatmap), "csv")
+            (
+                analytics::export::AnalyticsExporter::export_heatmap_csv(&heatmap),
+                "csv",
+            )
         }
-        _ => (analytics::export::AnalyticsExporter::export_roi_text(&report), "text"),
+        _ => (
+            analytics::export::AnalyticsExporter::export_roi_text(&report),
+            "text",
+        ),
     };
 
     Ok(serde_json::json!({ "content": content, "format": fmt }))
@@ -3060,7 +3590,9 @@ async fn cmd_apply_retention(
     };
     let conn = open_analytics_conn(&state.db_path)?;
     let deleted = policy.apply(&conn)?;
-    Ok(serde_json::json!({ "deleted": deleted, "policy": serde_json::to_value(&policy).unwrap_or_default() }))
+    Ok(
+        serde_json::json!({ "deleted": deleted, "policy": serde_json::to_value(&policy).unwrap_or_default() }),
+    )
 }
 
 #[tauri::command]
@@ -3091,22 +3623,184 @@ async fn cmd_get_business_metrics(
     serde_json::to_value(&m).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-async fn cmd_get_system_info(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+fn build_system_info_value(state: &AppState) -> serde_json::Value {
     let db_size_mb = std::fs::metadata(&state.db_path)
         .map(|m| m.len() as f64 / (1024.0 * 1024.0))
         .unwrap_or(0.0);
 
-    Ok(serde_json::json!({
+    serde_json::json!({
         "rust_version": env!("CARGO_PKG_RUST_VERSION", "unknown"),
         "tauri_version": "2.x",
         "db_size_mb": (db_size_mb * 100.0).round() / 100.0,
         "uptime_hours": 0.0,
         "os": std::env::consts::OS,
         "architecture": std::env::consts::ARCH,
-    }))
+    })
+}
+
+fn build_system_info_narration(system_info: &serde_json::Value) -> String {
+    format!(
+        "System status: {} on {} architecture, database size {} megabytes, Tauri {}, Rust {}.",
+        system_info["os"].as_str().unwrap_or("unknown OS"),
+        system_info["architecture"]
+            .as_str()
+            .unwrap_or("unknown architecture"),
+        system_info["db_size_mb"].as_f64().unwrap_or(0.0),
+        system_info["tauri_version"].as_str().unwrap_or("unknown"),
+        system_info["rust_version"].as_str().unwrap_or("unknown"),
+    )
+}
+
+async fn maybe_speak_feedback(text: &str, speak_feedback: bool) -> Result<bool, String> {
+    if !speak_feedback {
+        return Ok(false);
+    }
+
+    voice::TextToSpeech::new().speak(text).await?;
+    Ok(true)
+}
+
+async fn describe_accessible_screen(
+    state: &AppState,
+) -> Result<accessibility::AccessibilityScreenSummary, String> {
+    let windows = tokio::task::spawn_blocking(|| eyes::ui_automation::list_windows())
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+    let elements = tokio::task::spawn_blocking(|| eyes::ui_automation::get_foreground_elements())
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+
+    let mgr = state
+        .accessibility_manager
+        .lock()
+        .map_err(|e| e.to_string())?;
+    Ok(mgr.summarize_screen(&windows, &elements))
+}
+
+async fn execute_accessibility_plan(
+    plan: &accessibility::AccessibilityCommandPlan,
+    state: &AppState,
+) -> Result<String, String> {
+    match plan.action {
+        accessibility::AccessibilityActionKind::DescribeScreen => {
+            let summary = describe_accessible_screen(state).await?;
+            Ok(summary.narration)
+        }
+        accessibility::AccessibilityActionKind::ListWindows => {
+            let windows = tokio::task::spawn_blocking(|| eyes::ui_automation::list_windows())
+                .await
+                .map_err(|e| e.to_string())?
+                .map_err(|e| e.to_string())?;
+            let titles: Vec<String> = windows
+                .into_iter()
+                .filter_map(|window| {
+                    let title = window.title.trim().to_string();
+                    if title.is_empty() {
+                        None
+                    } else {
+                        Some(title)
+                    }
+                })
+                .take(8)
+                .collect();
+
+            if titles.is_empty() {
+                Ok("No visible windows were detected.".to_string())
+            } else {
+                Ok(format!("Visible windows: {}.", titles.join(", ")))
+            }
+        }
+        accessibility::AccessibilityActionKind::OpenCalculator => {
+            let output = tokio::process::Command::new("powershell")
+                .args(["-NoProfile", "-Command", "Start-Process calc"])
+                .output()
+                .await
+                .map_err(|e| format!("Failed to launch Calculator: {}", e))?;
+            if !output.status.success() {
+                return Err(format!(
+                    "Calculator launch failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                ));
+            }
+            Ok("Calculator launched.".to_string())
+        }
+        accessibility::AccessibilityActionKind::CheckDiskSpace => {
+            let output = tokio::process::Command::new("powershell")
+                .args([
+                    "-NoProfile",
+                    "-Command",
+                    "Get-PSDrive -PSProvider FileSystem | ForEach-Object { \"$($_.Name): $([math]::Round($_.Free / 1GB, 2)) GB free\" }",
+                ])
+                .output()
+                .await
+                .map_err(|e| format!("Failed to read disk space: {}", e))?;
+            if !output.status.success() {
+                return Err(format!(
+                    "Disk space check failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                ));
+            }
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let lines: Vec<String> = stdout
+                .lines()
+                .map(|line| line.trim().to_string())
+                .filter(|line| !line.is_empty())
+                .collect();
+            if lines.is_empty() {
+                Ok("No filesystem drives were reported.".to_string())
+            } else {
+                Ok(format!("Disk space: {}.", lines.join(", ")))
+            }
+        }
+        accessibility::AccessibilityActionKind::SystemStatus => {
+            let info = build_system_info_value(state);
+            Ok(build_system_info_narration(&info))
+        }
+        accessibility::AccessibilityActionKind::Unknown => Ok(plan.confirmation.clone()),
+    }
+}
+
+async fn transcribe_accessibility_audio(
+    audio_base64: String,
+    language: Option<String>,
+    state: &AppState,
+) -> Result<String, String> {
+    let (api_key, lang) = {
+        let settings = state.settings.lock().map_err(|e| e.to_string())?;
+        if settings.openai_api_key.is_empty() {
+            return Err(
+                "OpenAI API key not configured. Set it in Settings to use accessibility voice commands."
+                    .to_string(),
+            );
+        }
+        let key = settings.openai_api_key.clone();
+        let resolved_language = language.or_else(|| {
+            let configured = settings.voice_language.clone();
+            if configured.is_empty() || configured == "auto" {
+                None
+            } else {
+                Some(configured)
+            }
+        });
+        (key, resolved_language)
+    };
+
+    let audio_bytes =
+        base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &audio_base64)
+            .map_err(|e| format!("Invalid base64 audio: {}", e))?;
+
+    voice::SpeechToText::new()
+        .transcribe(&audio_bytes, &api_key, lang.as_deref())
+        .await
+}
+
+#[tauri::command]
+async fn cmd_get_system_info(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    Ok(build_system_info_value(&state))
 }
 
 // ── R41: Voice Interface commands ────────────────────────────────────
@@ -3120,24 +3814,31 @@ async fn cmd_transcribe_audio(
     let (api_key, lang) = {
         let settings = state.settings.lock().map_err(|e| e.to_string())?;
         if settings.openai_api_key.is_empty() {
-            return Err("OpenAI API key not configured. Set it in Settings to use voice transcription.".to_string());
+            return Err(
+                "OpenAI API key not configured. Set it in Settings to use voice transcription."
+                    .to_string(),
+            );
         }
         let key = settings.openai_api_key.clone();
         let l = language.or_else(|| {
             let v = settings.voice_language.clone();
-            if v.is_empty() || v == "auto" { None } else { Some(v) }
+            if v.is_empty() || v == "auto" {
+                None
+            } else {
+                Some(v)
+            }
         });
         (key, l)
     };
 
-    let audio_bytes = base64::Engine::decode(
-        &base64::engine::general_purpose::STANDARD,
-        &audio_base64,
-    )
-    .map_err(|e| format!("Invalid base64 audio: {}", e))?;
+    let audio_bytes =
+        base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &audio_base64)
+            .map_err(|e| format!("Invalid base64 audio: {}", e))?;
 
     let stt = voice::SpeechToText::new();
-    let text = stt.transcribe(&audio_bytes, &api_key, lang.as_deref()).await?;
+    let text = stt
+        .transcribe(&audio_bytes, &api_key, lang.as_deref())
+        .await?;
     Ok(serde_json::json!({ "text": text }))
 }
 
@@ -3165,10 +3866,7 @@ async fn cmd_list_voices() -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
-async fn cmd_save_speech(
-    text: String,
-    output_path: String,
-) -> Result<serde_json::Value, String> {
+async fn cmd_save_speech(text: String, output_path: String) -> Result<serde_json::Value, String> {
     let tts = voice::TextToSpeech::new();
     tts.save_to_file(&text, &output_path).await?;
     Ok(serde_json::json!({ "ok": true }))
@@ -3191,23 +3889,19 @@ async fn cmd_aap_send_task(
         ("agentos-desktop".to_string(), "AgentOS-Desktop".to_string())
     };
     let client = protocol::AAPClient::new();
-    client.send_task(&host, port, &node_id, &node_name, &task).await
+    client
+        .send_task(&host, port, &node_id, &node_name, &task)
+        .await
 }
 
 #[tauri::command]
-async fn cmd_aap_query_capabilities(
-    host: String,
-    port: u16,
-) -> Result<serde_json::Value, String> {
+async fn cmd_aap_query_capabilities(host: String, port: u16) -> Result<serde_json::Value, String> {
     let client = protocol::AAPClient::new();
     client.query_capabilities(&host, port).await
 }
 
 #[tauri::command]
-async fn cmd_aap_health(
-    host: String,
-    port: u16,
-) -> Result<serde_json::Value, String> {
+async fn cmd_aap_health(host: String, port: u16) -> Result<serde_json::Value, String> {
     let client = protocol::AAPClient::new();
     let alive = client.health_check(&host, port).await;
     Ok(serde_json::json!({
@@ -3271,9 +3965,7 @@ async fn cmd_ocr_screenshot(
 }
 
 #[tauri::command]
-async fn cmd_screen_diff(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+async fn cmd_screen_diff(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     // Take first screenshot
     let before = tokio::task::spawn_blocking(|| {
         eyes::capture::capture_full_screen().map_err(|e| e.to_string())
@@ -3331,26 +4023,24 @@ async fn cmd_get_logs(
 }
 
 #[tauri::command]
-async fn cmd_export_logs(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+async fn cmd_export_logs(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let content = state.structured_logger.export()?;
     let line_count = content.lines().count();
     Ok(serde_json::json!({ "content": content, "lines": line_count }))
 }
 
 #[tauri::command]
-async fn cmd_get_alerts(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+async fn cmd_get_alerts(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let mgr = state.alert_manager.lock().await;
-    let active: Vec<_> = mgr.get_active().into_iter().cloned().collect();
-    let all = mgr.get_all().to_vec();
-    let rules = mgr.get_rules().to_vec();
+    let active = mgr.get_active()?;
+    let all = mgr.get_all()?;
+    let rules = mgr.get_rules()?;
+    let runbooks = mgr.get_runbooks()?;
     Ok(serde_json::json!({
         "active": active,
         "all": all,
         "rules": rules,
+        "runbooks": runbooks,
         "active_count": active.len()
     }))
 }
@@ -3360,15 +4050,92 @@ async fn cmd_acknowledge_alert(
     alert_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let mut mgr = state.alert_manager.lock().await;
-    mgr.acknowledge(&alert_id);
+    let mgr = state.alert_manager.lock().await;
+    mgr.acknowledge(&alert_id)?;
     Ok(serde_json::json!({ "ok": true, "alert_id": alert_id }))
 }
 
 #[tauri::command]
-async fn cmd_get_health() -> Result<serde_json::Value, String> {
-    let status = observability::HealthDashboard::check_all().await;
+async fn cmd_open_incident(
+    rule_id: String,
+    message: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.alert_manager.lock().await;
+    let incident = mgr.open_incident(&rule_id, &message)?;
+    serde_json::to_value(&incident).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_resolve_incident(
+    alert_id: String,
+    notes: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.alert_manager.lock().await;
+    mgr.resolve(&alert_id, notes.as_deref())?;
+    Ok(serde_json::json!({ "ok": true, "alert_id": alert_id }))
+}
+
+#[tauri::command]
+async fn cmd_incident_runbooks(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.alert_manager.lock().await;
+    let runbooks = mgr.get_runbooks()?;
+    serde_json::to_value(&runbooks).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_get_health(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let providers_configured = {
+        let settings = state.settings.lock().map_err(|e| e.to_string())?;
+        settings.configured_providers().len()
+    };
+    let api_enabled = *state.api_enabled.lock().map_err(|e| e.to_string())?;
+    let vault_unlocked = state.vault.lock().map_err(|e| e.to_string())?.is_unlocked();
+    let recent_error_logs = state
+        .structured_logger
+        .get_recent(100, Some("error"), None)
+        .len();
+    let status = observability::HealthDashboard::check_all(
+        &state.db_path,
+        api_enabled,
+        vault_unlocked,
+        providers_configured,
+        recent_error_logs,
+    )
+    .await;
     Ok(serde_json::json!(status))
+}
+
+#[tauri::command]
+async fn cmd_get_observability_summary(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let health = cmd_get_health(state.clone()).await?;
+    let analytics = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        db.get_analytics().map_err(|e| e.to_string())?
+    };
+    let recent_errors = state.structured_logger.get_recent(20, Some("error"), None);
+    let recent_warnings = state.structured_logger.get_recent(20, Some("warn"), None);
+    let alerts = {
+        let mgr = state.alert_manager.lock().await;
+        mgr.get_active()?
+    };
+    let reliability = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        observability::HealthDashboard::reliability_report(db.conn(), 30)
+    };
+    Ok(serde_json::json!({
+        "health": health,
+        "analytics": analytics,
+        "recent_errors": recent_errors,
+        "recent_warnings": recent_warnings,
+        "active_incidents": alerts,
+        "reliability": reliability,
+    }))
 }
 
 // ── R48: AI Training Pipeline commands ─────────────────────────────
@@ -3406,7 +4173,11 @@ async fn cmd_preview_anonymized(
     training::collector::TrainingCollector::ensure_table(&conn)?;
     let records = training::collector::TrainingCollector::get_records(&conn, 20)?;
     let anonymized = training::anonymizer::Anonymizer::anonymize_batch(&records);
-    let opt_in = state.settings.lock().map_err(|e| e.to_string())?.training_opt_in;
+    let opt_in = state
+        .settings
+        .lock()
+        .map_err(|e| e.to_string())?
+        .training_opt_in;
     Ok(serde_json::json!({
         "preview": anonymized,
         "count": anonymized.len(),
@@ -3429,9 +4200,7 @@ async fn cmd_set_training_opt_in(
 // ── R49: Desktop Widgets commands ─────────────────────────────────────
 
 #[tauri::command]
-async fn cmd_get_widgets(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+async fn cmd_get_widgets(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let mgr = state.widget_manager.lock().await;
     let widgets: Vec<_> = mgr.get_all().into_iter().cloned().collect();
     Ok(serde_json::json!({ "widgets": widgets }))
@@ -3482,7 +4251,8 @@ async fn cmd_show_quick_task(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let mgr = state.widget_manager.lock().await;
-    let config = mgr.get("quick-task")
+    let config = mgr
+        .get("quick-task")
         .cloned()
         .ok_or_else(|| "quick-task widget config not found".to_string())?;
     drop(mgr);
@@ -3503,7 +4273,8 @@ async fn cmd_show_widget(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let mgr = state.widget_manager.lock().await;
-    let config = mgr.get(&id)
+    let config = mgr
+        .get(&id)
         .cloned()
         .ok_or_else(|| format!("Widget '{}' not found", id))?;
     drop(mgr);
@@ -3518,7 +4289,10 @@ async fn cmd_hide_widget(id: String, app: tauri::AppHandle) -> Result<serde_json
 }
 
 #[tauri::command]
-async fn cmd_destroy_widget(id: String, app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+async fn cmd_destroy_widget(
+    id: String,
+    app: tauri::AppHandle,
+) -> Result<serde_json::Value, String> {
     widgets::manager::destroy_widget_window(&app, &id)?;
     Ok(serde_json::json!({ "ok": true, "widget_id": id }))
 }
@@ -3545,7 +4319,9 @@ async fn cmd_get_conversation(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let convos = state.conversations.lock().await;
-    let chain = convos.iter().find(|c| c.id == id)
+    let chain = convos
+        .iter()
+        .find(|c| c.id == id)
         .ok_or_else(|| "Conversation not found".to_string())?;
     serde_json::to_value(chain).map_err(|e| e.to_string())
 }
@@ -3555,17 +4331,20 @@ async fn cmd_list_conversations(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let convos = state.conversations.lock().await;
-    let list: Vec<serde_json::Value> = convos.iter().map(|c| {
-        serde_json::json!({
-            "id": c.id,
-            "topic": c.topic,
-            "participants": c.participants,
-            "message_count": c.messages.len(),
-            "round": c.current_round(),
-            "status": c.status,
-            "created_at": c.created_at,
+    let list: Vec<serde_json::Value> = convos
+        .iter()
+        .map(|c| {
+            serde_json::json!({
+                "id": c.id,
+                "topic": c.topic,
+                "participants": c.participants,
+                "message_count": c.messages.len(),
+                "round": c.current_round(),
+                "status": c.status,
+                "created_at": c.created_at,
+            })
         })
-    }).collect();
+        .collect();
     Ok(serde_json::json!({ "conversations": list }))
 }
 
@@ -3578,7 +4357,9 @@ async fn cmd_add_conversation_message(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let mut convos = state.conversations.lock().await;
-    let chain = convos.iter_mut().find(|c| c.id == id)
+    let chain = convos
+        .iter_mut()
+        .find(|c| c.id == id)
         .ok_or_else(|| "Conversation not found".to_string())?;
 
     if chain.is_complete() {
@@ -3702,7 +4483,8 @@ async fn cmd_create_trigger_from_nl(
         trigger_type_str,
         &config_json,
         &config.task,
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
 
     Ok(serde_json::json!({
         "ok": true,
@@ -3776,7 +4558,7 @@ async fn cmd_memory_search(
             let db = state.db.lock().map_err(|e| e.to_string())?;
             memory::MemoryStore::load_embedded_memories(db.conn()).unwrap_or_default()
         }; // DB lock dropped here
-        // Step 2: generate query embedding (async, no DB lock held)
+           // Step 2: generate query embedding (async, no DB lock held)
         if !embedded.is_empty() {
             if let Ok(query_emb) = memory::store::get_embedding(&query, &api_key).await {
                 let scored = memory::MemoryStore::rank_by_similarity(embedded, &query_emb, lim);
@@ -3832,9 +4614,7 @@ async fn cmd_memory_forget_all(
 }
 
 #[tauri::command]
-async fn cmd_memory_stats(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+async fn cmd_memory_stats(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     memory::MemoryStore::stats(db.conn())
 }
@@ -4003,7 +4783,6 @@ async fn cmd_get_chain_interventions(
     Ok(serde_json::json!({ "interventions": interventions }))
 }
 
-
 // ── R55: File Understanding commands ──────────────────────────────────
 
 #[tauri::command]
@@ -4042,7 +4821,10 @@ async fn cmd_process_file(
     let preview = files::FileReader::read(p)?;
 
     let file_summary = match &preview.content {
-        files::reader::FileContent::Text { content, line_count } => {
+        files::reader::FileContent::Text {
+            content,
+            line_count,
+        } => {
             format!(
                 "File: {} ({} lines)
 ---
@@ -4050,7 +4832,11 @@ async fn cmd_process_file(
                 preview.name, line_count, content
             )
         }
-        files::reader::FileContent::Table { headers, rows, row_count } => {
+        files::reader::FileContent::Table {
+            headers,
+            rows,
+            row_count,
+        } => {
             let header_line = headers.join(" | ");
             let sample: Vec<String> = rows.iter().take(20).map(|r| r.join(" | ")).collect();
             format!(
@@ -4064,13 +4850,21 @@ Headers: {}
                 sample.join("\n")
             )
         }
-        files::reader::FileContent::Image { width, height, format, .. } => {
+        files::reader::FileContent::Image {
+            width,
+            height,
+            format,
+            ..
+        } => {
             format!(
                 "File: {} (image, {}x{}, {})",
                 preview.name, width, height, format
             )
         }
-        files::reader::FileContent::Binary { description, size_bytes } => {
+        files::reader::FileContent::Binary {
+            description,
+            size_bytes,
+        } => {
             format!(
                 "File: {} ({}, {} bytes)",
                 preview.name, description, size_bytes
@@ -4108,9 +4902,7 @@ Please complete the task based on the file content above.",
 // ── R58: Template Engine commands ──────────────────────────────────
 
 #[tauri::command]
-async fn cmd_get_templates(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+async fn cmd_get_templates(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let templates = state.template_engine.list()?;
     serde_json::to_value(&templates).map_err(|e| e.to_string())
 }
@@ -4171,9 +4963,7 @@ async fn cmd_delete_template(
 // ── R59: Agent Personas commands ──────────────────────────────────
 
 #[tauri::command]
-async fn cmd_list_personas(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+async fn cmd_list_personas(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let mut custom = personas::PersonaManager::list(db.conn())?;
     let defaults = personas::PersonaManager::get_defaults();
@@ -4211,7 +5001,8 @@ async fn cmd_create_persona(
     persona: serde_json::Value,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let mut p: personas::AgentPersona = serde_json::from_value(persona).map_err(|e| e.to_string())?;
+    let mut p: personas::AgentPersona =
+        serde_json::from_value(persona).map_err(|e| e.to_string())?;
     if p.id.is_empty() {
         p.id = uuid::Uuid::new_v4().to_string();
     }
@@ -4270,7 +5061,10 @@ async fn cmd_get_referral_link(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     // Use a hash of the db path as a stable anonymous user identifier
-    let user_id = format!("{:x}", md5_simple(state.db_path.to_string_lossy().as_bytes()));
+    let user_id = format!(
+        "{:x}",
+        md5_simple(state.db_path.to_string_lossy().as_bytes())
+    );
     let link = growth::ShareManager::create_referral_link(&user_id);
     Ok(serde_json::json!({ "referral_url": link }))
 }
@@ -4278,9 +5072,7 @@ async fn cmd_get_referral_link(
 // ── R61: Multi-User — user profiles, session management ───────────
 
 #[tauri::command]
-async fn cmd_list_users(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+async fn cmd_list_users(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let list = users::UserManager::list_users(db.conn())?;
     Ok(serde_json::json!({ "users": list }))
@@ -4343,9 +5135,7 @@ async fn cmd_login_user(
 }
 
 #[tauri::command]
-async fn cmd_logout_user(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+async fn cmd_logout_user(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     users::UserManager::logout(db.conn())?;
     Ok(serde_json::json!({ "ok": true }))
@@ -4359,6 +5149,70 @@ async fn cmd_get_pending_approvals(
 ) -> Result<serde_json::Value, String> {
     let pending = state.approval_manager.get_pending();
     Ok(serde_json::json!({ "approvals": pending }))
+}
+
+#[tauri::command]
+async fn cmd_permission_grant(
+    user_id: String,
+    capability: String,
+    allow: bool,
+    org_id: Option<String>,
+    agent_name: Option<String>,
+    reason: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let capability = approvals::PermissionCapability::from_str(&capability)?;
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    approvals::ApprovalManager::ensure_permission_tables(db.conn())?;
+    let grant = approvals::ApprovalManager::grant_permission(
+        db.conn(),
+        &user_id,
+        org_id.as_deref(),
+        agent_name.as_deref(),
+        capability,
+        allow,
+        reason.as_deref(),
+    )?;
+    serde_json::to_value(&grant).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_permission_list(
+    user_id: Option<String>,
+    capability: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let capability = capability
+        .as_deref()
+        .map(approvals::PermissionCapability::from_str)
+        .transpose()?;
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    approvals::ApprovalManager::ensure_permission_tables(db.conn())?;
+    approvals::ApprovalManager::seed_default_permissions(db.conn())?;
+    let grants = approvals::ApprovalManager::list_permissions(
+        db.conn(),
+        user_id.as_deref(),
+        capability,
+    )?;
+    Ok(serde_json::json!({ "grants": grants }))
+}
+
+#[tauri::command]
+async fn cmd_permission_check(
+    capability: String,
+    agent_name: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let capability = approvals::PermissionCapability::from_str(&capability)?;
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    approvals::ApprovalManager::ensure_permission_tables(db.conn())?;
+    approvals::ApprovalManager::seed_default_permissions(db.conn())?;
+    let decision = approvals::ApprovalManager::check_current_permission(
+        db.conn(),
+        capability,
+        agent_name.as_deref(),
+    )?;
+    serde_json::to_value(&decision).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -4379,9 +5233,7 @@ async fn cmd_respond_approval(
 }
 
 #[tauri::command]
-async fn cmd_classify_risk(
-    command: String,
-) -> Result<serde_json::Value, String> {
+async fn cmd_classify_risk(command: String) -> Result<serde_json::Value, String> {
     let risk = approvals::ApprovalManager::classify_risk(&command);
     Ok(serde_json::json!({ "command": command, "risk": risk }))
 }
@@ -4540,7 +5392,9 @@ async fn cmd_email_list(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let mgr = state.email_manager.lock().await;
-    let messages = mgr.list_messages_async(&folder, limit.unwrap_or(50)).await?;
+    let messages = mgr
+        .list_messages_async(&folder, limit.unwrap_or(50))
+        .await?;
     Ok(serde_json::json!({ "messages": messages }))
 }
 
@@ -4710,9 +5564,7 @@ async fn cmd_db_remove(
 }
 
 #[tauri::command]
-async fn cmd_db_list(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+async fn cmd_db_list(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let mgr = state.database_manager.lock().await;
     let connections = mgr.list_connections();
     Ok(serde_json::json!({ "connections": connections }))
@@ -4831,21 +5683,27 @@ async fn cmd_sandbox_available() -> Result<serde_json::Value, String> {
 async fn cmd_sandbox_run(
     config: serde_json::Value,
     command: String,
+    state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let cfg: sandbox::SandboxConfig =
-        serde_json::from_value(config).map_err(|e| e.to_string())?;
+    let _decision = enforce_permission(&state, approvals::PermissionCapability::SandboxManage, None)?;
+    let cfg: sandbox::SandboxConfig = serde_json::from_value(config).map_err(|e| e.to_string())?;
     let result = sandbox::SandboxManager::create_sandbox(&cfg, &command).await?;
     serde_json::to_value(&result).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-async fn cmd_sandbox_list() -> Result<serde_json::Value, String> {
+async fn cmd_sandbox_list(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let _decision = enforce_permission(&state, approvals::PermissionCapability::SandboxManage, None)?;
     let containers = sandbox::SandboxManager::list_running().await?;
     serde_json::to_value(&containers).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-async fn cmd_sandbox_kill(id: String) -> Result<serde_json::Value, String> {
+async fn cmd_sandbox_kill(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let _decision = enforce_permission(&state, approvals::PermissionCapability::SandboxManage, None)?;
     sandbox::SandboxManager::kill_sandbox(&id).await?;
     Ok(serde_json::json!({ "ok": true }))
 }
@@ -4863,7 +5721,8 @@ async fn cmd_marketplace_list_agents(
         .map(|p| {
             let installed = marketplace::AgentMarketplace::is_installed(db.conn(), &p.id);
             let mut v = serde_json::to_value(p).unwrap_or_default();
-            v.as_object_mut().map(|o| o.insert("installed".into(), serde_json::json!(installed)));
+            v.as_object_mut()
+                .map(|o| o.insert("installed".into(), serde_json::json!(installed)));
             v
         })
         .collect();
@@ -4882,7 +5741,8 @@ async fn cmd_marketplace_search_agents(
         .map(|p| {
             let installed = marketplace::AgentMarketplace::is_installed(db.conn(), &p.id);
             let mut v = serde_json::to_value(p).unwrap_or_default();
-            v.as_object_mut().map(|o| o.insert("installed".into(), serde_json::json!(installed)));
+            v.as_object_mut()
+                .map(|o| o.insert("installed".into(), serde_json::json!(installed)));
             v
         })
         .collect();
@@ -4932,9 +5792,7 @@ async fn cmd_team_create(
 }
 
 #[tauri::command]
-async fn cmd_team_list(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+async fn cmd_team_list(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let conn = open_enterprise_conn(&state.db_path)?;
     teams::TeamManager::ensure_tables(&conn)?;
     let teams_list = teams::TeamManager::list_teams(&conn)?;
@@ -4998,7 +5856,8 @@ async fn cmd_team_share_resource(
 ) -> Result<serde_json::Value, String> {
     let conn = open_enterprise_conn(&state.db_path)?;
     teams::TeamManager::ensure_tables(&conn)?;
-    let resource = teams::TeamManager::share_resource(&conn, &team_id, &resource_type, &resource_id)?;
+    let resource =
+        teams::TeamManager::share_resource(&conn, &team_id, &resource_type, &resource_id)?;
     serde_json::to_value(&resource).map_err(|e| e.to_string())
 }
 
@@ -5063,9 +5922,7 @@ async fn cmd_scim_sync() -> Result<serde_json::Value, String> {
 // ── R71: Visual Workflow Builder commands ────────────────────────────
 
 #[tauri::command]
-async fn cmd_workflow_list(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+async fn cmd_workflow_list(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let conn = open_enterprise_conn(&state.db_path)?;
     workflows::WorkflowEngine::ensure_tables(&conn)?;
     let list = workflows::WorkflowEngine::list(&conn)?;
@@ -5133,19 +5990,13 @@ async fn cmd_webhook_create(
 ) -> Result<serde_json::Value, String> {
     let conn = open_enterprise_conn(&state.db_path)?;
     webhooks::WebhookManager::ensure_tables(&conn)?;
-    let trigger = webhooks::WebhookManager::create_trigger(
-        &conn,
-        &name,
-        &task_template,
-        filter.as_deref(),
-    )?;
+    let trigger =
+        webhooks::WebhookManager::create_trigger(&conn, &name, &task_template, filter.as_deref())?;
     serde_json::to_value(&trigger).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-async fn cmd_webhook_list(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+async fn cmd_webhook_list(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let conn = open_enterprise_conn(&state.db_path)?;
     webhooks::WebhookManager::ensure_tables(&conn)?;
     let triggers = webhooks::WebhookManager::list_triggers(&conn)?;
@@ -5218,9 +6069,7 @@ async fn cmd_ft_status(
 }
 
 #[tauri::command]
-async fn cmd_ft_list_jobs(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+async fn cmd_ft_list_jobs(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let conn = open_enterprise_conn(&state.db_path)?;
     let jobs = training::FineTuneManager::list_jobs(&conn)?;
     Ok(serde_json::json!({ "jobs": jobs }))
@@ -5238,58 +6087,55 @@ async fn cmd_test_list_suites() -> Result<serde_json::Value, String> {
 async fn cmd_test_run_suite(
     suite_json: String,
     state: tauri::State<'_, AppState>,
-    app_handle: tauri::AppHandle,
 ) -> Result<serde_json::Value, String> {
     let suite: testing::TestSuite =
         serde_json::from_str(&suite_json).map_err(|e| format!("Invalid suite JSON: {}", e))?;
-    let settings = {
-        let s = state.settings.lock().map_err(|e| e.to_string())?;
-        s.clone()
-    };
-    let kill_switch = state.kill_switch.clone();
-    let screenshots_dir = state.screenshots_dir.clone();
-    let results = testing::TestRunner::run_suite(
-        &suite,
-        &settings,
-        &kill_switch,
-        &screenshots_dir,
-        &state.db_path,
-        &app_handle,
-    )
-    .await;
-    serde_json::to_value(&results).map_err(|e| e.to_string())
+    let summary = testing::TestRunner::run_suite(&suite).await;
+    let conn = open_enterprise_conn(&state.db_path)?;
+    testing::TestRunner::persist_run(&conn, &summary)?;
+    serde_json::to_value(&summary).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn cmd_test_run_single(
     test_json: String,
     state: tauri::State<'_, AppState>,
-    app_handle: tauri::AppHandle,
 ) -> Result<serde_json::Value, String> {
     let test_case: testing::TestCase =
         serde_json::from_str(&test_json).map_err(|e| format!("Invalid test JSON: {}", e))?;
-    let settings = {
-        let s = state.settings.lock().map_err(|e| e.to_string())?;
-        s.clone()
+    let result = testing::TestRunner::run_single(&test_case).await;
+    let summary = testing::TestRunSummary {
+        run_id: uuid::Uuid::new_v4().to_string(),
+        suite_id: "suite-single".to_string(),
+        suite_name: format!("Single Test: {}", test_case.name),
+        status: result.status.clone(),
+        total_cases: 1,
+        passed_count: usize::from(result.status == "pass"),
+        failed_count: usize::from(result.status == "fail"),
+        warning_count: usize::from(result.status == "warning"),
+        duration_ms: result.duration_ms,
+        created_at: chrono::Utc::now().to_rfc3339(),
+        results: vec![result],
     };
-    let kill_switch = state.kill_switch.clone();
-    let screenshots_dir = state.screenshots_dir.clone();
-    let result = testing::TestRunner::run_single(
-        &test_case,
-        &settings,
-        &kill_switch,
-        &screenshots_dir,
-        &state.db_path,
-        &app_handle,
-    )
-    .await;
-    serde_json::to_value(&result).map_err(|e| e.to_string())
+    let conn = open_enterprise_conn(&state.db_path)?;
+    testing::TestRunner::persist_run(&conn, &summary)?;
+    serde_json::to_value(&summary).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn cmd_test_create_template() -> Result<serde_json::Value, String> {
     let template = testing::TestRunner::create_template();
     serde_json::to_value(&template).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_test_history(
+    limit: Option<usize>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    let history = testing::TestRunner::list_history(&conn, limit.unwrap_or(20))?;
+    serde_json::to_value(&history).map_err(|e| e.to_string())
 }
 
 // ── R75: Playbook Version Control commands ────────────────────────
@@ -5312,7 +6158,14 @@ async fn cmd_playbook_save_version(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let conn = open_enterprise_conn(&state.db_path)?;
-    let version = playbooks::VersionStore::save_version(&conn, &playbook_id, &content, &message, "user", "main")?;
+    let version = playbooks::VersionStore::save_version(
+        &conn,
+        &playbook_id,
+        &content,
+        &message,
+        "user",
+        "main",
+    )?;
     serde_json::to_value(&version).map_err(|e| e.to_string())
 }
 
@@ -5407,7 +6260,10 @@ async fn cmd_generate_widget_snippet(
 ) -> Result<serde_json::Value, String> {
     // Store the config for future reference
     {
-        let mut cfg = state.embed_widget_config.lock().map_err(|e| e.to_string())?;
+        let mut cfg = state
+            .embed_widget_config
+            .lock()
+            .map_err(|e| e.to_string())?;
         *cfg = config.clone();
     }
     let snippet = widget::EmbedGenerator::generate_snippet(&config);
@@ -5430,6 +6286,8 @@ async fn cmd_terminal_execute(
     command: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    let _decision =
+        enforce_permission(&state, approvals::PermissionCapability::TerminalExecute, None)?;
     let mut terminal = state.smart_terminal.lock().await;
     let output = terminal.execute(&command).await?;
     serde_json::to_value(&output).map_err(|e| e.to_string())
@@ -5486,6 +6344,8 @@ async fn cmd_plugin_invoke_method(
     args: serde_json::Value,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    let _decision =
+        enforce_permission(&state, approvals::PermissionCapability::PluginExecute, Some(&name))?;
     let api = state.extension_api_v2.lock().await;
     api.invoke_plugin_method(&name, &method, &args)
 }
@@ -5508,6 +6368,8 @@ async fn cmd_plugin_storage_set(
     value: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    let _decision =
+        enforce_permission(&state, approvals::PermissionCapability::PluginExecute, Some(&name))?;
     let api = state.extension_api_v2.lock().await;
     api.plugin_storage_set(&name, &key, &value)?;
     Ok(serde_json::json!({ "ok": true, "plugin": name, "key": key }))
@@ -5554,7 +6416,10 @@ async fn cmd_supported_languages(
 async fn cmd_get_accessibility(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let mgr = state.accessibility_manager.lock().map_err(|e| e.to_string())?;
+    let mgr = state
+        .accessibility_manager
+        .lock()
+        .map_err(|e| e.to_string())?;
     let config = mgr.get_config();
     serde_json::to_value(config).map_err(|e| e.to_string())
 }
@@ -5564,7 +6429,10 @@ async fn cmd_set_accessibility(
     config: accessibility::AccessibilityConfig,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let mut mgr = state.accessibility_manager.lock().map_err(|e| e.to_string())?;
+    let mut mgr = state
+        .accessibility_manager
+        .lock()
+        .map_err(|e| e.to_string())?;
     mgr.update_config(config);
     let updated = mgr.get_config();
     serde_json::to_value(updated).map_err(|e| e.to_string())
@@ -5574,9 +6442,74 @@ async fn cmd_set_accessibility(
 async fn cmd_get_accessibility_css(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let mgr = state.accessibility_manager.lock().map_err(|e| e.to_string())?;
+    let mgr = state
+        .accessibility_manager
+        .lock()
+        .map_err(|e| e.to_string())?;
     let css = mgr.get_css_overrides();
     Ok(serde_json::json!({ "css": css }))
+}
+
+#[tauri::command]
+async fn cmd_accessibility_describe_screen(
+    speak_feedback: Option<bool>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let summary = describe_accessible_screen(&state).await?;
+    let spoken = maybe_speak_feedback(&summary.narration, speak_feedback.unwrap_or(false)).await?;
+    Ok(serde_json::json!({
+        "summary": summary,
+        "spoken": spoken,
+    }))
+}
+
+#[tauri::command]
+async fn cmd_accessibility_run_voice_command(
+    command: String,
+    speak_feedback: Option<bool>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let plan = {
+        let mgr = state
+            .accessibility_manager
+            .lock()
+            .map_err(|e| e.to_string())?;
+        mgr.plan_voice_command(&command)
+    };
+    let response = execute_accessibility_plan(&plan, &state).await?;
+    let spoken = maybe_speak_feedback(&response, speak_feedback.unwrap_or(false)).await?;
+
+    Ok(serde_json::json!({
+        "plan": plan,
+        "response": response,
+        "spoken": spoken,
+    }))
+}
+
+#[tauri::command]
+async fn cmd_accessibility_run_voice_command_audio(
+    audio_base64: String,
+    language: Option<String>,
+    speak_feedback: Option<bool>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let transcript = transcribe_accessibility_audio(audio_base64, language, &state).await?;
+    let plan = {
+        let mgr = state
+            .accessibility_manager
+            .lock()
+            .map_err(|e| e.to_string())?;
+        mgr.plan_voice_command(&transcript)
+    };
+    let response = execute_accessibility_plan(&plan, &state).await?;
+    let spoken = maybe_speak_feedback(&response, speak_feedback.unwrap_or(false)).await?;
+
+    Ok(serde_json::json!({
+        "transcript": transcript,
+        "plan": plan,
+        "response": response,
+        "spoken": spoken,
+    }))
 }
 
 // ── R88: Industry Verticals commands ─────────────────────────────
@@ -5623,6 +6556,81 @@ async fn cmd_get_active_vertical(
     }
 }
 
+#[tauri::command]
+fn cmd_get_platform_support(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    Ok(serde_json::json!({
+        "platform": state.platform.name(),
+        "os_version": state.platform.os_version(),
+        "default_shell": state.platform.default_shell(),
+        "capabilities": {
+            "screen_capture": state.platform.can_capture_screen(),
+            "input_control": state.platform.can_control_input(),
+            "core_chat": true,
+            "billing": true,
+            "calendar": true,
+            "gmail": true,
+            "memory_rag": true,
+            "swarm": true,
+        },
+        "windows_only": [
+            "pc_control",
+            "ui_automation",
+            "windows_ocr",
+            "desktop_widget_windowing"
+        ],
+        "limited_cross_platform": [
+            "screen_capture",
+            "input_control",
+            "voice_tts"
+        ]
+    }))
+}
+
+#[tauri::command]
+async fn cmd_vertical_get_playbook(id: String) -> Result<serde_json::Value, String> {
+    let playbook = match id.as_str() {
+        "accounting" => verticals::AccountingEngine::month_close_playbook(),
+        "legal" => verticals::LegalSuite::case_intake_playbook(),
+        _ => return Err(format!("No pack playbook registered for '{}'", id)),
+    };
+    serde_json::to_value(playbook).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_vertical_run_workflow(
+    id: String,
+    payload: serde_json::Value,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    match id.as_str() {
+        "accounting" => {
+            let request: Vec<verticals::accounting::AccountingWorkflowTransaction> =
+                serde_json::from_value(
+                    payload
+                        .get("transactions")
+                        .cloned()
+                        .ok_or("Missing 'transactions' payload for accounting pack")?,
+                )
+                .map_err(|e| e.to_string())?;
+            let period = payload
+                .get("period")
+                .and_then(|value| value.as_str())
+                .ok_or("Missing 'period' payload for accounting pack")?;
+            let mut engine = state.accounting_engine.lock().await;
+            Ok(engine.run_month_close_workflow(period, request))
+        }
+        "legal" => {
+            let request: verticals::legal::LegalIntakeRequest =
+                serde_json::from_value(payload).map_err(|e| e.to_string())?;
+            let mut suite = state.legal_suite.lock().await;
+            suite.run_case_intake_workflow(request)
+        }
+        _ => Err(format!("No pack workflow registered for '{}'", id)),
+    }
+}
+
 // ── R89: Offline First commands ──────────────────────────────────
 
 #[tauri::command]
@@ -5631,7 +6639,10 @@ async fn cmd_check_connectivity(
 ) -> Result<serde_json::Value, String> {
     let mut mgr = state.offline_manager.lock().await;
     let online = mgr.check_connectivity().await;
-    Ok(serde_json::json!({ "is_online": online }))
+    Ok(serde_json::json!({
+        "is_online": online,
+        "status": mgr.get_status(),
+    }))
 }
 
 #[tauri::command]
@@ -5644,12 +6655,69 @@ async fn cmd_get_offline_status(
 }
 
 #[tauri::command]
-async fn cmd_sync_offline(
+async fn cmd_sync_offline(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let pending = {
+        let mgr = state.offline_manager.lock().await;
+        mgr.can_sync()?;
+        mgr.get_pending_sync()
+    };
+
+    let mut synced = 0u32;
+    let mut failed = 0u32;
+    let mut last_error = None;
+
+    for item in pending {
+        let sync_result = match item.action.as_str() {
+            "crossapp_csv_workflow" => {
+                let mut bridge = state.crossapp_bridge.lock().await;
+                bridge
+                    .run_csv_to_email_calendar(&item.payload)
+                    .await
+                    .and_then(|run| serde_json::to_string(&run).map_err(|e| e.to_string()))
+            }
+            other => Err(format!("Unsupported offline sync action '{}'", other)),
+        };
+
+        match sync_result {
+            Ok(response) => {
+                {
+                    let mut mgr = state.offline_manager.lock().await;
+                    let db = state.db.lock().map_err(|e| e.to_string())?;
+                    mgr.cache_response(db.conn(), item.action.clone(), response)?;
+                    mgr.mark_sync_success(db.conn(), &item.id)?;
+                }
+                synced += 1;
+            }
+            Err(error) => {
+                let mut mgr = state.offline_manager.lock().await;
+                let db = state.db.lock().map_err(|e| e.to_string())?;
+                mgr.mark_sync_failure(db.conn(), &item.id, format!("{}: {}", item.id, error))?;
+                failed += 1;
+                last_error = Some(error);
+            }
+        }
+    }
+
+    let status = {
+        let mgr = state.offline_manager.lock().await;
+        mgr.get_status()
+    };
+    Ok(serde_json::json!({
+        "synced": synced,
+        "failed": failed,
+        "last_error": last_error,
+        "status": status,
+    }))
+}
+
+#[tauri::command]
+async fn cmd_recovery_report(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let mut mgr = state.offline_manager.lock().await;
-    let synced = mgr.sync_when_online()?;
-    Ok(serde_json::json!({ "synced": synced, "status": mgr.get_status() }))
+    let mgr = state.offline_manager.lock().await;
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let report = mgr.recovery_report(db.conn())?;
+    serde_json::to_value(&report).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -5664,12 +6732,19 @@ async fn cmd_get_cached_response(
     }
 }
 
+#[tauri::command]
+async fn cmd_set_connectivity_override(
+    forced_online: Option<bool>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.offline_manager.lock().await;
+    serde_json::to_value(mgr.set_connectivity_override(forced_online)).map_err(|e| e.to_string())
+}
+
 // ── R81: On-Device AI commands ────────────────────────────────────
 
 #[tauri::command]
-async fn cmd_ondevice_list(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+async fn cmd_ondevice_list(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let engine = state.ondevice_engine.lock().await;
     let models = engine.list_models();
     serde_json::to_value(&models).map_err(|e| e.to_string())
@@ -5721,31 +6796,130 @@ async fn cmd_ondevice_status(
 async fn cmd_process_multimodal(
     input_type: String,
     data: Option<String>,
+    task: Option<String>,
     state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<serde_json::Value, String> {
     let processor = &state.input_processor;
+    let raw_data = data.unwrap_or_default();
     let input = match input_type.as_str() {
-        "text" => multimodal::MultimodalInput::Text(data.unwrap_or_default()),
+        "text" => multimodal::MultimodalInput::Text(raw_data.clone()),
         "clipboard" => multimodal::MultimodalInput::Clipboard,
         "image" => {
             let bytes = base64::engine::general_purpose::STANDARD
-                .decode(data.unwrap_or_default().as_bytes())
+                .decode(raw_data.as_bytes())
                 .map_err(|e| format!("Invalid base64 image: {}", e))?;
             multimodal::MultimodalInput::Image(bytes)
         }
         "audio" => {
             let bytes = base64::engine::general_purpose::STANDARD
-                .decode(data.unwrap_or_default().as_bytes())
+                .decode(raw_data.as_bytes())
                 .map_err(|e| format!("Invalid base64 audio: {}", e))?;
             multimodal::MultimodalInput::Audio(bytes)
         }
-        "file" => {
-            multimodal::MultimodalInput::File(std::path::PathBuf::from(data.unwrap_or_default()))
-        }
+        "file" => multimodal::MultimodalInput::File(std::path::PathBuf::from(raw_data)),
         _ => return Err(format!("Unknown input type: {}", input_type)),
     };
-    let processed = processor.process(&input)?;
-    serde_json::to_value(&processed).map_err(|e| e.to_string())
+    let mut processed = processor.process(&input)?;
+
+    match &input {
+        multimodal::MultimodalInput::Image(bytes) => {
+            let temp_path = std::env::temp_dir()
+                .join(format!("agentos_multimodal_{}.img", uuid::Uuid::new_v4()));
+            std::fs::write(&temp_path, bytes).map_err(|e| e.to_string())?;
+            let ocr_text = eyes::ocr::OCREngine::extract_text(&temp_path.to_string_lossy()).await;
+            let _ = std::fs::remove_file(&temp_path);
+            if !ocr_text.trim().is_empty() {
+                processed.text_content = format!(
+                    "{}\nOCR text extracted from image:\n{}",
+                    processed.text_content, ocr_text
+                );
+                processed.metadata["ocr_text"] = serde_json::json!(ocr_text);
+            }
+        }
+        multimodal::MultimodalInput::Audio(bytes) => {
+            let settings = {
+                let s = state.settings.lock().map_err(|e| e.to_string())?;
+                s.clone()
+            };
+            if !settings.openai_api_key.is_empty() {
+                let transcript = voice::SpeechToText::new()
+                    .transcribe(bytes, &settings.openai_api_key, None)
+                    .await?;
+                processed.text_content = format!("Audio transcript:\n{}", transcript);
+                processed.support_status = "supported".to_string();
+                processed.metadata["transcript_source"] = serde_json::json!("openai_whisper");
+                processed.metadata["transcript_text"] = serde_json::json!(transcript);
+            } else {
+                processed.support_status = "requires_openai_whisper".to_string();
+                processed.metadata["fallback_reason"] =
+                    serde_json::json!("OpenAI API key not configured for audio transcription");
+            }
+        }
+        multimodal::MultimodalInput::File(path) => {
+            let extension = path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .unwrap_or_default()
+                .to_lowercase();
+            if ["png", "jpg", "jpeg", "gif", "bmp", "webp"].contains(&extension.as_str()) {
+                let ocr_text = eyes::ocr::OCREngine::extract_text(&path.to_string_lossy()).await;
+                if !ocr_text.trim().is_empty() {
+                    processed.text_content = format!(
+                        "{}\nOCR text extracted from file image:\n{}",
+                        processed.text_content, ocr_text
+                    );
+                    processed.metadata["ocr_text"] = serde_json::json!(ocr_text);
+                }
+            }
+        }
+        _ => {}
+    }
+
+    let agent_response = if let Some(task_text) = task {
+        let settings = {
+            let s = state.settings.lock().map_err(|e| e.to_string())?;
+            s.clone()
+        };
+
+        if processed.input_type == "image" {
+            if let Some(image_b64) = processed.base64_data.as_ref() {
+                let prompt = format!(
+                    "{}\n\nMultimodal image metadata:\n{}",
+                    task_text, processed.text_content
+                );
+                let gateway = state.gateway.lock().await;
+                Some(
+                    serde_json::to_value(
+                        gateway
+                            .complete_with_vision(&prompt, image_b64, &settings)
+                            .await?,
+                    )
+                    .map_err(|e| e.to_string())?,
+                )
+            } else {
+                None
+            }
+        } else if processed.support_status == "requires_openai_whisper" {
+            Some(serde_json::json!({
+                "error": "Audio transcription requires OpenAI API key configuration.",
+                "processed_input": processed.clone(),
+            }))
+        } else {
+            let prompt = format!(
+                "{}\n\nNormalized multimodal input:\n{}",
+                task_text, processed.text_content
+            );
+            Some(cmd_process_message(state, app_handle, prompt).await?)
+        }
+    } else {
+        None
+    };
+
+    Ok(serde_json::json!({
+        "processed": processed,
+        "agent_response": agent_response,
+    }))
 }
 
 #[tauri::command]
@@ -5759,9 +6933,7 @@ async fn cmd_capture_clipboard(
 }
 
 #[tauri::command]
-async fn cmd_detect_input_type(
-    data_base64: String,
-) -> Result<serde_json::Value, String> {
+async fn cmd_detect_input_type(data_base64: String) -> Result<serde_json::Value, String> {
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(data_base64.as_bytes())
         .map_err(|e| format!("Invalid base64: {}", e))?;
@@ -5823,9 +6995,7 @@ async fn cmd_crossapp_register(
 }
 
 #[tauri::command]
-async fn cmd_crossapp_list(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+async fn cmd_crossapp_list(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let bridge = state.crossapp_bridge.lock().await;
     let apps = bridge.list_apps();
     serde_json::to_value(&apps).map_err(|e| e.to_string())
@@ -5853,6 +7023,58 @@ async fn cmd_crossapp_status(
     serde_json::to_value(&status).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+async fn cmd_crossapp_run_csv_workflow(
+    csv_text: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let is_online = {
+        let mgr = state.offline_manager.lock().await;
+        mgr.get_status().is_online
+    };
+
+    if !is_online {
+        let mut mgr = state.offline_manager.lock().await;
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let queued =
+            mgr.queue_for_sync(db.conn(), "crossapp_csv_workflow".to_string(), csv_text)?;
+        let status = mgr.get_status();
+        return Ok(serde_json::json!({
+            "queued": true,
+            "pending_item": queued,
+            "status": status,
+        }));
+    }
+
+    let run = {
+        let mut bridge = state.crossapp_bridge.lock().await;
+        bridge.run_csv_to_email_calendar(&csv_text).await?
+    };
+
+    {
+        let mut mgr = state.offline_manager.lock().await;
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        mgr.cache_response(
+            db.conn(),
+            "crossapp_csv_workflow".to_string(),
+            serde_json::to_string(&run).map_err(|e| e.to_string())?,
+        )?;
+    }
+
+    Ok(serde_json::json!({
+        "queued": false,
+        "run": run,
+    }))
+}
+
+#[tauri::command]
+async fn cmd_crossapp_history(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let bridge = state.crossapp_bridge.lock().await;
+    serde_json::to_value(bridge.workflow_history()).map_err(|e| e.to_string())
+}
+
 // ── R85: Agent Swarm commands ────────────────────────────────────
 
 #[tauri::command]
@@ -5862,8 +7084,21 @@ async fn cmd_swarm_create(
     strategy: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    let (max_concurrency, timeout_ms) = {
+        let settings = state.settings.lock().map_err(|e| e.to_string())?;
+        (
+            settings.swarm_max_concurrency.clamp(1, 5),
+            settings.cli_timeout.saturating_mul(1000),
+        )
+    };
     let mut coordinator = state.swarm_coordinator.lock().await;
-    let task = coordinator.create_swarm_task(&description, agents, &strategy);
+    let task = coordinator.create_swarm_task(
+        &description,
+        agents,
+        &strategy,
+        max_concurrency,
+        timeout_ms,
+    )?;
     serde_json::to_value(&task).map_err(|e| e.to_string())
 }
 
@@ -5872,13 +7107,25 @@ async fn cmd_swarm_execute(
     task_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let mut coordinator = state.swarm_coordinator.lock().await;
     let settings = {
-        let s = state.settings.lock().map_err(|e| e.to_string())?;
-        s.clone()
+        let settings = state.settings.lock().map_err(|e| e.to_string())?;
+        settings.clone()
     };
-    let task = coordinator.execute(&task_id, &settings, &state.db_path).await?;
-    serde_json::to_value(&task).map_err(|e| e.to_string())
+    let coordinator = state.swarm_coordinator.clone();
+    {
+        let mut swarm = coordinator.lock().await;
+        swarm.start_execution(&task_id)?;
+        let snapshot = swarm.get_results(&task_id)?;
+        drop(swarm);
+        tauri::async_runtime::spawn(async move {
+            if let Err(error) =
+                swarm::execute_started_swarm_task(coordinator, task_id, settings).await
+            {
+                tracing::warn!(error = %error, "Swarm background execution failed");
+            }
+        });
+        return serde_json::to_value(&snapshot).map_err(|e| e.to_string());
+    }
 }
 
 #[tauri::command]
@@ -5888,7 +7135,7 @@ async fn cmd_swarm_results(
 ) -> Result<serde_json::Value, String> {
     let coordinator = state.swarm_coordinator.lock().await;
     let task = coordinator.get_results(&task_id)?;
-    let consensus = task.consensus.clone();
+    let consensus = swarm::SwarmCoordinator::vote_consensus(&task.results);
     Ok(serde_json::json!({
         "task": task,
         "consensus": consensus,
@@ -5896,12 +7143,20 @@ async fn cmd_swarm_results(
 }
 
 #[tauri::command]
-async fn cmd_swarm_list(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+async fn cmd_swarm_list(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let coordinator = state.swarm_coordinator.lock().await;
     let tasks = coordinator.list_tasks();
     serde_json::to_value(&tasks).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_swarm_cancel(
+    task_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut coordinator = state.swarm_coordinator.lock().await;
+    let task = coordinator.request_cancel(&task_id)?;
+    serde_json::to_value(&task).map_err(|e| e.to_string())
 }
 
 // ── R96: Agent Debugger commands ──────────────────────────────────
@@ -5909,12 +7164,13 @@ async fn cmd_swarm_list(
 #[tauri::command]
 async fn cmd_debugger_start_trace(
     task_id: String,
+    agent_name: Option<String>,
+    model: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
-    db.ensure_execution_trace(&task_id, &task_id, "manual")
-        .map_err(|e| e.to_string())?;
-    Ok(serde_json::json!({ "trace_id": task_id, "task_id": task_id }))
+    let dbg = state.agent_debugger.lock().await;
+    let trace_id = dbg.start_trace(&task_id, agent_name.as_deref(), model.as_deref())?;
+    Ok(serde_json::json!({ "trace_id": trace_id, "task_id": task_id }))
 }
 
 #[tauri::command]
@@ -5922,44 +7178,49 @@ async fn cmd_debugger_get_trace(
     trace_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
-    db.get_execution_trace(&trace_id).map_err(|e| e.to_string())
+    let dbg = state.agent_debugger.lock().await;
+    match dbg.get_trace(&trace_id)? {
+        Some(trace) => serde_json::to_value(trace).map_err(|e| e.to_string()),
+        None => Err(format!("Trace not found: {}", trace_id)),
+    }
 }
 
 #[tauri::command]
 async fn cmd_debugger_list_traces(
     limit: Option<usize>,
+    task_id: Option<String>,
+    agent_name: Option<String>,
+    status: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
-    db.list_execution_traces(limit.unwrap_or(20))
-        .map_err(|e| e.to_string())
+    let dbg = state.agent_debugger.lock().await;
+    let traces = dbg.list_traces(
+        limit.unwrap_or(20),
+        task_id.as_deref(),
+        agent_name.as_deref(),
+        status.as_deref(),
+    )?;
+    serde_json::to_value(&traces).map_err(|e| e.to_string())
 }
 
 // ── R97: Revenue Optimization commands ──────────────────────────────
 
 #[tauri::command]
-fn cmd_revenue_metrics(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+fn cmd_revenue_metrics(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let metrics = state.revenue_optimizer.calculate_metrics(db.conn());
     serde_json::to_value(&metrics).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn cmd_churn_predictions(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+fn cmd_churn_predictions(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let risks = state.revenue_optimizer.predict_churn(db.conn());
     serde_json::to_value(&risks).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn cmd_upsell_candidates(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+fn cmd_upsell_candidates(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let candidates = state.revenue_optimizer.get_upsell_candidates(db.conn());
     serde_json::to_value(&candidates).map_err(|e| e.to_string())
@@ -5967,78 +7228,31 @@ fn cmd_upsell_candidates(
 
 // ── R98: Global Infrastructure commands ─────────────────────────────
 
-fn build_infra_probes(state: &tauri::State<'_, AppState>) -> Result<Vec<infrastructure::ProbeTarget>, String> {
-    let mut probes = Vec::new();
-
-    probes.push(infrastructure::ProbeTarget {
-        region: "local-db".to_string(),
-        endpoint: state.db_path.to_string_lossy().to_string(),
-        probe_type: "file_exists".to_string(),
-    });
-
-    let settings = state.settings.lock().map_err(|e| e.to_string())?;
-    if !settings.local_llm_url.trim().is_empty() {
-        probes.push(infrastructure::ProbeTarget {
-            region: "local-llm".to_string(),
-            endpoint: settings.local_llm_url.clone(),
-            probe_type: "tcp".to_string(),
-        });
-    }
-    if !settings.relay_server_url.trim().is_empty() {
-        probes.push(infrastructure::ProbeTarget {
-            region: "relay".to_string(),
-            endpoint: settings.relay_server_url.clone(),
-            probe_type: "tcp".to_string(),
-        });
-    }
-    drop(settings);
-
-    let api_enabled = *state.api_enabled.lock().map_err(|e| e.to_string())?;
-    if api_enabled {
-        probes.push(infrastructure::ProbeTarget {
-            region: "local-api".to_string(),
-            endpoint: format!("127.0.0.1:{}", state.api_port),
-            probe_type: "tcp".to_string(),
-        });
-    }
-
-    Ok(probes)
-}
-
 #[tauri::command]
-fn cmd_infra_status(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
-    let probes = build_infra_probes(&state)?;
-    let status = state.infra_monitor.check_regions(&probes);
+fn cmd_infra_status(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let status = state.infra_monitor.check_regions(&[]);
     serde_json::to_value(&status).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn cmd_infra_check_regions(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
-    let probes = build_infra_probes(&state)?;
-    let data = state.infra_monitor.get_status_page_data(&probes);
+fn cmd_infra_check_regions(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let data = state.infra_monitor.get_status_page_data(&[]);
     Ok(data)
 }
 
 // ── R99: IPO Readiness commands ─────────────────────────────────────
 
 #[tauri::command]
-fn cmd_investor_metrics(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+fn cmd_investor_metrics(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let metrics = state.ipo_dashboard.calculate_metrics(db.conn());
     serde_json::to_value(&metrics).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn cmd_data_room(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
-    let docs = state.ipo_dashboard.generate_data_room_index();
+fn cmd_data_room(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let docs = state.ipo_dashboard.generate_data_room_index(db.conn());
     serde_json::to_value(&docs).map_err(|e| e.to_string())
 }
 
@@ -6048,16 +7262,39 @@ fn cmd_financial_projections(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    let projections = state.ipo_dashboard.get_projections(db.conn(), years.unwrap_or(5));
+    let projections = state
+        .ipo_dashboard
+        .get_projections(db.conn(), years.unwrap_or(5));
     serde_json::to_value(&projections).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn cmd_readiness_artifacts(
+fn cmd_category_demos(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let demos = state.ipo_dashboard.get_category_demos(db.conn());
+    serde_json::to_value(&demos).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn cmd_definitive_readiness(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let artifacts = state.ipo_dashboard.get_readiness_artifacts();
-    serde_json::to_value(&artifacts).map_err(|e| e.to_string())
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let report = state.ipo_dashboard.definitive_readiness(db.conn());
+    serde_json::to_value(&report).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn cmd_reliability_report(
+    window_days: Option<u32>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let report = observability::HealthDashboard::reliability_report(
+        db.conn(),
+        window_days.unwrap_or(30),
+    );
+    serde_json::to_value(&report).map_err(|e| e.to_string())
 }
 
 /// Simple non-cryptographic hash for referral IDs (not security-sensitive).
@@ -6070,68 +7307,254 @@ fn md5_simple(data: &[u8]) -> u64 {
     hash
 }
 
+fn focus_main_window(app_handle: &tauri::AppHandle) {
+    if let Some(window) = app_handle.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+fn pricing_copy_variant(plan: &str) -> &'static str {
+    match plan {
+        "team" => "team-collaboration",
+        "pro" => "limit-focused",
+        _ => "control",
+    }
+}
+
+fn log_revenue_event(db_path: &std::path::Path, event_type: &str, details: serde_json::Value) {
+    if let Ok(conn) = rusqlite::Connection::open(db_path) {
+        let _ = enterprise::AuditLog::ensure_table(&conn);
+        let _ = enterprise::AuditLog::log(&conn, event_type, details);
+    }
+}
+
+fn collect_federated_metrics(conn: &rusqlite::Connection) -> Vec<(&'static str, f64, u64)> {
+    let total_tasks = conn
+        .query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get::<_, i64>(0))
+        .unwrap_or(0)
+        .max(0) as u64;
+    let completed_tasks = conn
+        .query_row(
+            "SELECT COUNT(*) FROM tasks WHERE status = 'completed'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+        .max(0) as u64;
+    let failed_tasks = conn
+        .query_row(
+            "SELECT COUNT(*) FROM tasks WHERE status = 'failed'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+        .max(0) as u64;
+    let avg_cost = conn
+        .query_row(
+            "SELECT COALESCE(AVG(CAST(cost AS REAL)), 0) FROM tasks",
+            [],
+            |row| row.get::<_, f64>(0),
+        )
+        .unwrap_or(0.0);
+    let avg_duration_ms = conn
+        .query_row(
+            "SELECT COALESCE(AVG(CAST(duration_ms AS REAL)), 0) FROM tasks",
+            [],
+            |row| row.get::<_, f64>(0),
+        )
+        .unwrap_or(0.0);
+    let success_rate = if total_tasks == 0 {
+        0.0
+    } else {
+        completed_tasks as f64 / total_tasks as f64
+    };
+    let failure_rate = if total_tasks == 0 {
+        0.0
+    } else {
+        failed_tasks as f64 / total_tasks as f64
+    };
+
+    vec![
+        ("task.total_count", total_tasks as f64, total_tasks),
+        ("task.success_rate", success_rate, total_tasks),
+        ("task.failure_rate", failure_rate, total_tasks),
+        ("task.avg_cost", avg_cost, total_tasks),
+        ("task.avg_duration_ms", avg_duration_ms, total_tasks),
+    ]
+}
+
 // ── R91: OS Integration commands ─────────────────────────────────
 
 #[tauri::command]
-fn cmd_get_file_actions(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+fn cmd_get_file_actions(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let si = state.shell_integration.lock().map_err(|e| e.to_string())?;
     serde_json::to_value(si.get_file_actions()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn cmd_get_text_actions(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+fn cmd_get_text_actions(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let si = state.shell_integration.lock().map_err(|e| e.to_string())?;
     serde_json::to_value(si.get_text_actions()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn cmd_process_file_action(
-    file_path: String,
-    action_id: String,
+fn cmd_get_shell_registration_status(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    let exe_path = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("agentos.exe"));
     let si = state.shell_integration.lock().map_err(|e| e.to_string())?;
-    let result = si.process_file_action(&file_path, &action_id)?;
-    serde_json::to_value(&result).map_err(|e| e.to_string())
+    serde_json::to_value(si.get_registration_status(&exe_path)?).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn cmd_process_text_action(
-    text: String,
-    action_id: String,
+fn cmd_install_windows_context_menu(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let exe_path = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("agentos.exe"));
+    let si = state.shell_integration.lock().map_err(|e| e.to_string())?;
+    serde_json::to_value(si.install_windows_context_menu(&exe_path)?).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn cmd_uninstall_windows_context_menu(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let exe_path = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("agentos.exe"));
+    let si = state.shell_integration.lock().map_err(|e| e.to_string())?;
+    serde_json::to_value(si.uninstall_windows_context_menu(&exe_path)?).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn cmd_get_pending_shell_invocation(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let si = state.shell_integration.lock().map_err(|e| e.to_string())?;
-    let result = si.process_text_action(&text, &action_id)?;
-    serde_json::to_value(&result).map_err(|e| e.to_string())
+    serde_json::to_value(si.get_pending_invocation()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn cmd_get_last_shell_execution(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let si = state.shell_integration.lock().map_err(|e| e.to_string())?;
+    serde_json::to_value(si.get_last_execution()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_process_file_action(
+    file_path: String,
+    action_id: String,
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<serde_json::Value, String> {
+    let _decision = enforce_permission(&state, approvals::PermissionCapability::ShellExecute, None)?;
+    let action = {
+        let si = state.shell_integration.lock().map_err(|e| e.to_string())?;
+        si.process_file_action(&file_path, &action_id)?
+    };
+    let agent_response = cmd_process_message(state.clone(), app_handle, action.output.clone()).await?;
+    Ok(serde_json::json!({
+        "action": action,
+        "agent_response": agent_response,
+    }))
+}
+
+#[tauri::command]
+async fn cmd_process_text_action(
+    text: String,
+    action_id: String,
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<serde_json::Value, String> {
+    let _decision = enforce_permission(&state, approvals::PermissionCapability::ShellExecute, None)?;
+    let action = {
+        let si = state.shell_integration.lock().map_err(|e| e.to_string())?;
+        si.process_text_action(&text, &action_id)?
+    };
+    let agent_response = cmd_process_message(state.clone(), app_handle, action.output.clone()).await?;
+    Ok(serde_json::json!({
+        "action": action,
+        "agent_response": agent_response,
+    }))
 }
 
 // ── R92: Federated Learning commands ─────────────────────────────
 
 #[tauri::command]
+async fn cmd_consume_pending_shell_invocation(
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<serde_json::Value, String> {
+    let invocation = {
+        let mut si = state.shell_integration.lock().map_err(|e| e.to_string())?;
+        si.consume_pending_invocation()
+    };
+
+    let Some(invocation) = invocation else {
+        return Ok(serde_json::json!(null));
+    };
+
+    let action = {
+        let si = state.shell_integration.lock().map_err(|e| e.to_string())?;
+        si.process_file_action(&invocation.target_path, &invocation.action_id)?
+    };
+
+    let agent_response = cmd_process_message(state.clone(), app_handle, action.output.clone()).await?;
+    let record = os_integration::ShellExecutionRecord {
+        invocation,
+        context_summary: action.context_summary.clone(),
+        prompt: action.output.clone(),
+        agent_status: agent_response
+            .get("status")
+            .and_then(|value| value.as_str())
+            .map(|value| value.to_string()),
+        agent_output: agent_response
+            .get("output")
+            .and_then(|value| value.as_str())
+            .map(|value| value.to_string()),
+        error: None,
+        completed_at: chrono::Utc::now().to_rfc3339(),
+    };
+
+    {
+        let mut si = state.shell_integration.lock().map_err(|e| e.to_string())?;
+        si.set_last_execution(record.clone());
+    }
+
+    Ok(serde_json::json!({
+        "invocation": record.invocation,
+        "action": action,
+        "agent_response": agent_response,
+        "record": record,
+    }))
+}
+
+#[tauri::command]
 async fn cmd_federated_train(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    let metrics = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        collect_federated_metrics(db.conn())
+    };
     let mut client = state.federated_client.lock().await;
-    let data: Vec<Vec<f64>> = vec![vec![1.0, 2.0], vec![3.0, 4.0]];
-    let deltas = client.train_local(&data);
-    let noisy = client.add_privacy_noise(deltas, client.get_config().privacy_budget);
-    serde_json::to_value(&noisy).map_err(|e| e.to_string())
+    let payload = client.build_payload(&metrics);
+    serde_json::to_value(&payload).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn cmd_federated_submit(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    let metrics = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        collect_federated_metrics(db.conn())
+    };
     let mut client = state.federated_client.lock().await;
-    let data: Vec<Vec<f64>> = vec![vec![1.0, 2.0]];
-    let deltas = client.train_local(&data);
-    let noisy = client.add_privacy_noise(deltas, client.get_config().privacy_budget);
-    client.submit_deltas(&noisy)
+    let payload = client.build_payload(&metrics);
+    client.submit_payload(&payload).await
 }
 
 #[tauri::command]
@@ -6152,10 +7575,18 @@ async fn cmd_federated_config(
 ) -> Result<serde_json::Value, String> {
     let mut client = state.federated_client.lock().await;
     let mut cfg = client.get_config().clone();
-    if let Some(url) = server_url { cfg.server_url = url; }
-    if let Some(name) = model_name { cfg.model_name = name; }
-    if let Some(budget) = privacy_budget { cfg.privacy_budget = budget; }
-    if let Some(min) = min_samples { cfg.min_samples = min; }
+    if let Some(url) = server_url {
+        cfg.server_url = url;
+    }
+    if let Some(name) = model_name {
+        cfg.model_name = name;
+    }
+    if let Some(budget) = privacy_budget {
+        cfg.privacy_budget = budget;
+    }
+    if let Some(min) = min_samples {
+        cfg.min_samples = min;
+    }
     client.configure(cfg.clone());
     serde_json::to_value(&cfg).map_err(|e| e.to_string())
 }
@@ -6164,11 +7595,16 @@ async fn cmd_federated_config(
 
 #[tauri::command]
 async fn cmd_list_escalations(
+    status: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let mgr = state.escalation_manager.lock().await;
-    let pending: Vec<_> = mgr.list_pending().into_iter().cloned().collect();
-    serde_json::to_value(&pending).map_err(|e| e.to_string())
+    let filter = status
+        .as_deref()
+        .map(escalation::HandoffStatus::from_str)
+        .transpose()?;
+    let items = mgr.list(filter)?;
+    serde_json::to_value(&items).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -6176,9 +7612,9 @@ async fn cmd_resolve_escalation(
     id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let mut mgr = state.escalation_manager.lock().await;
-    mgr.resolve(&id)?;
-    Ok(serde_json::json!({ "ok": true, "id": id }))
+    let mgr = state.escalation_manager.lock().await;
+    let updated = mgr.complete_by_human(&id, "human", "Resolved from legacy resolve command.")?;
+    serde_json::to_value(&updated).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -6188,15 +7624,17 @@ async fn cmd_create_escalation(
     task_type: String,
     task_description: String,
     attempts: Vec<String>,
+    task_id: Option<String>,
+    chain_id: Option<String>,
+    evidence: Option<Vec<String>>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let reason = escalation::EscalationDetector::should_escalate(confidence, retries, &task_type)
         .unwrap_or(escalation::EscalationReason::UserRequest);
-    let pkg = escalation::EscalationDetector::create_handoff(reason, &task_description, attempts);
-    let mut mgr = state.escalation_manager.lock().await;
-    let val = serde_json::to_value(&pkg).map_err(|e| e.to_string())?;
-    mgr.add(pkg);
-    Ok(val)
+    let draft = escalation::EscalationDetector::create_handoff(reason, &task_description, attempts);
+    let mgr = state.escalation_manager.lock().await;
+    let pkg = mgr.create(draft, task_id, chain_id, evidence.unwrap_or_default())?;
+    serde_json::to_value(&pkg).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -6205,8 +7643,62 @@ async fn cmd_get_escalation(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let mgr = state.escalation_manager.lock().await;
-    let esc = mgr.get(&id).ok_or_else(|| format!("Not found: {}", id))?;
-    serde_json::to_value(esc).map_err(|e| e.to_string())
+    let esc = mgr.get(&id)?.ok_or_else(|| format!("Not found: {}", id))?;
+    serde_json::to_value(&esc).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_assign_escalation(
+    id: String,
+    assignee: String,
+    actor: Option<String>,
+    note: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.escalation_manager.lock().await;
+    let esc = mgr.assign(
+        &id,
+        &assignee,
+        actor.as_deref().unwrap_or("human"),
+        note.as_deref(),
+    )?;
+    serde_json::to_value(&esc).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_add_escalation_note(
+    id: String,
+    author: String,
+    note: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.escalation_manager.lock().await;
+    let esc = mgr.add_note(&id, &author, &note)?;
+    serde_json::to_value(&esc).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_resume_escalation(
+    id: String,
+    author: String,
+    note: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.escalation_manager.lock().await;
+    let esc = mgr.resume(&id, &author, &note)?;
+    serde_json::to_value(&esc).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_complete_escalation_by_human(
+    id: String,
+    author: String,
+    note: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.escalation_manager.lock().await;
+    let esc = mgr.complete_by_human(&id, &author, &note)?;
+    serde_json::to_value(&esc).map_err(|e| e.to_string())
 }
 
 // ── R94: Compliance Automation commands ──────────────────────────
@@ -6214,15 +7706,31 @@ async fn cmd_get_escalation(
 #[tauri::command]
 async fn cmd_run_compliance_check(
     framework: String,
+    days: Option<i64>,
+    agent_name: Option<String>,
+    status: Option<String>,
+    user: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    let approvals = state.approval_manager.get_all();
     let mut reporter = state.compliance_reporter.lock().await;
     let report = match framework.to_lowercase().as_str() {
-        "gdpr" => reporter.run_gdpr_checks(),
-        "sox" => reporter.run_sox_checks(),
-        "hipaa" => reporter.run_hipaa_checks(),
-        "iso27001" => reporter.run_iso27001_checks(),
-        _ => return Err(format!("Unknown framework: {}. Supported: gdpr, sox, hipaa, iso27001", framework)),
+        "gdpr" | "sox" | "hipaa" | "iso27001" => reporter.run_framework_report(
+            &framework,
+            compliance::ComplianceFilters {
+                days,
+                agent_name,
+                status,
+                user,
+            },
+            &approvals,
+        )?,
+        _ => {
+            return Err(format!(
+                "Unknown framework: {}. Supported: gdpr, sox, hipaa, iso27001",
+                framework
+            ))
+        }
     };
     serde_json::to_value(&report).map_err(|e| e.to_string())
 }
@@ -6262,17 +7770,20 @@ async fn cmd_org_marketplace_publish(
     visibility: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    let scoped_org_id = resolve_org_scope(&conn, Some(&org_id))?
+        .ok_or_else(|| "No organization selected for marketplace publish".to_string())?;
     let listing = marketplace::OrgListing {
         id: String::new(),
-        org_id,
+        org_id: scoped_org_id,
         resource_type,
         resource_id,
         visibility,
         approved: false,
         created_at: String::new(),
     };
-    let mut mp = state.org_marketplace.lock().await;
-    let created = mp.publish(listing);
+    let mp = state.org_marketplace.lock().await;
+    let created = mp.publish(listing)?;
     serde_json::to_value(&created).map_err(|e| e.to_string())
 }
 
@@ -6281,8 +7792,11 @@ async fn cmd_org_marketplace_list(
     org_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    let scoped_org_id = resolve_org_scope(&conn, Some(&org_id))?
+        .ok_or_else(|| "No organization selected for marketplace list".to_string())?;
     let mp = state.org_marketplace.lock().await;
-    let listings: Vec<_> = mp.list_for_org(&org_id).into_iter().cloned().collect();
+    let listings = mp.list_for_org(&scoped_org_id)?;
     serde_json::to_value(&listings).map_err(|e| e.to_string())
 }
 
@@ -6291,8 +7805,11 @@ async fn cmd_org_marketplace_approve(
     listing_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let mut mp = state.org_marketplace.lock().await;
-    mp.approve(&listing_id)?;
+    let conn = open_enterprise_conn(&state.db_path)?;
+    let org_id = enterprise::OrgManager::get_current_org_id(&conn)?
+        .ok_or_else(|| "No organization selected for marketplace approval".to_string())?;
+    let mp = state.org_marketplace.lock().await;
+    mp.approve_for_org(&listing_id, &org_id)?;
     Ok(serde_json::json!({ "ok": true, "listing_id": listing_id }))
 }
 
@@ -6301,8 +7818,11 @@ async fn cmd_org_marketplace_remove(
     listing_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let mut mp = state.org_marketplace.lock().await;
-    mp.remove(&listing_id)?;
+    let conn = open_enterprise_conn(&state.db_path)?;
+    let org_id = enterprise::OrgManager::get_current_org_id(&conn)?
+        .ok_or_else(|| "No organization selected for marketplace removal".to_string())?;
+    let mp = state.org_marketplace.lock().await;
+    mp.remove_for_org(&listing_id, &org_id)?;
     Ok(serde_json::json!({ "ok": true }))
 }
 
@@ -6312,9 +7832,26 @@ async fn cmd_org_marketplace_search(
     org_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    let scoped_org_id = resolve_org_scope(&conn, Some(&org_id))?
+        .ok_or_else(|| "No organization selected for marketplace search".to_string())?;
     let mp = state.org_marketplace.lock().await;
-    let results: Vec<_> = mp.search(&query, &org_id).into_iter().cloned().collect();
+    let results = mp.search(&query, &scoped_org_id)?;
     serde_json::to_value(&results).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_org_marketplace_view(
+    org_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    let scoped_org_id = resolve_org_scope(&conn, Some(&org_id))?
+        .ok_or_else(|| "No organization selected for marketplace view".to_string())?;
+    let fallback_branding = state.branding.read().await.clone();
+    let mp = state.org_marketplace.lock().await;
+    let view = mp.get_view_for_org(&scoped_org_id, &fallback_branding)?;
+    serde_json::to_value(&view).map_err(|e| e.to_string())
 }
 
 // ── R101: AR/VR Agent commands ───────────────────────────────────
@@ -6327,14 +7864,21 @@ async fn cmd_arvr_connect(
     fov: f64,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let config = devices::ARVRConfig { headset_type, connection, resolution, fov };
+    let config = devices::ARVRConfig {
+        headset_type,
+        connection,
+        resolution,
+        fov,
+    };
     let mut agent = state.arvr_agent.lock().await;
     let status = agent.connect(config)?;
     serde_json::to_value(&status).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-async fn cmd_arvr_disconnect(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+async fn cmd_arvr_disconnect(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
     let mut agent = state.arvr_agent.lock().await;
     agent.disconnect()?;
     Ok(serde_json::json!({"ok": true}))
@@ -6477,14 +8021,21 @@ async fn cmd_tablet_enable(
     layout: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let config = devices::TabletConfig { touch_enabled, gesture_support, font_scale, layout };
+    let config = devices::TabletConfig {
+        touch_enabled,
+        gesture_support,
+        font_scale,
+        layout,
+    };
     let mut tm = state.tablet_mode.lock().await;
     let status = tm.enable(config)?;
     serde_json::to_value(&status).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-async fn cmd_tablet_disable(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+async fn cmd_tablet_disable(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
     let mut tm = state.tablet_mode.lock().await;
     tm.disable()?;
     Ok(serde_json::json!({"ok": true}))
@@ -6515,7 +8066,11 @@ async fn cmd_tv_enable(
     content_type: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let config = devices::TVConfig { display_mode, auto_refresh_secs, content_type };
+    let config = devices::TVConfig {
+        display_mode,
+        auto_refresh_secs,
+        content_type,
+    };
     let mut tv = state.tv_display.lock().await;
     let status = tv.enable(config)?;
     serde_json::to_value(&status).map_err(|e| e.to_string())
@@ -6693,11 +8248,10 @@ async fn cmd_email_client_send(
 // ── R109: Hardware Partnerships commands ─────────────────────────
 
 #[tauri::command]
-async fn cmd_list_partners(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
-    db.list_hardware_partners().map_err(|e| e.to_string())
+async fn cmd_list_partners(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let registry = state.partner_registry.lock().await;
+    let partners = registry.list_partners()?;
+    serde_json::to_value(&partners).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -6705,9 +8259,9 @@ async fn cmd_get_partner(
     id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
-    match db.get_hardware_partner(&id).map_err(|e| e.to_string())? {
-        Some(p) => Ok(p),
+    let registry = state.partner_registry.lock().await;
+    match registry.get_partner(&id)? {
+        Some(p) => serde_json::to_value(&p).map_err(|e| e.to_string()),
         None => Err(format!("Partner not found: {}", id)),
     }
 }
@@ -6717,15 +8271,18 @@ async fn cmd_register_partner(
     company: String,
     device_type: String,
     integration_level: String,
+    org_id: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let level = match integration_level.as_str() {
-        "basic" | "premium" | "exclusive" => integration_level.as_str(),
+        "basic" => partnerships::IntegrationLevel::Basic,
+        "premium" => partnerships::IntegrationLevel::Premium,
+        "exclusive" => partnerships::IntegrationLevel::Exclusive,
         _ => return Err(format!("Invalid integration level: {}", integration_level)),
     };
-    let db = state.db.lock().map_err(|e| e.to_string())?;
-    db.register_hardware_partner(&company, &device_type, level)
-        .map_err(|e| e.to_string())
+    let registry = state.partner_registry.lock().await;
+    let partner = registry.register_partner(company, device_type, level, org_id)?;
+    serde_json::to_value(&partner).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -6733,13 +8290,58 @@ async fn cmd_certify_partner(
     id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
-    db.certify_hardware_partner(
+    let registry = state.partner_registry.lock().await;
+    let partner = registry.certify(&id)?;
+    serde_json::to_value(&partner).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_partner_configure_distribution(
+    id: String,
+    org_id: Option<String>,
+    distribution_channel: String,
+    artifact_base_url: String,
+    updater_pubkey: Option<String>,
+    contact_email: Option<String>,
+    units_shipped: Option<u64>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let registry = state.partner_registry.lock().await;
+    let partner = registry.configure_distribution(
         &id,
-        "Certified from readiness dashboard after runtime validation.",
-        "repo://docs/partner_enablement_runbook.md",
-    )
-    .map_err(|e| e.to_string())
+        org_id,
+        distribution_channel,
+        artifact_base_url,
+        updater_pubkey,
+        contact_email,
+        units_shipped,
+    )?;
+    serde_json::to_value(&partner).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_partner_prepare_distribution(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let partner = {
+        let registry = state.partner_registry.lock().await;
+        registry
+            .get_partner(&id)?
+            .ok_or_else(|| format!("Partner not found: {}", id))?
+    };
+    let fallback_branding = state.branding.read().await.clone();
+    let org_id = partner
+        .org_id
+        .clone()
+        .ok_or_else(|| "Partner must be linked to an organization before packaging distribution".to_string())?;
+    let view = {
+        let marketplace = state.org_marketplace.lock().await;
+        marketplace.get_view_for_org(&org_id, &fallback_branding)?
+    };
+    let registry = state.partner_registry.lock().await;
+    let bundle = registry.prepare_distribution_bundle(&id, &view.branding, &view)?;
+    serde_json::to_value(&bundle).map_err(|e| e.to_string())
 }
 
 // ── R111: Autonomous Inbox commands ──────────────────────────────────
@@ -6781,7 +8383,12 @@ async fn cmd_auto_inbox_process(
     labels: Vec<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let msg = autonomous::inbox::InboxMessage { from, subject, body, labels };
+    let msg = autonomous::inbox::InboxMessage {
+        from,
+        subject,
+        body,
+        labels,
+    };
     let inbox = state.auto_inbox.lock().await;
     let result = inbox.process_message(&msg);
     serde_json::to_value(&result).map_err(|e| e.to_string())
@@ -6836,12 +8443,24 @@ async fn cmd_auto_schedule_preferences(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let mut scheduler = state.auto_scheduler.lock().await;
-    if preferred_start.is_some() || preferred_end.is_some() || buffer_minutes.is_some() || max_meetings.is_some() {
+    if preferred_start.is_some()
+        || preferred_end.is_some()
+        || buffer_minutes.is_some()
+        || max_meetings.is_some()
+    {
         let mut prefs = scheduler.get_preferences();
-        if let Some(s) = preferred_start { prefs.preferred_hours.0 = s; }
-        if let Some(e) = preferred_end { prefs.preferred_hours.1 = e; }
-        if let Some(b) = buffer_minutes { prefs.buffer_minutes = b; }
-        if let Some(m) = max_meetings { prefs.max_meetings_per_day = m; }
+        if let Some(s) = preferred_start {
+            prefs.preferred_hours.0 = s;
+        }
+        if let Some(e) = preferred_end {
+            prefs.preferred_hours.1 = e;
+        }
+        if let Some(b) = buffer_minutes {
+            prefs.buffer_minutes = b;
+        }
+        if let Some(m) = max_meetings {
+            prefs.max_meetings_per_day = m;
+        }
         scheduler.set_preferences(prefs);
     }
     serde_json::to_value(scheduler.get_preferences()).map_err(|e| e.to_string())
@@ -6982,9 +8601,7 @@ async fn cmd_qa_generate_plan(
 }
 
 #[tauri::command]
-async fn cmd_qa_coverage(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+async fn cmd_qa_coverage(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let qa = state.auto_qa.lock().await;
     serde_json::to_value(qa.get_coverage_report()).map_err(|e| e.to_string())
 }
@@ -7013,9 +8630,7 @@ async fn cmd_support_process(
 }
 
 #[tauri::command]
-async fn cmd_support_list(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+async fn cmd_support_list(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let support = state.auto_support.lock().await;
     serde_json::to_value(support.list_tickets()).map_err(|e| e.to_string())
 }
@@ -7031,9 +8646,7 @@ async fn cmd_support_resolve(
 }
 
 #[tauri::command]
-async fn cmd_support_stats(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+async fn cmd_support_stats(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let support = state.auto_support.lock().await;
     Ok(support.stats())
 }
@@ -7354,7 +8967,12 @@ fn cmd_kg_add_entity(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let kg = state.knowledge_graph.lock().map_err(|e| e.to_string())?;
-    let entity = knowledge::Entity { id: id.clone(), name, entity_type, properties };
+    let entity = knowledge::Entity {
+        id: id.clone(),
+        name,
+        entity_type,
+        properties,
+    };
     kg.add_entity(&entity)?;
     Ok(serde_json::json!({ "ok": true, "id": id }))
 }
@@ -7369,7 +8987,13 @@ fn cmd_kg_add_relationship(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let kg = state.knowledge_graph.lock().map_err(|e| e.to_string())?;
-    let rel = knowledge::Relationship { id: id.clone(), from_entity, to_entity, relation_type, weight };
+    let rel = knowledge::Relationship {
+        id: id.clone(),
+        from_entity,
+        to_entity,
+        relation_type,
+        weight,
+    };
     kg.add_relationship(&rel)?;
     Ok(serde_json::json!({ "ok": true, "id": id }))
 }
@@ -7407,9 +9031,7 @@ fn cmd_kg_relationships(
 }
 
 #[tauri::command]
-fn cmd_kg_stats(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+fn cmd_kg_stats(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let kg = state.knowledge_graph.lock().map_err(|e| e.to_string())?;
     let stats = kg.get_graph_stats()?;
     serde_json::to_value(&stats).map_err(|e| e.to_string())
@@ -7472,7 +9094,9 @@ async fn cmd_confidence_record(
     correct: Option<bool>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    state.confidence_calibrator.record_confidence(&task_id, score)?;
+    state
+        .confidence_calibrator
+        .record_confidence(&task_id, score)?;
     if let Some(c) = correct {
         state.confidence_calibrator.record_outcome(&task_id, c)?;
     }
@@ -7546,9 +9170,7 @@ async fn cmd_transfer_apply(
 }
 
 #[tauri::command]
-async fn cmd_transfer_list(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+async fn cmd_transfer_list(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let engine = state.transfer_engine.lock().await;
     let patterns = engine.list_patterns();
     serde_json::to_value(&patterns).map_err(|e| e.to_string())
@@ -7563,7 +9185,9 @@ async fn cmd_meta_record(
     corrected: bool,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let curve = state.meta_learner.record_task(&domain, success, corrected)?;
+    let curve = state
+        .meta_learner
+        .record_task(&domain, success, corrected)?;
     serde_json::to_value(&curve).map_err(|e| e.to_string())
 }
 
@@ -7951,7 +9575,12 @@ async fn cmd_construction_milestone(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let mut mgr = state.construction_manager.lock().await;
-    mgr.update_milestone(&project_id, &milestone_id, completed, notes.unwrap_or_default())
+    mgr.update_milestone(
+        &project_id,
+        &milestone_id,
+        completed,
+        notes.unwrap_or_default(),
+    )
 }
 
 #[tauri::command]
@@ -8024,20 +9653,27 @@ async fn cmd_agri_yield(
 // ── R141: Agent Hiring IPC commands ──────────────────────────────
 #[tauri::command]
 async fn cmd_hiring_post(
-    title: String, description: String, requirements: Vec<String>,
-    budget: f64, poster_id: String,
+    title: String,
+    description: String,
+    requirements: Vec<String>,
+    budget: f64,
+    poster_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let mut mgr = state.hiring_manager.lock().await;
-    let job = mgr.post_job(title, description, requirements, budget,
-        economy::hiring::PricingModel::Monthly(budget), poster_id);
+    let job = mgr.post_job(
+        title,
+        description,
+        requirements,
+        budget,
+        economy::hiring::PricingModel::Monthly(budget),
+        poster_id,
+    );
     serde_json::to_value(&job).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-async fn cmd_hiring_list(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+async fn cmd_hiring_list(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let mgr = state.hiring_manager.lock().await;
     let jobs: Vec<_> = mgr.list_jobs(None);
     serde_json::to_value(&jobs).map_err(|e| e.to_string())
@@ -8045,7 +9681,9 @@ async fn cmd_hiring_list(
 
 #[tauri::command]
 async fn cmd_hiring_apply(
-    job_id: String, agent_id: String, cover_note: String,
+    job_id: String,
+    agent_id: String,
+    cover_note: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let mut mgr = state.hiring_manager.lock().await;
@@ -8055,7 +9693,8 @@ async fn cmd_hiring_apply(
 
 #[tauri::command]
 async fn cmd_hiring_hire(
-    job_id: String, agent_id: String,
+    job_id: String,
+    agent_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let mut mgr = state.hiring_manager.lock().await;
@@ -8070,17 +9709,25 @@ async fn cmd_reputation_get(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let engine = state.reputation_engine.lock().await;
-    let score = engine.get_score(&agent_id);
+    let score = engine.get_score(&agent_id)?;
     serde_json::to_value(&score).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn cmd_reputation_review(
-    agent_id: String, rating: f64, comment: String, reviewer_id: String,
+    agent_id: String,
+    rating: f64,
+    comment: String,
+    reviewer_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let mut engine = state.reputation_engine.lock().await;
-    let review = engine.add_review(&agent_id, rating, comment, reviewer_id);
+    let review = engine.add_review(&agent_id, rating, comment, reviewer_id)?;
+    drop(engine);
+    let studio = state.creator_studio.lock().await;
+    if studio.get_project(&agent_id)?.is_some() {
+        let _ = studio.record_event(&agent_id, "rating", review.rating, serde_json::json!({}));
+    }
     serde_json::to_value(&review).map_err(|e| e.to_string())
 }
 
@@ -8090,14 +9737,28 @@ async fn cmd_reputation_leaderboard(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let engine = state.reputation_engine.lock().await;
-    let board = engine.get_leaderboard(limit.unwrap_or(10));
+    let board = engine.get_leaderboard(limit.unwrap_or(10))?;
     serde_json::to_value(&board).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_reputation_history(
+    agent_id: String,
+    limit: Option<usize>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let engine = state.reputation_engine.lock().await;
+    let history = engine.list_history(&agent_id, limit.unwrap_or(20))?;
+    serde_json::to_value(&history).map_err(|e| e.to_string())
 }
 
 // ── R143: Cross-User Collaboration IPC commands ──────────────────
 #[tauri::command]
 async fn cmd_collab_create(
-    name: String, creator: String, task: String, shared_context: String,
+    name: String,
+    creator: String,
+    task: String,
+    shared_context: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let mut mgr = state.collab_manager.lock().await;
@@ -8107,7 +9768,9 @@ async fn cmd_collab_create(
 
 #[tauri::command]
 async fn cmd_collab_join(
-    session_id: String, user_id: String, agents: Vec<String>,
+    session_id: String,
+    user_id: String,
+    agents: Vec<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let mut mgr = state.collab_manager.lock().await;
@@ -8117,16 +9780,20 @@ async fn cmd_collab_join(
 
 #[tauri::command]
 async fn cmd_collab_list(
+    user_id: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let mgr = state.collab_manager.lock().await;
-    let sessions: Vec<_> = mgr.list_sessions();
+    let sessions = mgr.list_sessions(user_id.as_deref())?;
     serde_json::to_value(&sessions).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn cmd_collab_share(
-    session_id: String, from_user: String, agent_id: String, content: String,
+    session_id: String,
+    from_user: String,
+    agent_id: String,
+    content: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let mut mgr = state.collab_manager.lock().await;
@@ -8137,18 +9804,22 @@ async fn cmd_collab_share(
 // ── R144: Microtasks IPC commands ────────────────────────────────
 #[tauri::command]
 async fn cmd_microtask_post(
-    title: String, description: String, reward_amount: f64,
-    deadline: Option<String>, poster_id: String,
+    title: String,
+    description: String,
+    reward_amount: f64,
+    deadline: Option<String>,
+    poster_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let mut market = state.microtask_market.lock().await;
-    let task = market.post_task(title, description, reward_amount, deadline, poster_id);
+    let task = market.post_task(title, description, reward_amount, deadline, poster_id)?;
     serde_json::to_value(&task).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn cmd_microtask_claim(
-    task_id: String, agent_id: String,
+    task_id: String,
+    agent_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let mut market = state.microtask_market.lock().await;
@@ -8158,7 +9829,8 @@ async fn cmd_microtask_claim(
 
 #[tauri::command]
 async fn cmd_microtask_complete(
-    task_id: String, result: String,
+    task_id: String,
+    result: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let mut market = state.microtask_market.lock().await;
@@ -8168,21 +9840,34 @@ async fn cmd_microtask_complete(
 
 #[tauri::command]
 async fn cmd_microtask_list(
+    agent_id: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let market = state.microtask_market.lock().await;
-    let tasks: Vec<_> = market.list_available();
+    let tasks = if let Some(agent_id) = agent_id {
+        market.list_my_tasks(&agent_id)?
+    } else {
+        market.list_available()?
+    };
     serde_json::to_value(&tasks).map_err(|e| e.to_string())
 }
 
 // ── R145: Escrow IPC commands ────────────────────────────────────
 #[tauri::command]
 async fn cmd_escrow_create(
-    payer: String, payee: String, amount: f64, task_description: String,
+    payer: String,
+    payee: String,
+    amount: f64,
+    task_description: String,
+    microtask_id: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let mut mgr = state.escrow_manager.lock().await;
-    let tx = mgr.create_escrow(payer, payee, amount, task_description);
+    let tx = mgr.create_escrow(payer, payee, amount, task_description, microtask_id.clone())?;
+    if let Some(task_id) = microtask_id {
+        let market = state.microtask_market.lock().await;
+        let _ = market.attach_escrow(&task_id, &tx.id);
+    }
     serde_json::to_value(&tx).map_err(|e| e.to_string())
 }
 
@@ -8207,19 +9892,41 @@ async fn cmd_escrow_refund(
 }
 
 #[tauri::command]
+async fn cmd_escrow_dispute(
+    tx_id: String,
+    reason: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.escrow_manager.lock().await;
+    let tx = mgr.dispute(&tx_id, reason)?;
+    serde_json::to_value(&tx).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn cmd_escrow_list(
     user_id: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let mgr = state.escrow_manager.lock().await;
-    let txs: Vec<_> = mgr.list_transactions(user_id.as_deref());
+    let txs = mgr.list_transactions(user_id.as_deref())?;
     serde_json::to_value(&txs).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_escrow_history(
+    tx_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.escrow_manager.lock().await;
+    let history = mgr.history(&tx_id)?;
+    serde_json::to_value(&history).map_err(|e| e.to_string())
 }
 
 // ── R146: Agent Insurance IPC commands ───────────────────────────
 #[tauri::command]
 async fn cmd_insurance_create(
-    agent_id: String, coverage_type: String,
+    agent_id: String,
+    coverage_type: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let ct = match coverage_type.as_str() {
@@ -8246,7 +9953,10 @@ async fn cmd_insurance_list(
 
 #[tauri::command]
 async fn cmd_insurance_claim(
-    policy_id: String, description: String, amount: f64, evidence: Vec<String>,
+    policy_id: String,
+    description: String,
+    amount: f64,
+    evidence: Vec<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let mut mgr = state.insurance_manager.lock().await;
@@ -8256,7 +9966,8 @@ async fn cmd_insurance_claim(
 
 #[tauri::command]
 async fn cmd_insurance_status(
-    policy_id: String, claim_id: String,
+    policy_id: String,
+    claim_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let mgr = state.insurance_manager.lock().await;
@@ -8267,7 +9978,10 @@ async fn cmd_insurance_status(
 // ── R147: Creator Studio IPC commands ────────────────────────────
 #[tauri::command]
 async fn cmd_creator_create(
-    name: String, description: String, project_type: String, creator_id: String,
+    name: String,
+    description: String,
+    project_type: String,
+    creator_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let pt = match project_type.as_str() {
@@ -8278,8 +9992,28 @@ async fn cmd_creator_create(
         _ => return Err("Invalid project type".to_string()),
     };
     let mut studio = state.creator_studio.lock().await;
-    let project = studio.create_project(name, description, pt, creator_id);
+    let project = studio.create_project(name, description, pt, creator_id)?;
     serde_json::to_value(&project).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_creator_test(
+    project_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let studio = state.creator_studio.lock().await;
+    let summary = studio.run_project_test(&project_id).await?;
+    serde_json::to_value(&summary).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_creator_prepare_package(
+    project_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let studio = state.creator_studio.lock().await;
+    let package = studio.prepare_package(&project_id)?;
+    serde_json::to_value(&package).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -8287,7 +10021,7 @@ async fn cmd_creator_publish(
     project_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let mut studio = state.creator_studio.lock().await;
+    let studio = state.creator_studio.lock().await;
     let project = studio.publish(&project_id)?;
     serde_json::to_value(&project).map_err(|e| e.to_string())
 }
@@ -8298,7 +10032,29 @@ async fn cmd_creator_list(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let studio = state.creator_studio.lock().await;
-    let projects: Vec<_> = studio.list_projects(creator_id.as_deref());
+    let mut projects = studio.list_projects(creator_id.as_deref())?;
+    drop(studio);
+    if creator_id.is_none() {
+        let engine = state.reputation_engine.lock().await;
+        projects.sort_by(|a, b| {
+            let a_score = engine
+                .get_score(&a.id)
+                .ok()
+                .flatten()
+                .map(|score| score.score)
+                .unwrap_or(0.0);
+            let b_score = engine
+                .get_score(&b.id)
+                .ok()
+                .flatten()
+                .map(|score| score.score)
+                .unwrap_or(0.0);
+            b_score
+                .partial_cmp(&a_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| b.updated_at.cmp(&a.updated_at))
+        });
+    }
     serde_json::to_value(&projects).map_err(|e| e.to_string())
 }
 
@@ -8318,7 +10074,7 @@ async fn cmd_creator_metrics(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let engine = state.creator_analytics.lock().await;
-    let metrics = engine.get_metrics();
+    let metrics = engine.get_metrics()?;
     serde_json::to_value(&metrics).map_err(|e| e.to_string())
 }
 
@@ -8328,7 +10084,7 @@ async fn cmd_creator_revenue(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let engine = state.creator_analytics.lock().await;
-    let history = engine.get_revenue_history(limit.unwrap_or(30));
+    let history = engine.get_revenue_history(limit.unwrap_or(30))?;
     serde_json::to_value(&history).map_err(|e| e.to_string())
 }
 
@@ -8338,14 +10094,26 @@ async fn cmd_creator_trends(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let engine = state.creator_analytics.lock().await;
-    let trends = engine.get_download_trend(limit.unwrap_or(30));
+    let trends = engine.get_download_trend(limit.unwrap_or(30))?;
     serde_json::to_value(&trends).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_creator_dashboard(
+    creator_id: String,
+    limit: Option<usize>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let engine = state.creator_analytics.lock().await;
+    let dashboard = engine.get_creator_dashboard(&creator_id, limit.unwrap_or(5))?;
+    serde_json::to_value(&dashboard).map_err(|e| e.to_string())
 }
 
 // ── R149: Affiliate Program IPC commands ─────────────────────────
 #[tauri::command]
 async fn cmd_affiliate_create(
-    creator_id: String, product_id: String,
+    creator_id: String,
+    product_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let mut program = state.affiliate_program.lock().await;
@@ -8375,7 +10143,9 @@ async fn cmd_affiliate_list(
 
 #[tauri::command]
 async fn cmd_affiliate_track(
-    link_code: String, conversion: bool, amount: Option<f64>,
+    link_code: String,
+    conversion: bool,
+    amount: Option<f64>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let mut program = state.affiliate_program.lock().await;
@@ -8420,8 +10190,12 @@ pub fn run() {
             tracing::info!("AgentOS starting, data dir: {:?}", app_dir);
 
             let db_path = app_dir.join("agentos.db");
-            let db = memory::Database::new(&db_path)
-                .expect("failed to open database");
+            let db = memory::Database::new(&db_path).expect("failed to open database");
+            offline::OfflineManager::init_db(db.conn()).expect("failed to init offline storage");
+            let mut offline_manager = offline::OfflineManager::new();
+            offline_manager
+                .load_from_db(db.conn())
+                .expect("failed to load offline queue");
 
             let screenshots_dir = app_dir.join("screenshots");
             std::fs::create_dir_all(&screenshots_dir).ok();
@@ -8429,8 +10203,7 @@ pub fn run() {
             let playbooks_dir = app_dir.join("playbooks");
             std::fs::create_dir_all(&playbooks_dir).ok();
 
-            let settings = config::Settings::load(&app_dir);
-            let gateway = brain::Gateway::new(&settings);
+            let mut settings = config::Settings::load(&app_dir);
 
             // ── R21: Initialize secure vault ─────────────────────────
             let mut secure_vault = vault::SecureVault::new(&app_dir);
@@ -8446,7 +10219,11 @@ pub fn run() {
                         tracing::info!("Created new vault");
                         // Migrate existing plaintext keys
                         match secure_vault.migrate_from_settings(&settings) {
-                            Ok(n) if n > 0 => tracing::info!("Migrated {} keys to vault", n),
+                            Ok(n) if n > 0 => {
+                                tracing::info!("Migrated {} keys to vault", n);
+                                scrub_persisted_secrets(&mut settings);
+                                let _ = settings.save();
+                            }
                             Ok(_) => {}
                             Err(e) => tracing::warn!("Key migration failed: {}", e),
                         }
@@ -8456,13 +10233,24 @@ pub fn run() {
             }
 
             // ── R45: Load branding config ────────────────────────────
+            if secure_vault.is_unlocked() {
+                if let Err(e) = hydrate_settings_from_vault(&mut settings, &secure_vault) {
+                    tracing::warn!("Failed to hydrate settings from vault: {}", e);
+                }
+            }
+            let gateway = brain::Gateway::new(&settings);
+
             let branding_path = app_dir.join("branding.json");
-            let branding_config = branding::BrandingConfig::load(&branding_path)
-                .unwrap_or_else(|e| {
+            let branding_config =
+                branding::BrandingConfig::load(&branding_path).unwrap_or_else(|e| {
                     tracing::warn!("Failed to load branding.json: {}, using defaults", e);
                     branding::BrandingConfig::default()
                 });
-            tracing::info!("Branding: {} (OEM: {})", branding_config.app_name, branding_config.is_oem());
+            tracing::info!(
+                "Branding: {} (OEM: {})",
+                branding_config.app_name,
+                branding_config.is_oem()
+            );
 
             let api_port: u16 = 8080;
 
@@ -8481,7 +10269,11 @@ pub fn run() {
 
             // ── R26: Platform abstraction ─────────────────────────────
             let platform_provider = Arc::new(platform::get_platform());
-            tracing::info!("Platform: {} ({})", platform_provider.name(), platform_provider.os_version());
+            tracing::info!(
+                "Platform: {} ({})",
+                platform_provider.name(),
+                platform_provider.os_version()
+            );
 
             app.manage(AppState {
                 db: std::sync::Mutex::new(db),
@@ -8515,25 +10307,21 @@ pub fn run() {
                     app_dir.join("logs"),
                 )),
                 alert_manager: Arc::new(tokio::sync::Mutex::new(
-                    observability::alerts::AlertManager::new(),
+                    observability::alerts::AlertManager::new(db_path.clone())
+                        .expect("failed to initialize alert manager"),
                 )),
-                widget_manager: Arc::new(tokio::sync::Mutex::new(
-                    widgets::WidgetManager::new(),
-                )),
+                widget_manager: Arc::new(tokio::sync::Mutex::new(widgets::WidgetManager::new())),
                 conversations: Arc::new(tokio::sync::Mutex::new(Vec::new())),
-                screen_recorder: Arc::new(tokio::sync::Mutex::new(
-                    recording::ScreenRecorder::new(app_dir.join("recordings")),
-                )),
-                monitor_manager: Arc::new(tokio::sync::Mutex::new(
-                    monitors::MonitorManager::new(),
-                )),
+                screen_recorder: Arc::new(tokio::sync::Mutex::new(recording::ScreenRecorder::new(
+                    app_dir.join("recordings"),
+                ))),
+                monitor_manager: Arc::new(tokio::sync::Mutex::new(monitors::MonitorManager::new())),
                 intervention_manager: Arc::new(tokio::sync::Mutex::new(
                     chains::intervention::InterventionManager::new(),
                 )),
                 template_engine: {
-                    let engine = Arc::new(templates::TemplateEngine::new(
-                        app_dir.join("templates"),
-                    ));
+                    let engine =
+                        Arc::new(templates::TemplateEngine::new(app_dir.join("templates")));
                     engine.seed_defaults();
                     engine
                 },
@@ -8559,17 +10347,13 @@ pub fn run() {
                 database_manager: Arc::new(tokio::sync::Mutex::new(
                     integrations::DatabaseManager::new(),
                 )),
-                api_registry: Arc::new(tokio::sync::Mutex::new(
-                    integrations::APIRegistry::new(),
-                )),
+                api_registry: Arc::new(tokio::sync::Mutex::new(integrations::APIRegistry::new())),
                 quota_manager: Arc::new(enterprise::QuotaManager::new()),
                 embed_widget_config: std::sync::Mutex::new(widget::WidgetConfig::default()),
-                smart_terminal: Arc::new(tokio::sync::Mutex::new(
-                    terminal::SmartTerminal::new(),
-                )),
-                extension_api_v2: Arc::new(tokio::sync::Mutex::new(
-                    plugins::ExtensionAPIv2::new(app_dir.join("plugin_storage.db")),
-                )),
+                smart_terminal: Arc::new(tokio::sync::Mutex::new(terminal::SmartTerminal::new())),
+                extension_api_v2: Arc::new(tokio::sync::Mutex::new(plugins::ExtensionAPIv2::new(
+                    app_dir.join("plugin_storage.db"),
+                ))),
                 translation_engine: Arc::new(translation::TranslationEngine::new()),
                 accessibility_manager: Arc::new(std::sync::Mutex::new(
                     accessibility::AccessibilityManager::new(),
@@ -8577,24 +10361,19 @@ pub fn run() {
                 vertical_registry: Arc::new(tokio::sync::Mutex::new(
                     verticals::VerticalRegistry::new(),
                 )),
-                offline_manager: Arc::new(tokio::sync::Mutex::new(
-                    offline::OfflineManager::new(),
-                )),
-                ondevice_engine: Arc::new(tokio::sync::Mutex::new(
-                    ondevice::OnDeviceEngine::new(),
-                )),
+                offline_manager: Arc::new(tokio::sync::Mutex::new(offline_manager)),
+                ondevice_engine: Arc::new(tokio::sync::Mutex::new(ondevice::OnDeviceEngine::new())),
                 input_processor: Arc::new(multimodal::InputProcessor::new()),
                 prediction_engine: Arc::new(tokio::sync::Mutex::new(
                     predictions::PredictionEngine::new(),
                 )),
-                crossapp_bridge: Arc::new(tokio::sync::Mutex::new(
-                    crossapp::CrossAppBridge::new(),
-                )),
-                swarm_coordinator: Arc::new(tokio::sync::Mutex::new(
-                    swarm::SwarmCoordinator::new(),
-                )),
+                crossapp_bridge: Arc::new(tokio::sync::Mutex::new(crossapp::CrossAppBridge::new())),
+                swarm_coordinator: Arc::new(
+                    tokio::sync::Mutex::new(swarm::SwarmCoordinator::new()),
+                ),
                 agent_debugger: Arc::new(tokio::sync::Mutex::new(
-                    debugger::AgentDebugger::new(),
+                    debugger::AgentDebugger::new(db_path.clone())
+                        .expect("failed to initialize agent debugger"),
                 )),
                 revenue_optimizer: Arc::new(revenue::RevenueOptimizer::new()),
                 infra_monitor: Arc::new(infrastructure::InfraMonitor::new()),
@@ -8606,38 +10385,61 @@ pub fn run() {
                     federated::FederatedClient::new(),
                 )),
                 escalation_manager: Arc::new(tokio::sync::Mutex::new(
-                    escalation::EscalationManager::new(),
+                    escalation::EscalationManager::new(db_path.clone())
+                        .expect("failed to initialize escalation manager"),
                 )),
                 compliance_reporter: Arc::new(tokio::sync::Mutex::new(
-                    compliance::ComplianceReporter::new(),
+                    compliance::ComplianceReporter::new(db_path.clone()),
                 )),
                 org_marketplace: Arc::new(tokio::sync::Mutex::new(
-                    marketplace::OrgMarketplace::new(),
+                    marketplace::OrgMarketplace::new(db_path.clone())
+                        .expect("failed to initialize org marketplace"),
                 )),
                 // R101-R105: Device modules
                 arvr_agent: Arc::new(tokio::sync::Mutex::new(devices::ARVRAgent::new())),
-                wearable_manager: Arc::new(tokio::sync::Mutex::new(devices::WearableManager::new())),
+                wearable_manager: Arc::new(
+                    tokio::sync::Mutex::new(devices::WearableManager::new()),
+                ),
                 iot_controller: Arc::new(tokio::sync::Mutex::new(devices::IoTController::new())),
                 tablet_mode: Arc::new(tokio::sync::Mutex::new(devices::TabletMode::new())),
                 tv_display: Arc::new(tokio::sync::Mutex::new(devices::TVDisplayMode::new())),
                 car_agent: Arc::new(tokio::sync::Mutex::new(devices::CarAgent::new())),
-                browser_bridge: Arc::new(tokio::sync::Mutex::new(browser_ext::BrowserBridge::new())),
-                email_client_mgr: Arc::new(tokio::sync::Mutex::new(email_client::EmailClient::new())),
-                partner_registry: Arc::new(tokio::sync::Mutex::new(partnerships::PartnerRegistry::new())),
+                browser_bridge: Arc::new(
+                    tokio::sync::Mutex::new(browser_ext::BrowserBridge::new()),
+                ),
+                email_client_mgr: Arc::new(tokio::sync::Mutex::new(
+                    email_client::EmailClient::new(),
+                )),
+                partner_registry: Arc::new(tokio::sync::Mutex::new(
+                    partnerships::PartnerRegistry::new(db_path.clone())
+                        .expect("failed to initialize partner registry"),
+                )),
                 // R111-R115: Autonomous Operations
                 auto_inbox: Arc::new(tokio::sync::Mutex::new(autonomous::AutoInbox::new())),
                 auto_scheduler: Arc::new(tokio::sync::Mutex::new(autonomous::AutoScheduler::new())),
                 auto_reporter: Arc::new(tokio::sync::Mutex::new(autonomous::AutoReporter::new())),
-                auto_data_entry: Arc::new(tokio::sync::Mutex::new(autonomous::AutoDataEntry::new())),
+                auto_data_entry: Arc::new(
+                    tokio::sync::Mutex::new(autonomous::AutoDataEntry::new()),
+                ),
                 auto_qa: Arc::new(tokio::sync::Mutex::new(autonomous::AutoQA::new())),
                 auto_support: Arc::new(tokio::sync::Mutex::new(autonomous::AutoSupport::new())),
-                auto_procurement: Arc::new(tokio::sync::Mutex::new(autonomous::AutoProcurement::new())),
-                auto_compliance: Arc::new(tokio::sync::Mutex::new(autonomous::AutoCompliance::new())),
-                auto_reconciliation: Arc::new(tokio::sync::Mutex::new(autonomous::AutoReconciliation::new())),
+                auto_procurement: Arc::new(tokio::sync::Mutex::new(
+                    autonomous::AutoProcurement::new(),
+                )),
+                auto_compliance: Arc::new(tokio::sync::Mutex::new(
+                    autonomous::AutoCompliance::new(),
+                )),
+                auto_reconciliation: Arc::new(tokio::sync::Mutex::new(
+                    autonomous::AutoReconciliation::new(),
+                )),
                 // R121-R124: Intelligence — reasoning modules (in-memory)
-                reasoning_engine: Arc::new(tokio::sync::Mutex::new(reasoning::ReasoningEngine::new())),
+                reasoning_engine: Arc::new(tokio::sync::Mutex::new(
+                    reasoning::ReasoningEngine::new(),
+                )),
                 self_corrector: Arc::new(tokio::sync::Mutex::new(reasoning::SelfCorrector::new())),
-                multimodal_reasoner: Arc::new(tokio::sync::Mutex::new(reasoning::MultimodalReasoner::new())),
+                multimodal_reasoner: Arc::new(tokio::sync::Mutex::new(
+                    reasoning::MultimodalReasoner::new(),
+                )),
                 causal_engine: Arc::new(tokio::sync::Mutex::new(reasoning::CausalEngine::new())),
                 // R125: Knowledge Graph (SQLite)
                 knowledge_graph: Arc::new(std::sync::Mutex::new(
@@ -8645,36 +10447,92 @@ pub fn run() {
                         .expect("failed to init knowledge graph"),
                 )),
                 // R126: Hypothesis Generation (in-memory)
-                hypothesis_engine: Arc::new(tokio::sync::Mutex::new(reasoning::HypothesisEngine::new())),
+                hypothesis_engine: Arc::new(tokio::sync::Mutex::new(
+                    reasoning::HypothesisEngine::new(),
+                )),
                 // R127: Confidence Calibration (SQLite)
                 confidence_calibrator: Arc::new(reasoning::ConfidenceCalibrator::new(&db_path)),
                 // R128: Transfer Learning (in-memory)
-                transfer_engine: Arc::new(tokio::sync::Mutex::new(reasoning::TransferEngine::new())),
+                transfer_engine: Arc::new(
+                    tokio::sync::Mutex::new(reasoning::TransferEngine::new()),
+                ),
                 // R129: Meta-Learning (SQLite)
                 meta_learner: Arc::new(reasoning::MetaLearner::new(&db_path)),
                 // R131-R139: Industry Vertical Pro modules
                 legal_suite: Arc::new(tokio::sync::Mutex::new(verticals::LegalSuite::new())),
-                medical_assistant: Arc::new(tokio::sync::Mutex::new(verticals::MedicalAssistant::new())),
-                accounting_engine: Arc::new(tokio::sync::Mutex::new(verticals::AccountingEngine::new())),
-                real_estate_agent: Arc::new(tokio::sync::Mutex::new(verticals::RealEstateAgent::new())),
-                education_assistant: Arc::new(tokio::sync::Mutex::new(verticals::EducationAssistant::new())),
+                medical_assistant: Arc::new(tokio::sync::Mutex::new(
+                    verticals::MedicalAssistant::new(),
+                )),
+                accounting_engine: Arc::new(tokio::sync::Mutex::new(
+                    verticals::AccountingEngine::new(),
+                )),
+                real_estate_agent: Arc::new(tokio::sync::Mutex::new(
+                    verticals::RealEstateAgent::new(),
+                )),
+                education_assistant: Arc::new(tokio::sync::Mutex::new(
+                    verticals::EducationAssistant::new(),
+                )),
                 hr_manager: Arc::new(tokio::sync::Mutex::new(verticals::HRManager::new())),
-                supply_chain_manager: Arc::new(tokio::sync::Mutex::new(verticals::SupplyChainManager::new())),
-                construction_manager: Arc::new(tokio::sync::Mutex::new(verticals::ConstructionManager::new())),
-                agriculture_assistant: Arc::new(tokio::sync::Mutex::new(verticals::AgricultureAssistant::new())),
+                supply_chain_manager: Arc::new(tokio::sync::Mutex::new(
+                    verticals::SupplyChainManager::new(),
+                )),
+                construction_manager: Arc::new(tokio::sync::Mutex::new(
+                    verticals::ConstructionManager::new(),
+                )),
+                agriculture_assistant: Arc::new(tokio::sync::Mutex::new(
+                    verticals::AgricultureAssistant::new(),
+                )),
                 // R141-R149: Agent Economy modules
-                hiring_manager: Arc::new(tokio::sync::Mutex::new(economy::hiring::HiringManager::new())),
-                reputation_engine: Arc::new(tokio::sync::Mutex::new(economy::reputation::ReputationEngine::new())),
-                collab_manager: Arc::new(tokio::sync::Mutex::new(economy::collaboration::CollabManager::new())),
-                microtask_market: Arc::new(tokio::sync::Mutex::new(economy::microtasks::MicrotaskMarket::new())),
-                escrow_manager: Arc::new(tokio::sync::Mutex::new(economy::escrow::EscrowManager::new())),
-                insurance_manager: Arc::new(tokio::sync::Mutex::new(economy::insurance::InsuranceManager::new())),
-                creator_studio: Arc::new(tokio::sync::Mutex::new(economy::creator_studio::CreatorStudio::new())),
-                creator_analytics: Arc::new(tokio::sync::Mutex::new(economy::creator_analytics::CreatorAnalyticsEngine::new())),
-                affiliate_program: Arc::new(tokio::sync::Mutex::new(economy::affiliate::AffiliateProgram::new())),
+                hiring_manager: Arc::new(tokio::sync::Mutex::new(
+                    economy::hiring::HiringManager::new(),
+                )),
+                reputation_engine: Arc::new(tokio::sync::Mutex::new(
+                    economy::reputation::ReputationEngine::new(db_path.clone())
+                        .map_err(|e| format!("Failed to initialize reputation engine: {}", e))?,
+                )),
+                collab_manager: Arc::new(tokio::sync::Mutex::new(
+                    economy::collaboration::CollabManager::new(db_path.clone())
+                        .map_err(|e| format!("Failed to initialize collaboration manager: {}", e))?,
+                )),
+                microtask_market: Arc::new(tokio::sync::Mutex::new(
+                    economy::microtasks::MicrotaskMarket::new(db_path.clone())
+                        .map_err(|e| format!("Failed to initialize microtask market: {}", e))?,
+                )),
+                escrow_manager: Arc::new(tokio::sync::Mutex::new(
+                    economy::escrow::EscrowManager::new(db_path.clone())
+                        .map_err(|e| format!("Failed to initialize escrow manager: {}", e))?,
+                )),
+                insurance_manager: Arc::new(tokio::sync::Mutex::new(
+                    economy::insurance::InsuranceManager::new(),
+                )),
+                creator_studio: Arc::new(tokio::sync::Mutex::new(
+                    economy::creator_studio::CreatorStudio::new(db_path.clone())
+                        .map_err(|e| format!("Failed to initialize creator studio: {}", e))?,
+                )),
+                creator_analytics: Arc::new(tokio::sync::Mutex::new(
+                    economy::creator_analytics::CreatorAnalyticsEngine::new(db_path.clone())
+                        .map_err(|e| format!("Failed to initialize creator analytics: {}", e))?,
+                )),
+                affiliate_program: Arc::new(tokio::sync::Mutex::new(
+                    economy::affiliate::AffiliateProgram::new(),
+                )),
             });
 
             // ── R35: Deferred startup — plugin discovery in background ────
+            let launch_args: Vec<String> = std::env::args().collect();
+            if let Some(invocation) = {
+                let state = app.state::<AppState>();
+                let mut shell = state.shell_integration.lock().map_err(|e| e.to_string())?;
+                shell.queue_launch_invocation(&launch_args)
+            } {
+                tracing::info!(
+                    action_id = invocation.action_id,
+                    target = invocation.target_path,
+                    "Queued shell invocation from OS context menu"
+                );
+                focus_main_window(&app.handle());
+            }
+
             {
                 let pm = app.state::<AppState>().plugin_manager.clone();
                 tauri::async_runtime::spawn(async move {
@@ -8798,7 +10656,9 @@ pub fn run() {
                         api_port,
                         stripe_webhook_secret,
                         None, // settings_path updated after config is available
-                    ).await {
+                    )
+                    .await
+                    {
                         Ok((mut rx, task_store)) => {
                             tracing::info!("Public API server started on port {}", api_port);
                             // Process incoming API tasks
@@ -8855,7 +10715,9 @@ pub fn run() {
             let discord_token = if !settings.discord_bot_token.is_empty() {
                 Some(settings.discord_bot_token.clone())
             } else {
-                std::env::var("DISCORD_BOT_TOKEN").ok().filter(|t| !t.is_empty())
+                std::env::var("DISCORD_BOT_TOKEN")
+                    .ok()
+                    .filter(|t| !t.is_empty())
             };
             if let Some(discord_token) = discord_token {
                 if settings.discord_enabled || std::env::var("DISCORD_BOT_TOKEN").is_ok() {
@@ -8911,13 +10773,20 @@ pub fn run() {
                     // Open a fresh connection for the report
                     if let Ok(conn) = rusqlite::Connection::open(&report_db_path) {
                         if feedback::collector::FeedbackCollector::ensure_table(&conn).is_ok() {
-                            let records = feedback::collector::FeedbackCollector::get_recent(&conn, 200)
-                                .unwrap_or_default();
+                            let records =
+                                feedback::collector::FeedbackCollector::get_recent(&conn, 200)
+                                    .unwrap_or_default();
                             let stats = feedback::collector::FeedbackCollector::get_stats(&conn)
                                 .unwrap_or(feedback::collector::FeedbackStats {
-                                    total: 0, positive: 0, negative: 0, positive_rate: 0.0,
+                                    total: 0,
+                                    positive: 0,
+                                    negative: 0,
+                                    positive_rate: 0.0,
                                 });
-                            let insights = feedback::analyzer::InsightAnalyzer::generate_weekly_insights(&records, &stats);
+                            let insights =
+                                feedback::analyzer::InsightAnalyzer::generate_weekly_insights(
+                                    &records, &stats,
+                                );
                             let _ = report_handle.emit("feedback:weekly_report", &insights);
                             tracing::info!("Weekly feedback report emitted on startup");
                         }
@@ -8995,13 +10864,20 @@ pub fn run() {
                 let current = env!("CARGO_PKG_VERSION");
                 match updater::UpdateChecker::check_for_update(current, AGENTOS_GITHUB_REPO).await {
                     Ok(info) if info.update_available => {
-                        tracing::info!("Update available: v{} → v{}", current, info.latest_version.as_deref().unwrap_or("?"));
-                        let _ = handle.emit("update:available", serde_json::json!({
-                            "current_version": info.current_version,
-                            "latest_version": info.latest_version,
-                            "release_notes": info.release_notes,
-                            "download_url": info.download_url,
-                        }));
+                        tracing::info!(
+                            "Update available: v{} → v{}",
+                            current,
+                            info.latest_version.as_deref().unwrap_or("?")
+                        );
+                        let _ = handle.emit(
+                            "update:available",
+                            serde_json::json!({
+                                "current_version": info.current_version,
+                                "latest_version": info.latest_version,
+                                "release_notes": info.release_notes,
+                                "download_url": info.download_url,
+                            }),
+                        );
                     }
                     Ok(_) => tracing::info!("AgentOS is up to date (v{})", current),
                     Err(e) => tracing::warn!("Auto-update check failed: {}", e),
@@ -9021,6 +10897,8 @@ pub fn run() {
             cmd_get_status,
             cmd_process_message,
             cmd_get_tasks,
+            cmd_retry_task,
+            cmd_classify_task,
             cmd_get_settings,
             cmd_update_settings,
             cmd_health_check,
@@ -9082,6 +10960,10 @@ pub fn run() {
             cmd_vault_retrieve,
             cmd_vault_delete,
             cmd_vault_migrate,
+            cmd_vault_rotate,
+            cmd_vault_audit,
+            cmd_trust_boundaries,
+            cmd_permission_enforcement_audit,
             // R22: Marketplace commands
             cmd_marketplace_list,
             cmd_marketplace_search,
@@ -9117,6 +10999,8 @@ pub fn run() {
             cmd_export_audit_log,
             cmd_get_org,
             cmd_create_org,
+            cmd_list_orgs,
+            cmd_set_current_org,
             cmd_list_org_members,
             cmd_add_org_member,
             cmd_get_sso_auth_url,
@@ -9138,6 +11022,8 @@ pub fn run() {
             // R34: Plugin commands
             cmd_plugin_list,
             cmd_plugin_install,
+            cmd_plugin_update,
+            cmd_plugin_rollback,
             cmd_plugin_uninstall,
             cmd_plugin_toggle,
             cmd_plugin_execute,
@@ -9198,7 +11084,11 @@ pub fn run() {
             cmd_export_logs,
             cmd_get_alerts,
             cmd_acknowledge_alert,
+            cmd_open_incident,
+            cmd_resolve_incident,
+            cmd_incident_runbooks,
             cmd_get_health,
+            cmd_get_observability_summary,
             // R48: AI Training Pipeline commands
             cmd_get_training_summary,
             cmd_get_training_records,
@@ -9279,6 +11169,9 @@ pub fn run() {
             cmd_respond_approval,
             cmd_classify_risk,
             cmd_list_approval_history,
+            cmd_permission_grant,
+            cmd_permission_list,
+            cmd_permission_check,
             // R63: Calendar Integration commands
             cmd_calendar_list_events,
             cmd_calendar_create_event,
@@ -9366,6 +11259,7 @@ pub fn run() {
             cmd_test_run_suite,
             cmd_test_run_single,
             cmd_test_create_template,
+            cmd_test_history,
             // R75: Playbook Version Control commands
             cmd_playbook_versions,
             cmd_playbook_save_version,
@@ -9399,16 +11293,24 @@ pub fn run() {
             cmd_get_accessibility,
             cmd_set_accessibility,
             cmd_get_accessibility_css,
+            cmd_accessibility_describe_screen,
+            cmd_accessibility_run_voice_command,
+            cmd_accessibility_run_voice_command_audio,
             // R88: Industry Verticals commands
             cmd_list_verticals,
             cmd_get_vertical,
             cmd_activate_vertical,
             cmd_get_active_vertical,
+            cmd_get_platform_support,
+            cmd_vertical_get_playbook,
+            cmd_vertical_run_workflow,
             // R89: Offline First commands
             cmd_check_connectivity,
             cmd_get_offline_status,
             cmd_sync_offline,
             cmd_get_cached_response,
+            cmd_set_connectivity_override,
+            cmd_recovery_report,
             // R81: On-Device AI commands
             cmd_ondevice_list,
             cmd_ondevice_load,
@@ -9428,11 +11330,14 @@ pub fn run() {
             cmd_crossapp_list,
             cmd_crossapp_send,
             cmd_crossapp_status,
+            cmd_crossapp_run_csv_workflow,
+            cmd_crossapp_history,
             // R85: Agent Swarm commands
             cmd_swarm_create,
             cmd_swarm_execute,
             cmd_swarm_results,
             cmd_swarm_list,
+            cmd_swarm_cancel,
             // R96: Agent Debugger commands
             cmd_debugger_start_trace,
             cmd_debugger_get_trace,
@@ -9448,12 +11353,20 @@ pub fn run() {
             cmd_investor_metrics,
             cmd_data_room,
             cmd_financial_projections,
-            cmd_readiness_artifacts,
+            cmd_category_demos,
+            cmd_definitive_readiness,
+            cmd_reliability_report,
             // R91: OS Integration commands
             cmd_get_file_actions,
             cmd_get_text_actions,
+            cmd_get_shell_registration_status,
+            cmd_install_windows_context_menu,
+            cmd_uninstall_windows_context_menu,
+            cmd_get_pending_shell_invocation,
+            cmd_get_last_shell_execution,
             cmd_process_file_action,
             cmd_process_text_action,
+            cmd_consume_pending_shell_invocation,
             // R92: Federated Learning commands
             cmd_federated_train,
             cmd_federated_submit,
@@ -9464,6 +11377,10 @@ pub fn run() {
             cmd_resolve_escalation,
             cmd_create_escalation,
             cmd_get_escalation,
+            cmd_assign_escalation,
+            cmd_add_escalation_note,
+            cmd_resume_escalation,
+            cmd_complete_escalation_by_human,
             // R94: Compliance Automation commands
             cmd_run_compliance_check,
             cmd_get_compliance_reports,
@@ -9474,6 +11391,7 @@ pub fn run() {
             cmd_org_marketplace_approve,
             cmd_org_marketplace_remove,
             cmd_org_marketplace_search,
+            cmd_org_marketplace_view,
             // R101: AR/VR Agent commands
             cmd_arvr_connect,
             cmd_arvr_disconnect,
@@ -9524,6 +11442,8 @@ pub fn run() {
             cmd_get_partner,
             cmd_register_partner,
             cmd_certify_partner,
+            cmd_partner_configure_distribution,
+            cmd_partner_prepare_distribution,
             // R111: Autonomous Inbox commands
             cmd_auto_inbox_add_rule,
             cmd_auto_inbox_list_rules,
@@ -9664,6 +11584,7 @@ pub fn run() {
             cmd_reputation_get,
             cmd_reputation_review,
             cmd_reputation_leaderboard,
+            cmd_reputation_history,
             // R143: Cross-User Collaboration commands
             cmd_collab_create,
             cmd_collab_join,
@@ -9678,7 +11599,9 @@ pub fn run() {
             cmd_escrow_create,
             cmd_escrow_release,
             cmd_escrow_refund,
+            cmd_escrow_dispute,
             cmd_escrow_list,
+            cmd_escrow_history,
             // R146: Agent Insurance commands
             cmd_insurance_create,
             cmd_insurance_list,
@@ -9686,6 +11609,8 @@ pub fn run() {
             cmd_insurance_status,
             // R147: Creator Studio commands
             cmd_creator_create,
+            cmd_creator_test,
+            cmd_creator_prepare_package,
             cmd_creator_publish,
             cmd_creator_list,
             cmd_creator_analytics,
@@ -9693,6 +11618,7 @@ pub fn run() {
             cmd_creator_metrics,
             cmd_creator_revenue,
             cmd_creator_trends,
+            cmd_creator_dashboard,
             // R149: Affiliate Program commands
             cmd_affiliate_create,
             cmd_affiliate_earnings,
@@ -9704,4 +11630,47 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn secret_settings_are_scrubbed_from_persisted_config() {
+        let mut settings = config::Settings::default();
+        settings.set("anthropic_api_key", "sk-ant");
+        settings.set("openai_api_key", "sk-openai");
+        settings.set("discord_bot_token", "discord-secret");
+
+        scrub_persisted_secrets(&mut settings);
+
+        assert!(settings.anthropic_api_key.is_empty());
+        assert!(settings.openai_api_key.is_empty());
+        assert!(settings.discord_bot_token.is_empty());
+    }
+
+    #[test]
+    fn settings_can_be_hydrated_from_vault() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut vault = vault::SecureVault::new(dir.path());
+        vault.create("pw").unwrap();
+        vault.store("ANTHROPIC_API_KEY", "sk-ant").unwrap();
+        vault.store("GOOGLE_REFRESH_TOKEN", "refresh-token").unwrap();
+
+        let mut settings = config::Settings::default();
+        hydrate_settings_from_vault(&mut settings, &vault).unwrap();
+
+        assert_eq!(settings.anthropic_api_key, "sk-ant");
+        assert_eq!(settings.google_refresh_token, "refresh-token");
+    }
+
+    #[test]
+    fn retryable_statuses_are_honest() {
+        assert!(is_retryable_task_status("failed"));
+        assert!(is_retryable_task_status("killed"));
+        assert!(is_retryable_task_status("timeout"));
+        assert!(!is_retryable_task_status("running"));
+        assert!(!is_retryable_task_status("completed"));
+    }
 }

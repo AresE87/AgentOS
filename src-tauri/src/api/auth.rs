@@ -28,9 +28,7 @@ pub fn ensure_table(conn: &Connection) -> Result<(), String> {
 pub fn generate_api_key() -> String {
     use rand::Rng;
     let mut rng = rand::thread_rng();
-    let hex: String = (0..32)
-        .map(|_| format!("{:x}", rng.gen::<u8>()))
-        .collect();
+    let hex: String = (0..32).map(|_| format!("{:x}", rng.gen::<u8>())).collect();
     format!("aos_{}", hex)
 }
 

@@ -115,7 +115,14 @@ impl AgentRegistry {
     }
 }
 
-fn p(name: &str, cat: &str, level: AgentLevel, prompt: &str, tools: &[&str], keywords: &[&str]) -> AgentProfile {
+fn p(
+    name: &str,
+    cat: &str,
+    level: AgentLevel,
+    prompt: &str,
+    tools: &[&str],
+    keywords: &[&str],
+) -> AgentProfile {
     AgentProfile {
         name: name.to_string(),
         category: cat.to_string(),
@@ -587,7 +594,8 @@ mod tests {
     #[test]
     fn find_best_scored_returns_high_score_for_specific_task() {
         let reg = AgentRegistry::new();
-        let (_agent, score) = reg.find_best_scored("review this code for bugs and vulnerabilities in the pull request");
+        let (_agent, score) = reg
+            .find_best_scored("review this code for bugs and vulnerabilities in the pull request");
         assert!(score >= 3, "Should match multiple keywords, got {}", score);
     }
 
@@ -617,13 +625,25 @@ mod tests {
     fn enhanced_agents_have_rich_prompts() {
         let reg = AgentRegistry::new();
         let programmer = reg.get_by_name("Programmer").unwrap();
-        assert!(programmer.system_prompt.len() > 100, "Programmer prompt should be rich");
-        assert!(programmer.system_prompt.contains("SOLID"), "Programmer prompt should mention SOLID");
+        assert!(
+            programmer.system_prompt.len() > 100,
+            "Programmer prompt should be rich"
+        );
+        assert!(
+            programmer.system_prompt.contains("SOLID"),
+            "Programmer prompt should mention SOLID"
+        );
 
         let reviewer = reg.get_by_name("Code Reviewer").unwrap();
-        assert!(reviewer.system_prompt.contains("APPROVE"), "Code Reviewer should have verdict format");
+        assert!(
+            reviewer.system_prompt.contains("APPROVE"),
+            "Code Reviewer should have verdict format"
+        );
 
         let sysadmin = reg.get_by_name("Sysadmin").unwrap();
-        assert!(sysadmin.system_prompt.contains("PowerShell"), "Sysadmin prompt should mention PowerShell");
+        assert!(
+            sysadmin.system_prompt.contains("PowerShell"),
+            "Sysadmin prompt should mention PowerShell"
+        );
     }
 }

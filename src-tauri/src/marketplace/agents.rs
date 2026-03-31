@@ -131,8 +131,9 @@ impl AgentMarketplace {
                 package_id   TEXT NOT NULL,
                 persona_id   TEXT NOT NULL,
                 installed_at TEXT NOT NULL
-            )"
-        ).map_err(|e| format!("agent marketplace table error: {}", e))
+            )",
+        )
+        .map_err(|e| format!("agent marketplace table error: {}", e))
     }
 
     // ── Catalog ────────────────────────────────────────────────────
@@ -176,15 +177,19 @@ impl AgentMarketplace {
         PersonaManager::ensure_table(conn)?;
 
         let all = Self::list_agents()?;
-        let pkg = all.iter().find(|p| p.id == id)
+        let pkg = all
+            .iter()
+            .find(|p| p.id == id)
             .ok_or_else(|| format!("Agent package '{}' not found", id))?;
 
         // Check if already installed
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM marketplace_agent_installs WHERE package_id = ?1",
-            rusqlite::params![id],
-            |row| row.get(0),
-        ).unwrap_or(0);
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM marketplace_agent_installs WHERE package_id = ?1",
+                rusqlite::params![id],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
         if count > 0 {
             return Err(format!("Agent '{}' is already installed", id));
         }
@@ -195,15 +200,35 @@ impl AgentMarketplace {
         let persona = AgentPersona {
             id: persona_id.clone(),
             name: pkg.name.clone(),
-            role: cfg.get("role").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            avatar: cfg.get("avatar").and_then(|v| v.as_str()).unwrap_or("\u{1F916}").to_string(),
-            personality: cfg.get("personality").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            role: cfg
+                .get("role")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            avatar: cfg
+                .get("avatar")
+                .and_then(|v| v.as_str())
+                .unwrap_or("\u{1F916}")
+                .to_string(),
+            personality: cfg
+                .get("personality")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
             language: "en".to_string(),
             voice: None,
-            system_prompt: cfg.get("system_prompt").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            system_prompt: cfg
+                .get("system_prompt")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
             knowledge_files: pkg.knowledge_files.clone(),
             preferred_model: None,
-            tier: cfg.get("tier").and_then(|v| v.as_str()).unwrap_or("standard").to_string(),
+            tier: cfg
+                .get("tier")
+                .and_then(|v| v.as_str())
+                .unwrap_or("standard")
+                .to_string(),
             created_at: Utc::now().to_rfc3339(),
         };
 
@@ -229,11 +254,13 @@ impl AgentMarketplace {
         Self::ensure_table(conn)?;
 
         // Find the linked persona
-        let persona_id: Option<String> = conn.query_row(
-            "SELECT persona_id FROM marketplace_agent_installs WHERE package_id = ?1",
-            rusqlite::params![id],
-            |row| row.get(0),
-        ).ok();
+        let persona_id: Option<String> = conn
+            .query_row(
+                "SELECT persona_id FROM marketplace_agent_installs WHERE package_id = ?1",
+                rusqlite::params![id],
+                |row| row.get(0),
+            )
+            .ok();
 
         // Delete persona if it exists
         if let Some(pid) = &persona_id {
@@ -244,7 +271,8 @@ impl AgentMarketplace {
         conn.execute(
             "DELETE FROM marketplace_agent_installs WHERE package_id = ?1",
             rusqlite::params![id],
-        ).map_err(|e| format!("DB delete error: {}", e))?;
+        )
+        .map_err(|e| format!("DB delete error: {}", e))?;
 
         tracing::info!(package_id = %id, "Agent package uninstalled");
         Ok(serde_json::json!({ "ok": true, "package_id": id }))
@@ -253,11 +281,13 @@ impl AgentMarketplace {
     /// Check whether an agent package is currently installed.
     pub fn is_installed(conn: &Connection, package_id: &str) -> bool {
         Self::ensure_table(conn).ok();
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM marketplace_agent_installs WHERE package_id = ?1",
-            rusqlite::params![package_id],
-            |row| row.get(0),
-        ).unwrap_or(0);
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM marketplace_agent_installs WHERE package_id = ?1",
+                rusqlite::params![package_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
         count > 0
     }
 

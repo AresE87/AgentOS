@@ -51,7 +51,14 @@ impl SCIMProvider {
     /// Create a new SCIM user (stub — returns the user with a generated ID).
     pub fn create_user(user: SCIMUser) -> SCIMUser {
         SCIMUser {
-            id: format!("scim-{}", uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("000")),
+            id: format!(
+                "scim-{}",
+                uuid::Uuid::new_v4()
+                    .to_string()
+                    .split('-')
+                    .next()
+                    .unwrap_or("000")
+            ),
             ..user
         }
     }

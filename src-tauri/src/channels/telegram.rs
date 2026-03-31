@@ -59,7 +59,10 @@ impl TelegramBot {
     }
 
     /// Send typing indicator
-    pub async fn send_typing(&self, chat_id: i64) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn send_typing(
+        &self,
+        chat_id: i64,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let url = format!("{}/bot{}/sendChatAction", TELEGRAM_API, self.token);
         self.client
             .post(&url)
@@ -77,7 +80,8 @@ impl TelegramBot {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         for chunk in split_message_smart(text, 4000) {
             let url = format!("{}/bot{}/sendMessage", TELEGRAM_API, self.token);
-            let resp = self.client
+            let resp = self
+                .client
                 .post(&url)
                 .json(&json!({
                     "chat_id": chat_id,
@@ -204,8 +208,11 @@ pub async fn run_bot_loop(token: &str, settings: &crate::config::Settings) {
                         let providers = settings.configured_providers();
                         let status = format!(
                             "*AgentOS Status*\n\nProviders: {}\nStatus: Online",
-                            if providers.is_empty() { "None configured".to_string() }
-                            else { providers.join(", ") }
+                            if providers.is_empty() {
+                                "None configured".to_string()
+                            } else {
+                                providers.join(", ")
+                            }
                         );
                         let _ = bot.send_message(msg.chat_id, &status).await;
                         continue;
@@ -223,7 +230,8 @@ pub async fn run_bot_loop(token: &str, settings: &crate::config::Settings) {
                     let typing_handle = tokio::spawn(async move {
                         let client = Client::new();
                         loop {
-                            let url = format!("{}/bot{}/sendChatAction", TELEGRAM_API, typing_token);
+                            let url =
+                                format!("{}/bot{}/sendChatAction", TELEGRAM_API, typing_token);
                             let _ = client
                                 .post(&url)
                                 .json(&json!({ "chat_id": typing_chat_id, "action": "typing" }))

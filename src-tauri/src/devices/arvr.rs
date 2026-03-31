@@ -94,7 +94,11 @@ impl ARVRAgent {
     }
 
     /// Send a spatial command (e.g., "highlight", "point", "place_panel")
-    pub fn send_spatial_command(&self, action: &str, _params: serde_json::Value) -> Result<serde_json::Value, String> {
+    pub fn send_spatial_command(
+        &self,
+        action: &str,
+        _params: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
         if !self.connected {
             return Err("Not connected to any headset".into());
         }

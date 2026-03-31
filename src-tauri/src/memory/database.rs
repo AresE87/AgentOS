@@ -1,6 +1,6 @@
 use crate::automation::scheduler::Trigger;
 use crate::brain::LLMResponse;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 
 pub struct Database {
@@ -67,52 +67,6 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks(created_at);
             CREATE INDEX IF NOT EXISTS idx_steps_task ON task_steps(task_id);
             CREATE INDEX IF NOT EXISTS idx_llm_task ON llm_calls(task_id);
-
-            CREATE TABLE IF NOT EXISTS execution_traces (
-                task_id TEXT PRIMARY KEY REFERENCES tasks(id),
-                source TEXT NOT NULL DEFAULT 'pipeline',
-                input_text TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'running',
-                total_duration_ms INTEGER NOT NULL DEFAULT 0,
-                total_cost REAL NOT NULL DEFAULT 0,
-                total_tokens INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                finished_at TEXT
-            );
-
-            CREATE TABLE IF NOT EXISTS execution_trace_steps (
-                id TEXT PRIMARY KEY,
-                task_id TEXT NOT NULL REFERENCES execution_traces(task_id),
-                seq INTEGER NOT NULL,
-                phase TEXT NOT NULL,
-                input TEXT NOT NULL DEFAULT '',
-                output TEXT NOT NULL DEFAULT '',
-                decision TEXT NOT NULL DEFAULT '',
-                duration_ms INTEGER NOT NULL DEFAULT 0,
-                cost REAL NOT NULL DEFAULT 0,
-                tokens INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL DEFAULT (datetime('now'))
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_execution_traces_created ON execution_traces(created_at);
-            CREATE INDEX IF NOT EXISTS idx_execution_trace_steps_task ON execution_trace_steps(task_id, seq);
-
-            CREATE TABLE IF NOT EXISTS hardware_partners (
-                id TEXT PRIMARY KEY,
-                company TEXT NOT NULL,
-                device_type TEXT NOT NULL,
-                integration_level TEXT NOT NULL,
-                certified INTEGER NOT NULL DEFAULT 0,
-                certification_note TEXT,
-                certification_evidence TEXT,
-                contact_email TEXT,
-                units_shipped INTEGER,
-                registered_at TEXT NOT NULL DEFAULT (datetime('now')),
-                certified_at TEXT
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_hardware_partners_registered ON hardware_partners(registered_at);
-            CREATE INDEX IF NOT EXISTS idx_hardware_partners_certified ON hardware_partners(certified);
 
             CREATE TABLE IF NOT EXISTS chain_log (
                 id          TEXT PRIMARY KEY,
@@ -268,19 +222,17 @@ impl Database {
     }
 
     pub fn get_analytics(&self) -> Result<Value, rusqlite::Error> {
-        let total_tasks: i64 =
-            self.conn
-                .query_row("SELECT COUNT(*) FROM tasks", [], |r| r.get(0))?;
+        let total_tasks: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM tasks", [], |r| r.get(0))?;
         let completed: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM tasks WHERE status='completed'",
             [],
             |r| r.get(0),
         )?;
-        let total_cost: f64 = self.conn.query_row(
-            "SELECT COALESCE(SUM(cost), 0) FROM tasks",
-            [],
-            |r| r.get(0),
-        )?;
+        let total_cost: f64 =
+            self.conn
+                .query_row("SELECT COALESCE(SUM(cost), 0) FROM tasks", [], |r| r.get(0))?;
         let total_tokens: i64 = self.conn.query_row(
             "SELECT COALESCE(SUM(tokens_in + tokens_out), 0) FROM tasks",
             [],
@@ -327,36 +279,17 @@ impl Database {
         Ok(())
     }
 
-    pub fn update_task_metrics(
+    pub fn get_task_retry_context(
         &self,
         task_id: &str,
-        model_used: Option<&str>,
-        provider: Option<&str>,
-        tokens_in: u32,
-        tokens_out: u32,
-        cost: f64,
-        duration_ms: u64,
-    ) -> Result<(), rusqlite::Error> {
-        self.conn.execute(
-            "UPDATE tasks
-             SET model_used = COALESCE(?2, model_used),
-                 provider = COALESCE(?3, provider),
-                 tokens_in = ?4,
-                 tokens_out = ?5,
-                 cost = ?6,
-                 duration_ms = ?7
-             WHERE id = ?1",
-            params![
-                task_id,
-                model_used,
-                provider,
-                tokens_in as i64,
-                tokens_out as i64,
-                cost,
-                duration_ms as i64,
-            ],
-        )?;
-        Ok(())
+    ) -> Result<Option<(String, String)>, rusqlite::Error> {
+        self.conn
+            .query_row(
+                "SELECT input_text, status FROM tasks WHERE id = ?1",
+                params![task_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
     }
 
     pub fn insert_task_step(
@@ -389,276 +322,6 @@ impl Database {
         Ok(())
     }
 
-    pub fn ensure_execution_trace(
-        &self,
-        task_id: &str,
-        input_text: &str,
-        source: &str,
-    ) -> Result<(), rusqlite::Error> {
-        self.conn.execute(
-            "INSERT INTO execution_traces (task_id, input_text, source, status)
-             VALUES (?1, ?2, ?3, 'running')
-             ON CONFLICT(task_id) DO UPDATE SET
-                input_text = excluded.input_text,
-                source = excluded.source",
-            params![task_id, input_text, source],
-        )?;
-        Ok(())
-    }
-
-    pub fn append_execution_trace_step(
-        &self,
-        task_id: &str,
-        phase: &str,
-        input: &str,
-        output: &str,
-        decision: &str,
-        duration_ms: u64,
-        cost: f64,
-        tokens: u32,
-    ) -> Result<(), rusqlite::Error> {
-        let id = uuid::Uuid::new_v4().to_string();
-        let seq: i64 = self.conn.query_row(
-            "SELECT COALESCE(MAX(seq), 0) + 1 FROM execution_trace_steps WHERE task_id = ?1",
-            params![task_id],
-            |row| row.get(0),
-        )?;
-
-        self.conn.execute(
-            "INSERT INTO execution_trace_steps (id, task_id, seq, phase, input, output, decision, duration_ms, cost, tokens)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-            params![
-                id,
-                task_id,
-                seq,
-                phase,
-                input,
-                output,
-                decision,
-                duration_ms as i64,
-                cost,
-                tokens as i64,
-            ],
-        )?;
-        Ok(())
-    }
-
-    pub fn finish_execution_trace(
-        &self,
-        task_id: &str,
-        status: &str,
-        total_duration_ms: u64,
-        total_cost: f64,
-        total_tokens: u32,
-    ) -> Result<(), rusqlite::Error> {
-        self.conn.execute(
-            "UPDATE execution_traces
-             SET status = ?2,
-                 total_duration_ms = ?3,
-                 total_cost = ?4,
-                 total_tokens = ?5,
-                 finished_at = datetime('now')
-             WHERE task_id = ?1",
-            params![
-                task_id,
-                status,
-                total_duration_ms as i64,
-                total_cost,
-                total_tokens as i64,
-            ],
-        )?;
-        Ok(())
-    }
-
-    pub fn list_execution_traces(&self, limit: usize) -> Result<Value, rusqlite::Error> {
-        let mut stmt = self.conn.prepare(
-            "SELECT t.task_id, t.input_text, t.status, t.total_duration_ms, t.total_cost, t.created_at,
-                    CASE WHEN t.finished_at IS NOT NULL THEN 1 ELSE 0 END AS finished
-             FROM execution_traces t
-             ORDER BY t.created_at DESC
-             LIMIT ?1",
-        )?;
-
-        let traces: Vec<Value> = stmt
-            .query_map(params![limit as i64], |row| {
-                Ok(json!({
-                    "id": row.get::<_, String>(0)?,
-                    "task_id": row.get::<_, String>(0)?,
-                    "input_text": row.get::<_, String>(1)?,
-                    "status": row.get::<_, String>(2)?,
-                    "total_duration_ms": row.get::<_, i64>(3)?,
-                    "total_cost": row.get::<_, f64>(4)?,
-                    "created_at": row.get::<_, String>(5)?,
-                    "finished": row.get::<_, i32>(6)? == 1,
-                }))
-            })?
-            .filter_map(|r| r.ok())
-            .collect();
-
-        Ok(json!(traces))
-    }
-
-    pub fn get_execution_trace(&self, task_id: &str) -> Result<Value, rusqlite::Error> {
-        let trace = self.conn.query_row(
-            "SELECT t.task_id, t.input_text, t.status, t.total_duration_ms, t.total_cost, t.total_tokens,
-                    t.created_at, CASE WHEN t.finished_at IS NOT NULL THEN 1 ELSE 0 END AS finished,
-                    tk.output_text
-             FROM execution_traces t
-             LEFT JOIN tasks tk ON tk.id = t.task_id
-             WHERE t.task_id = ?1",
-            params![task_id],
-            |row| {
-                Ok(json!({
-                    "id": row.get::<_, String>(0)?,
-                    "task_id": row.get::<_, String>(0)?,
-                    "input_text": row.get::<_, String>(1)?,
-                    "status": row.get::<_, String>(2)?,
-                    "total_duration_ms": row.get::<_, i64>(3)?,
-                    "total_cost": row.get::<_, f64>(4)?,
-                    "total_tokens": row.get::<_, i64>(5)?,
-                    "created_at": row.get::<_, String>(6)?,
-                    "finished": row.get::<_, i32>(7)? == 1,
-                    "output_text": row.get::<_, Option<String>>(8)?,
-                }))
-            },
-        )?;
-
-        let mut stmt = self.conn.prepare(
-            "SELECT seq, phase, input, output, decision, duration_ms, cost, tokens, created_at
-             FROM execution_trace_steps
-             WHERE task_id = ?1
-             ORDER BY seq ASC",
-        )?;
-
-        let steps: Vec<Value> = stmt
-            .query_map(params![task_id], |row| {
-                Ok(json!({
-                    "seq": row.get::<_, i64>(0)?,
-                    "phase": row.get::<_, String>(1)?,
-                    "input": row.get::<_, String>(2)?,
-                    "output": row.get::<_, String>(3)?,
-                    "decision": row.get::<_, String>(4)?,
-                    "duration_ms": row.get::<_, i64>(5)?,
-                    "cost": row.get::<_, f64>(6)?,
-                    "tokens": row.get::<_, i64>(7)?,
-                    "created_at": row.get::<_, String>(8)?,
-                }))
-            })?
-            .filter_map(|r| r.ok())
-            .collect();
-
-        let mut trace_obj = trace;
-        trace_obj["steps"] = json!(steps);
-        Ok(trace_obj)
-    }
-
-    pub fn list_hardware_partners(&self) -> Result<Value, rusqlite::Error> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, company, device_type, integration_level, certified,
-                    certification_note, certification_evidence, contact_email, units_shipped,
-                    registered_at, certified_at
-             FROM hardware_partners
-             ORDER BY registered_at DESC",
-        )?;
-
-        let partners: Vec<Value> = stmt
-            .query_map([], |row| {
-                Ok(json!({
-                    "id": row.get::<_, String>(0)?,
-                    "company": row.get::<_, String>(1)?,
-                    "device_type": row.get::<_, String>(2)?,
-                    "integration_level": row.get::<_, String>(3)?,
-                    "certified": row.get::<_, i32>(4)? == 1,
-                    "certification_note": row.get::<_, Option<String>>(5)?,
-                    "certification_evidence": row.get::<_, Option<String>>(6)?,
-                    "contact_email": row.get::<_, Option<String>>(7)?,
-                    "units_shipped": row.get::<_, Option<i64>>(8)?,
-                    "registered_at": row.get::<_, String>(9)?,
-                    "certified_at": row.get::<_, Option<String>>(10)?,
-                }))
-            })?
-            .filter_map(|r| r.ok())
-            .collect();
-
-        Ok(json!(partners))
-    }
-
-    pub fn get_hardware_partner(&self, id: &str) -> Result<Option<Value>, rusqlite::Error> {
-        let result = self.conn.query_row(
-            "SELECT id, company, device_type, integration_level, certified,
-                    certification_note, certification_evidence, contact_email, units_shipped,
-                    registered_at, certified_at
-             FROM hardware_partners
-             WHERE id = ?1",
-            params![id],
-            |row| {
-                Ok(json!({
-                    "id": row.get::<_, String>(0)?,
-                    "company": row.get::<_, String>(1)?,
-                    "device_type": row.get::<_, String>(2)?,
-                    "integration_level": row.get::<_, String>(3)?,
-                    "certified": row.get::<_, i32>(4)? == 1,
-                    "certification_note": row.get::<_, Option<String>>(5)?,
-                    "certification_evidence": row.get::<_, Option<String>>(6)?,
-                    "contact_email": row.get::<_, Option<String>>(7)?,
-                    "units_shipped": row.get::<_, Option<i64>>(8)?,
-                    "registered_at": row.get::<_, String>(9)?,
-                    "certified_at": row.get::<_, Option<String>>(10)?,
-                }))
-            },
-        );
-
-        match result {
-            Ok(partner) => Ok(Some(partner)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(error) => Err(error),
-        }
-    }
-
-    pub fn register_hardware_partner(
-        &self,
-        company: &str,
-        device_type: &str,
-        integration_level: &str,
-    ) -> Result<Value, rusqlite::Error> {
-        let id = uuid::Uuid::new_v4().to_string();
-        self.conn.execute(
-            "INSERT INTO hardware_partners (id, company, device_type, integration_level, certified)
-             VALUES (?1, ?2, ?3, ?4, 0)",
-            params![id, company, device_type, integration_level],
-        )?;
-
-        Ok(json!({
-            "id": id,
-            "company": company,
-            "device_type": device_type,
-            "integration_level": integration_level,
-            "certified": false,
-            "registered_at": chrono::Utc::now().to_rfc3339(),
-        }))
-    }
-
-    pub fn certify_hardware_partner(
-        &self,
-        id: &str,
-        certification_note: &str,
-        certification_evidence: &str,
-    ) -> Result<Value, rusqlite::Error> {
-        self.conn.execute(
-            "UPDATE hardware_partners
-             SET certified = 1,
-                 certification_note = ?2,
-                 certification_evidence = ?3,
-                 certified_at = datetime('now')
-             WHERE id = ?1",
-            params![id, certification_note, certification_evidence],
-        )?;
-
-        Ok(self
-            .get_hardware_partner(id)?
-            .unwrap_or_else(|| json!({ "id": id, "certified": true })))
-    }
-
     pub fn get_usage_summary(&self) -> Result<Value, rusqlite::Error> {
         // Read from daily_usage table (persisted counters) for billing enforcement
         let (tasks_today, tokens_today) = self.get_daily_usage()?;
@@ -686,42 +349,91 @@ impl Database {
         };
 
         let total: i64 = self.conn.query_row(
-            &format!("SELECT COUNT(*) FROM tasks WHERE {}", date_filter), [], |r| r.get(0))?;
+            &format!("SELECT COUNT(*) FROM tasks WHERE {}", date_filter),
+            [],
+            |r| r.get(0),
+        )?;
         let completed: i64 = self.conn.query_row(
-            &format!("SELECT COUNT(*) FROM tasks WHERE status='completed' AND {}", date_filter), [], |r| r.get(0))?;
+            &format!(
+                "SELECT COUNT(*) FROM tasks WHERE status='completed' AND {}",
+                date_filter
+            ),
+            [],
+            |r| r.get(0),
+        )?;
         let failed: i64 = self.conn.query_row(
-            &format!("SELECT COUNT(*) FROM tasks WHERE status='failed' AND {}", date_filter), [], |r| r.get(0))?;
+            &format!(
+                "SELECT COUNT(*) FROM tasks WHERE status='failed' AND {}",
+                date_filter
+            ),
+            [],
+            |r| r.get(0),
+        )?;
         let total_cost: f64 = self.conn.query_row(
-            &format!("SELECT COALESCE(SUM(cost), 0) FROM tasks WHERE {}", date_filter), [], |r| r.get(0))?;
+            &format!(
+                "SELECT COALESCE(SUM(cost), 0) FROM tasks WHERE {}",
+                date_filter
+            ),
+            [],
+            |r| r.get(0),
+        )?;
         let total_tokens: i64 = self.conn.query_row(
-            &format!("SELECT COALESCE(SUM(tokens_in + tokens_out), 0) FROM tasks WHERE {}", date_filter), [], |r| r.get(0))?;
+            &format!(
+                "SELECT COALESCE(SUM(tokens_in + tokens_out), 0) FROM tasks WHERE {}",
+                date_filter
+            ),
+            [],
+            |r| r.get(0),
+        )?;
         let avg_latency: f64 = self.conn.query_row(
-            &format!("SELECT COALESCE(AVG(duration_ms), 0) FROM tasks WHERE {}", date_filter), [], |r| r.get(0))?;
+            &format!(
+                "SELECT COALESCE(AVG(duration_ms), 0) FROM tasks WHERE {}",
+                date_filter
+            ),
+            [],
+            |r| r.get(0),
+        )?;
 
-        let success_rate = if total > 0 { (completed as f64 / total as f64) * 100.0 } else { 0.0 };
+        let success_rate = if total > 0 {
+            (completed as f64 / total as f64) * 100.0
+        } else {
+            0.0
+        };
 
         // Cost by provider
-        let mut stmt = self.conn.prepare(
-            &format!("SELECT COALESCE(provider, 'unknown'), SUM(cost) FROM tasks WHERE {} GROUP BY provider", date_filter))?;
-        let cost_by_provider: Vec<Value> = stmt.query_map([], |row| {
-            Ok(json!({ "provider": row.get::<_, String>(0)?, "cost": row.get::<_, f64>(1)? }))
-        })?.filter_map(|r| r.ok()).collect();
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT COALESCE(provider, 'unknown'), SUM(cost) FROM tasks WHERE {} GROUP BY provider",
+            date_filter
+        ))?;
+        let cost_by_provider: Vec<Value> = stmt
+            .query_map([], |row| {
+                Ok(json!({ "provider": row.get::<_, String>(0)?, "cost": row.get::<_, f64>(1)? }))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
 
         // Tasks by day (last 7 days)
         let mut stmt = self.conn.prepare(
             "SELECT date(created_at) as day, COUNT(*) as count
              FROM tasks WHERE date(created_at) >= date('now', '-7 days')
-             GROUP BY date(created_at) ORDER BY day")?;
-        let daily_tasks: Vec<Value> = stmt.query_map([], |row| {
-            Ok(json!({ "day": row.get::<_, String>(0)?, "tasks": row.get::<_, i32>(1)? }))
-        })?.filter_map(|r| r.ok()).collect();
+             GROUP BY date(created_at) ORDER BY day",
+        )?;
+        let daily_tasks: Vec<Value> = stmt
+            .query_map([], |row| {
+                Ok(json!({ "day": row.get::<_, String>(0)?, "tasks": row.get::<_, i32>(1)? }))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
 
         // Tasks by type
         let mut stmt = self.conn.prepare(
             &format!("SELECT COALESCE(task_type, 'unknown'), COUNT(*) FROM tasks WHERE {} GROUP BY task_type", date_filter))?;
-        let tasks_by_type: Vec<Value> = stmt.query_map([], |row| {
-            Ok(json!({ "name": row.get::<_, String>(0)?, "value": row.get::<_, i32>(1)? }))
-        })?.filter_map(|r| r.ok()).collect();
+        let tasks_by_type: Vec<Value> = stmt
+            .query_map([], |row| {
+                Ok(json!({ "name": row.get::<_, String>(0)?, "value": row.get::<_, i32>(1)? }))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
 
         Ok(json!({
             "total_tasks": total,
@@ -746,11 +458,11 @@ impl Database {
              GROUP BY input_text
              HAVING cnt >= ?2
              ORDER BY cnt DESC
-             LIMIT 5")?;
+             LIMIT 5",
+        )?;
 
-        let repeated: Vec<Value> = stmt.query_map(
-            params![format!("-{} days", days), threshold],
-            |row| {
+        let repeated: Vec<Value> = stmt
+            .query_map(params![format!("-{} days", days), threshold], |row| {
                 Ok(json!({
                     "input": row.get::<_, String>(0)?,
                     "count": row.get::<_, i32>(1)?,
@@ -924,7 +636,16 @@ impl Database {
              duration_ms = ?6, agent_name = ?7, model = ?8,
              progress = CASE WHEN ?2 = 'done' THEN 1.0 WHEN ?2 = 'running' THEN 0.5 ELSE 0.0 END
              WHERE id = ?1",
-            params![subtask_id, status, message, output, cost, duration_ms as i64, agent_name, model],
+            params![
+                subtask_id,
+                status,
+                message,
+                output,
+                cost,
+                duration_ms as i64,
+                agent_name,
+                model
+            ],
         )?;
         Ok(())
     }
@@ -1084,7 +805,8 @@ impl Database {
     }
 
     pub fn delete_trigger(&self, id: &str) -> Result<(), rusqlite::Error> {
-        self.conn.execute("DELETE FROM triggers WHERE id = ?1", params![id])?;
+        self.conn
+            .execute("DELETE FROM triggers WHERE id = ?1", params![id])?;
         Ok(())
     }
 
@@ -1222,7 +944,8 @@ mod tests {
     #[test]
     fn update_task_output() {
         let (db, _) = temp_db();
-        db.create_task_pending("task_p2", "do another thing").unwrap();
+        db.create_task_pending("task_p2", "do another thing")
+            .unwrap();
         db.update_task_output("task_p2", "Result: success").unwrap();
 
         let tasks = db.get_tasks(10).unwrap();
@@ -1230,15 +953,50 @@ mod tests {
         assert_eq!(arr[0]["output"], "Result: success");
     }
 
+    #[test]
+    fn get_task_retry_context_returns_input_and_status() {
+        let (db, _) = temp_db();
+        db.create_task_pending("task_retry", "open calculator")
+            .unwrap();
+        db.update_task_status("task_retry", "failed").unwrap();
+
+        let ctx = db.get_task_retry_context("task_retry").unwrap();
+        assert_eq!(
+            ctx,
+            Some(("open calculator".to_string(), "failed".to_string()))
+        );
+    }
+
     // ── Task steps ─────────────────────────────────────────────
 
     #[test]
     fn insert_and_get_task_steps() {
         let (db, _) = temp_db();
-        db.create_task_pending("task_s1", "multi-step task").unwrap();
+        db.create_task_pending("task_s1", "multi-step task")
+            .unwrap();
 
-        db.insert_task_step("task_s1", 1, "run_command", "echo hi", "", "terminal", true, 100).unwrap();
-        db.insert_task_step("task_s1", 2, "click", "click button", "", "screen", true, 50).unwrap();
+        db.insert_task_step(
+            "task_s1",
+            1,
+            "run_command",
+            "echo hi",
+            "",
+            "terminal",
+            true,
+            100,
+        )
+        .unwrap();
+        db.insert_task_step(
+            "task_s1",
+            2,
+            "click",
+            "click button",
+            "",
+            "screen",
+            true,
+            50,
+        )
+        .unwrap();
 
         let steps = db.get_task_steps("task_s1").unwrap();
         let arr = steps.as_array().unwrap();
@@ -1255,9 +1013,12 @@ mod tests {
         let (db, _) = temp_db();
         db.create_task_pending("task_s2", "ordered steps").unwrap();
         // Insert out of order
-        db.insert_task_step("task_s2", 3, "type", "typing", "", "screen", true, 30).unwrap();
-        db.insert_task_step("task_s2", 1, "click", "first click", "", "screen", true, 10).unwrap();
-        db.insert_task_step("task_s2", 2, "run_command", "cmd", "", "terminal", true, 20).unwrap();
+        db.insert_task_step("task_s2", 3, "type", "typing", "", "screen", true, 30)
+            .unwrap();
+        db.insert_task_step("task_s2", 1, "click", "first click", "", "screen", true, 10)
+            .unwrap();
+        db.insert_task_step("task_s2", 2, "run_command", "cmd", "", "terminal", true, 20)
+            .unwrap();
 
         let steps = db.get_task_steps("task_s2").unwrap();
         let arr = steps.as_array().unwrap();
@@ -1282,14 +1043,24 @@ mod tests {
     fn analytics_with_tasks() {
         let (db, _) = temp_db();
         let r1 = LLMResponse {
-            task_id: "t1".into(), content: "ok".into(), model: "haiku".into(),
-            provider: "anthropic".into(), tokens_in: 100, tokens_out: 200,
-            cost: 0.01, duration_ms: 500,
+            task_id: "t1".into(),
+            content: "ok".into(),
+            model: "haiku".into(),
+            provider: "anthropic".into(),
+            tokens_in: 100,
+            tokens_out: 200,
+            cost: 0.01,
+            duration_ms: 500,
         };
         let r2 = LLMResponse {
-            task_id: "t2".into(), content: "ok".into(), model: "haiku".into(),
-            provider: "anthropic".into(), tokens_in: 50, tokens_out: 150,
-            cost: 0.005, duration_ms: 300,
+            task_id: "t2".into(),
+            content: "ok".into(),
+            model: "haiku".into(),
+            provider: "anthropic".into(),
+            tokens_in: 50,
+            tokens_out: 150,
+            cost: 0.005,
+            duration_ms: 300,
         };
         db.insert_task("hello", &r1).unwrap();
         db.insert_task("world", &r2).unwrap();
@@ -1314,7 +1085,8 @@ mod tests {
     fn insert_llm_call() {
         let (db, _) = temp_db();
         db.create_task_pending("t_llm", "test llm").unwrap();
-        db.insert_llm_call("t_llm", "anthropic", "haiku", 100, 200, 0.01, 500).unwrap();
+        db.insert_llm_call("t_llm", "anthropic", "haiku", 100, 200, 0.01, 500)
+            .unwrap();
         // No panic = success. The llm_calls table is not directly queried in the current API,
         // but insert_task already creates one, so we verify it doesn't error.
     }
@@ -1324,10 +1096,22 @@ mod tests {
     #[test]
     fn create_and_list_triggers() {
         let (db, _) = temp_db();
-        db.create_trigger("tr1", "Morning report", "cron", r#"{"cron":"0 9 * * *"}"#, "Generate daily report")
-            .unwrap();
-        db.create_trigger("tr2", "Hourly check", "cron", r#"{"cron":"0 * * * *"}"#, "Check system status")
-            .unwrap();
+        db.create_trigger(
+            "tr1",
+            "Morning report",
+            "cron",
+            r#"{"cron":"0 9 * * *"}"#,
+            "Generate daily report",
+        )
+        .unwrap();
+        db.create_trigger(
+            "tr2",
+            "Hourly check",
+            "cron",
+            r#"{"cron":"0 * * * *"}"#,
+            "Check system status",
+        )
+        .unwrap();
 
         let triggers = db.get_triggers().unwrap();
         assert_eq!(triggers.len(), 2);
@@ -1357,8 +1141,14 @@ mod tests {
     #[test]
     fn update_trigger() {
         let (db, _) = temp_db();
-        db.create_trigger("tr1", "Old Name", "cron", r#"{"cron":"*/5 * * * *"}"#, "old task")
-            .unwrap();
+        db.create_trigger(
+            "tr1",
+            "Old Name",
+            "cron",
+            r#"{"cron":"*/5 * * * *"}"#,
+            "old task",
+        )
+        .unwrap();
 
         db.update_trigger("tr1", "New Name", r#"{"cron":"*/10 * * * *"}"#, "new task")
             .unwrap();
@@ -1385,9 +1175,13 @@ mod tests {
         db.create_trigger("tr1", "Test", "cron", r#"{"cron":"*/5 * * * *"}"#, "test")
             .unwrap();
 
-        db.update_trigger_last_run("tr1", "2026-03-29T10:00:00Z").unwrap();
+        db.update_trigger_last_run("tr1", "2026-03-29T10:00:00Z")
+            .unwrap();
 
         let triggers = db.get_triggers().unwrap();
-        assert_eq!(triggers[0].last_run, Some("2026-03-29T10:00:00Z".to_string()));
+        assert_eq!(
+            triggers[0].last_run,
+            Some("2026-03-29T10:00:00Z".to_string())
+        );
     }
 }

@@ -94,21 +94,14 @@ impl StripeClient {
     /// In production this should use the `stripe-signature` header components
     /// (t=..., v1=...) — for now we do a basic presence check so callers are
     /// wired up correctly even before the crypto is fully implemented.
-    pub fn verify_webhook_signature(
-        _payload: &str,
-        signature: &str,
-        webhook_secret: &str,
-    ) -> bool {
+    pub fn verify_webhook_signature(_payload: &str, signature: &str, webhook_secret: &str) -> bool {
         // TODO: Implement full HMAC-SHA256 verification with timestamp tolerance.
         // For now, accept if both signature header and secret are configured.
         !signature.is_empty() && !webhook_secret.is_empty()
     }
 
     /// Retrieve the most recent active subscription for a customer.
-    pub async fn get_subscription(
-        &self,
-        customer_id: &str,
-    ) -> Result<serde_json::Value, String> {
+    pub async fn get_subscription(&self, customer_id: &str) -> Result<serde_json::Value, String> {
         let response = self
             .client
             .get(&format!(

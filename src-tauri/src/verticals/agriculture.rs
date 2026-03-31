@@ -183,8 +183,8 @@ impl AgricultureAssistant {
     pub fn yield_forecast(
         &self,
         crop_id: &str,
-        soil_quality: f64,   // 0.0 - 1.0
-        pest_pressure: f64,  // 0.0 - 1.0
+        soil_quality: f64,  // 0.0 - 1.0
+        pest_pressure: f64, // 0.0 - 1.0
     ) -> Result<serde_json::Value, String> {
         let plan = self
             .plans
@@ -193,7 +193,7 @@ impl AgricultureAssistant {
             .ok_or_else(|| format!("Crop plan not found: {}", crop_id))?;
 
         let base_yield_per_acre = match plan.crop.to_lowercase().as_str() {
-            "corn" => 180.0,   // bushels
+            "corn" => 180.0, // bushels
             "wheat" => 50.0,
             "soybean" => 50.0,
             "rice" => 7500.0,  // lbs

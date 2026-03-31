@@ -1,3 +1,3 @@
 pub mod graph;
 
-pub use graph::{Entity, Relationship, KnowledgeGraph};
+pub use graph::{Entity, KnowledgeGraph, Relationship};

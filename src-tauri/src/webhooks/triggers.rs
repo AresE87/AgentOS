@@ -1,6 +1,6 @@
-use serde::{Deserialize, Serialize};
-use rusqlite::Connection;
 use chrono::Utc;
+use rusqlite::Connection;
+use serde::{Deserialize, Serialize};
 
 // ── Data structures ──────────────────────────────────────────────────
 
@@ -45,13 +45,22 @@ impl WebhookManager {
                 payload_json TEXT NOT NULL,
                 received_at TEXT NOT NULL,
                 task_queued TEXT NOT NULL
-            );"
-        ).map_err(|e| e.to_string())
+            );",
+        )
+        .map_err(|e| e.to_string())
     }
 
-    pub fn create_trigger(conn: &Connection, name: &str, task_template: &str, filter: Option<&str>) -> Result<WebhookTrigger, String> {
+    pub fn create_trigger(
+        conn: &Connection,
+        name: &str,
+        task_template: &str,
+        filter: Option<&str>,
+    ) -> Result<WebhookTrigger, String> {
         let id = uuid::Uuid::new_v4().to_string();
-        let secret = format!("whsec_{}", uuid::Uuid::new_v4().to_string().replace('-', ""));
+        let secret = format!(
+            "whsec_{}",
+            uuid::Uuid::new_v4().to_string().replace('-', "")
+        );
         let now = Utc::now().to_rfc3339();
 
         conn.execute(
@@ -75,17 +84,19 @@ impl WebhookManager {
             .prepare("SELECT id, name, secret, filter, task_template, created_at, last_triggered FROM webhook_triggers ORDER BY created_at DESC")
             .map_err(|e| e.to_string())?;
 
-        let rows = stmt.query_map([], |row| {
-            Ok(WebhookTrigger {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                secret: row.get(2)?,
-                filter: row.get(3)?,
-                task_template: row.get(4)?,
-                created_at: row.get(5)?,
-                last_triggered: row.get(6)?,
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(WebhookTrigger {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    secret: row.get(2)?,
+                    filter: row.get(3)?,
+                    task_template: row.get(4)?,
+                    created_at: row.get(5)?,
+                    last_triggered: row.get(6)?,
+                })
             })
-        }).map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?;
 
         let mut triggers = Vec::new();
         for row in rows {
@@ -111,26 +122,38 @@ impl WebhookManager {
                 created_at: row.get(5)?,
                 last_triggered: row.get(6)?,
             })
-        }).map_err(|e| format!("Webhook trigger not found: {}", e))
+        })
+        .map_err(|e| format!("Webhook trigger not found: {}", e))
     }
 
     pub fn delete_trigger(conn: &Connection, id: &str) -> Result<bool, String> {
         let affected = conn
-            .execute("DELETE FROM webhook_triggers WHERE id = ?1", rusqlite::params![id])
+            .execute(
+                "DELETE FROM webhook_triggers WHERE id = ?1",
+                rusqlite::params![id],
+            )
             .map_err(|e| e.to_string())?;
         Ok(affected > 0)
     }
 
     /// Validate an incoming webhook signature against the stored secret.
     /// Uses simple HMAC-like comparison (secret must match header value).
-    pub fn validate_secret(conn: &Connection, trigger_id: &str, signature: &str) -> Result<bool, String> {
+    pub fn validate_secret(
+        conn: &Connection,
+        trigger_id: &str,
+        signature: &str,
+    ) -> Result<bool, String> {
         let trigger = Self::get_trigger(conn, trigger_id)?;
         // Simple secret comparison — in production use HMAC-SHA256
         Ok(trigger.secret == signature)
     }
 
     /// Process an incoming webhook: validate, record event, queue task.
-    pub fn trigger(conn: &Connection, trigger_id: &str, payload: serde_json::Value) -> Result<WebhookEvent, String> {
+    pub fn trigger(
+        conn: &Connection,
+        trigger_id: &str,
+        payload: serde_json::Value,
+    ) -> Result<WebhookEvent, String> {
         let trigger = Self::get_trigger(conn, trigger_id)?;
         let now = Utc::now().to_rfc3339();
 
@@ -138,13 +161,18 @@ impl WebhookManager {
         if let Some(ref filter_key) = trigger.filter {
             if !filter_key.is_empty() {
                 if payload.get(filter_key).is_none() {
-                    return Err(format!("Payload does not contain required filter key: {}", filter_key));
+                    return Err(format!(
+                        "Payload does not contain required filter key: {}",
+                        filter_key
+                    ));
                 }
             }
         }
 
         // Build task description from template + payload
-        let task_desc = trigger.task_template.replace("{payload}", &payload.to_string());
+        let task_desc = trigger
+            .task_template
+            .replace("{payload}", &payload.to_string());
         let event_id = uuid::Uuid::new_v4().to_string();
         let payload_json = serde_json::to_string(&payload).map_err(|e| e.to_string())?;
 
@@ -157,9 +185,14 @@ impl WebhookManager {
         conn.execute(
             "UPDATE webhook_triggers SET last_triggered = ?1 WHERE id = ?2",
             rusqlite::params![now, trigger_id],
-        ).map_err(|e| e.to_string())?;
+        )
+        .map_err(|e| e.to_string())?;
 
-        tracing::info!("Webhook triggered: {} -> task queued: {}", trigger.name, task_desc);
+        tracing::info!(
+            "Webhook triggered: {} -> task queued: {}",
+            trigger.name,
+            task_desc
+        );
 
         Ok(WebhookEvent {
             trigger_id: trigger_id.to_string(),

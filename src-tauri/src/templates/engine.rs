@@ -59,8 +59,7 @@ impl TemplateEngine {
 
     pub fn get(&self, name: &str) -> Result<String, String> {
         let path = self.templates_dir.join(format!("{}.md", name));
-        std::fs::read_to_string(&path)
-            .map_err(|e| format!("Template '{}' not found: {}", name, e))
+        std::fs::read_to_string(&path).map_err(|e| format!("Template '{}' not found: {}", name, e))
     }
 
     pub fn save(&self, name: &str, content: &str) -> Result<(), String> {
@@ -113,9 +112,8 @@ impl TemplateEngine {
                         .map(|v| v.split(',').collect())
                         .unwrap_or_default();
                     for item in items {
-                        output.push_str(
-                            &body.replace(&format!("{{{{{}}}}}", item_var), item.trim()),
-                        );
+                        output
+                            .push_str(&body.replace(&format!("{{{{{}}}}}", item_var), item.trim()));
                     }
                     remaining = &after_tag[endfor_pos + 10..];
                 } else {
@@ -167,11 +165,26 @@ impl TemplateEngine {
         }
 
         let defaults: &[(&str, &str)] = &[
-            ("monthly-report", include_str!("../../templates/monthly-report.md")),
-            ("follow-up-email", include_str!("../../templates/follow-up-email.md")),
-            ("daily-standup", include_str!("../../templates/daily-standup.md")),
-            ("project-status", include_str!("../../templates/project-status.md")),
-            ("invoice-summary", include_str!("../../templates/invoice-summary.md")),
+            (
+                "monthly-report",
+                include_str!("../../templates/monthly-report.md"),
+            ),
+            (
+                "follow-up-email",
+                include_str!("../../templates/follow-up-email.md"),
+            ),
+            (
+                "daily-standup",
+                include_str!("../../templates/daily-standup.md"),
+            ),
+            (
+                "project-status",
+                include_str!("../../templates/project-status.md"),
+            ),
+            (
+                "invoice-summary",
+                include_str!("../../templates/invoice-summary.md"),
+            ),
         ];
 
         for (name, content) in defaults {

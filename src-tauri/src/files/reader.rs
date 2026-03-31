@@ -4,10 +4,25 @@ use std::path::Path;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum FileContent {
-    Text { content: String, line_count: usize },
-    Table { headers: Vec<String>, rows: Vec<Vec<String>>, row_count: usize },
-    Image { width: u32, height: u32, format: String, base64_preview: Option<String> },
-    Binary { description: String, size_bytes: u64 },
+    Text {
+        content: String,
+        line_count: usize,
+    },
+    Table {
+        headers: Vec<String>,
+        rows: Vec<Vec<String>>,
+        row_count: usize,
+    },
+    Image {
+        width: u32,
+        height: u32,
+        format: String,
+        base64_preview: Option<String>,
+    },
+    Binary {
+        description: String,
+        size_bytes: u64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,13 +39,21 @@ pub struct FileReader;
 impl FileReader {
     pub fn read(path: &Path) -> Result<FilePreview, String> {
         let metadata = std::fs::metadata(path).map_err(|e| e.to_string())?;
-        let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
-        let ext = path.extension().unwrap_or_default().to_string_lossy().to_lowercase();
+        let name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        let ext = path
+            .extension()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_lowercase();
 
         let content = match ext.as_str() {
-            "txt" | "md" | "rs" | "py" | "js" | "ts" | "tsx" | "jsx" | "json" | "yaml"
-            | "yml" | "toml" | "xml" | "html" | "css" | "sql" | "sh" | "bat" | "ps1"
-            | "log" | "cfg" | "ini" | "env" => {
+            "txt" | "md" | "rs" | "py" | "js" | "ts" | "tsx" | "jsx" | "json" | "yaml" | "yml"
+            | "toml" | "xml" | "html" | "css" | "sql" | "sh" | "bat" | "ps1" | "log" | "cfg"
+            | "ini" | "env" => {
                 let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
                 let lines = text.lines().count();
                 // Truncate to 50KB for preview
@@ -164,9 +187,7 @@ fn extract_pdf_text(path: &Path) -> Result<String, String> {
         .args(["-NoProfile", "-Command", &script])
         .output()
         .map_err(|e| e.to_string())?;
-    Ok(String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .to_string())
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
 fn extract_excel_data(path: &Path) -> Result<(Vec<String>, Vec<Vec<String>>), String> {

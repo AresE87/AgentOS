@@ -303,6 +303,33 @@ const MOCK_DATA: Record<string, unknown> = {
   },
   browse_url: { ok: true },
   web_search: { results: [] },
+  get_shell_registration_status: {
+    platform: 'browser',
+    supported: false,
+    installed: false,
+    menu_label: 'Ask AgentOS',
+    command_preview: null,
+    issues: ['Windows context-menu integration requires the Tauri desktop app.'],
+  },
+  install_windows_context_menu: {
+    platform: 'browser',
+    supported: false,
+    installed: false,
+    menu_label: 'Ask AgentOS',
+    command_preview: null,
+    issues: ['Windows context-menu integration requires the Tauri desktop app.'],
+  },
+  uninstall_windows_context_menu: {
+    platform: 'browser',
+    supported: false,
+    installed: false,
+    menu_label: 'Ask AgentOS',
+    command_preview: null,
+    issues: ['Windows context-menu integration requires the Tauri desktop app.'],
+  },
+  get_pending_shell_invocation: null,
+  get_last_shell_execution: null,
+  consume_pending_shell_invocation: null,
 };
 
 export async function invoke<T>(command: string, _args?: Record<string, unknown>): Promise<T> {

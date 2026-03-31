@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
-use std::sync::Mutex;
 use std::path::Path;
+use std::sync::Mutex;
 
 /// A confidence score with calibration metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,12 +73,28 @@ impl ConfidenceCalibrator {
     pub fn get_calibration(&self) -> Result<CalibrationStats, String> {
         let scores = self.scores.lock().map_err(|e| e.to_string())?;
         let total = scores.len() as u64;
-        let with_outcome: Vec<&ConfidenceScore> = scores.iter().filter(|s| s.correct.is_some()).collect();
-        let correct_count = with_outcome.iter().filter(|s| s.correct == Some(true)).count() as u64;
+        let with_outcome: Vec<&ConfidenceScore> =
+            scores.iter().filter(|s| s.correct.is_some()).collect();
+        let correct_count = with_outcome
+            .iter()
+            .filter(|s| s.correct == Some(true))
+            .count() as u64;
         let n = with_outcome.len() as f64;
-        let accuracy = if n > 0.0 { correct_count as f64 / n } else { 0.0 };
-        let mean_conf = if total > 0 { scores.iter().map(|s| s.predicted).sum::<f64>() / total as f64 } else { 0.0 };
-        let overconf = if accuracy > 0.0 { (mean_conf - accuracy).max(0.0) / mean_conf.max(0.01) } else { 0.0 };
+        let accuracy = if n > 0.0 {
+            correct_count as f64 / n
+        } else {
+            0.0
+        };
+        let mean_conf = if total > 0 {
+            scores.iter().map(|s| s.predicted).sum::<f64>() / total as f64
+        } else {
+            0.0
+        };
+        let overconf = if accuracy > 0.0 {
+            (mean_conf - accuracy).max(0.0) / mean_conf.max(0.01)
+        } else {
+            0.0
+        };
         Ok(CalibrationStats {
             total_predictions: total,
             correct_count,

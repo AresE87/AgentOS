@@ -19,9 +19,9 @@ pub struct WidgetConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum WidgetType {
-    QuickTask,      // 400x50 input box
-    Status,         // 250x80 status display
-    Notification,   // 300x100 toast stack
+    QuickTask,    // 400x50 input box
+    Status,       // 250x80 status display
+    Notification, // 300x100 toast stack
 }
 
 pub struct WidgetManager {
@@ -32,29 +32,50 @@ impl WidgetManager {
     pub fn new() -> Self {
         let mut widgets = HashMap::new();
 
-        widgets.insert("quick-task".to_string(), WidgetConfig {
-            id: "quick-task".to_string(),
-            widget_type: WidgetType::QuickTask,
-            enabled: false,
-            x: 100, y: 100, width: 400, height: 60,
-            always_on_top: true, opacity: 0.95,
-        });
+        widgets.insert(
+            "quick-task".to_string(),
+            WidgetConfig {
+                id: "quick-task".to_string(),
+                widget_type: WidgetType::QuickTask,
+                enabled: false,
+                x: 100,
+                y: 100,
+                width: 400,
+                height: 60,
+                always_on_top: true,
+                opacity: 0.95,
+            },
+        );
 
-        widgets.insert("status".to_string(), WidgetConfig {
-            id: "status".to_string(),
-            widget_type: WidgetType::Status,
-            enabled: false,
-            x: 100, y: 200, width: 250, height: 80,
-            always_on_top: true, opacity: 0.9,
-        });
+        widgets.insert(
+            "status".to_string(),
+            WidgetConfig {
+                id: "status".to_string(),
+                widget_type: WidgetType::Status,
+                enabled: false,
+                x: 100,
+                y: 200,
+                width: 250,
+                height: 80,
+                always_on_top: true,
+                opacity: 0.9,
+            },
+        );
 
-        widgets.insert("notification".to_string(), WidgetConfig {
-            id: "notification".to_string(),
-            widget_type: WidgetType::Notification,
-            enabled: false,
-            x: -1, y: -1, width: 300, height: 100, // -1 = auto position (bottom-right)
-            always_on_top: true, opacity: 0.95,
-        });
+        widgets.insert(
+            "notification".to_string(),
+            WidgetConfig {
+                id: "notification".to_string(),
+                widget_type: WidgetType::Notification,
+                enabled: false,
+                x: -1,
+                y: -1,
+                width: 300,
+                height: 100, // -1 = auto position (bottom-right)
+                always_on_top: true,
+                opacity: 0.95,
+            },
+        );
 
         Self { widgets }
     }
@@ -68,36 +89,47 @@ impl WidgetManager {
     }
 
     pub fn set_enabled(&mut self, id: &str, enabled: bool) -> Result<(), String> {
-        self.widgets.get_mut(id)
-            .map(|w| { w.enabled = enabled; })
+        self.widgets
+            .get_mut(id)
+            .map(|w| {
+                w.enabled = enabled;
+            })
             .ok_or_else(|| format!("Widget '{}' not found", id))
     }
 
     pub fn update_position(&mut self, id: &str, x: i32, y: i32) -> Result<(), String> {
-        self.widgets.get_mut(id)
-            .map(|w| { w.x = x; w.y = y; })
+        self.widgets
+            .get_mut(id)
+            .map(|w| {
+                w.x = x;
+                w.y = y;
+            })
             .ok_or_else(|| format!("Widget '{}' not found", id))
     }
 
     pub fn update_size(&mut self, id: &str, width: u32, height: u32) -> Result<(), String> {
-        self.widgets.get_mut(id)
-            .map(|w| { w.width = width; w.height = height; })
+        self.widgets
+            .get_mut(id)
+            .map(|w| {
+                w.width = width;
+                w.height = height;
+            })
             .ok_or_else(|| format!("Widget '{}' not found", id))
     }
 
     pub fn set_opacity(&mut self, id: &str, opacity: f64) -> Result<(), String> {
-        self.widgets.get_mut(id)
-            .map(|w| { w.opacity = opacity.clamp(0.1, 1.0); })
+        self.widgets
+            .get_mut(id)
+            .map(|w| {
+                w.opacity = opacity.clamp(0.1, 1.0);
+            })
             .ok_or_else(|| format!("Widget '{}' not found", id))
     }
 }
 
 /// Create or show a widget as a Tauri secondary window.
 /// Returns Ok(true) if a new window was created, Ok(false) if an existing one was shown.
-pub fn show_widget_window(
-    app: &tauri::AppHandle,
-    config: &WidgetConfig,
-) -> Result<bool, String> {
+pub fn show_widget_window(app: &tauri::AppHandle, config: &WidgetConfig) -> Result<bool, String> {
     let label = &config.id;
 
     // If the window already exists, just show + focus it
@@ -131,7 +163,12 @@ pub fn show_widget_window(
 
     builder.build().map_err(|e| e.to_string())?;
 
-    info!(widget = label, width = config.width, height = config.height, "Widget window created");
+    info!(
+        widget = label,
+        width = config.width,
+        height = config.height,
+        "Widget window created"
+    );
     Ok(true)
 }
 

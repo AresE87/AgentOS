@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use rusqlite::Connection;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdoptionMetrics {
@@ -20,17 +20,32 @@ pub struct AdoptionMetrics {
 
 impl AdoptionMetrics {
     pub fn collect(conn: &Connection) -> Self {
-        let total_tasks: i64 = conn.query_row("SELECT COUNT(*) FROM tasks", [], |r| r.get(0)).unwrap_or(0);
+        let total_tasks: i64 = conn
+            .query_row("SELECT COUNT(*) FROM tasks", [], |r| r.get(0))
+            .unwrap_or(0);
         let providers: i64 = 0; // Count from settings
-        let personas: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='agent_personas'", [], |r| r.get(0)
-        ).and_then(|exists: i64| {
-            if exists > 0 { conn.query_row("SELECT COUNT(*) FROM agent_personas", [], |r| r.get(0)) } else { Ok(0) }
-        }).unwrap_or(0);
+        let personas: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='agent_personas'",
+                [],
+                |r| r.get(0),
+            )
+            .and_then(|exists: i64| {
+                if exists > 0 {
+                    conn.query_row("SELECT COUNT(*) FROM agent_personas", [], |r| r.get(0))
+                } else {
+                    Ok(0)
+                }
+            })
+            .unwrap_or(0);
 
         let mut features = vec!["chat".to_string()];
-        if total_tasks > 0 { features.push("tasks".into()); }
-        if personas > 0 { features.push("personas".into()); }
+        if total_tasks > 0 {
+            features.push("tasks".into());
+        }
+        if personas > 0 {
+            features.push("personas".into());
+        }
 
         Self {
             install_date: "".into(),

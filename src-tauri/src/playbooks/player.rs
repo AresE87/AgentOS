@@ -123,8 +123,7 @@ impl PlaybookPlayer {
                 let cap_w = screenshot.width;
                 let cap_h = screenshot.height;
 
-                let (b64, img_w, img_h) = match capture::to_base64_jpeg_with_dims(&screenshot, 75)
-                {
+                let (b64, img_w, img_h) = match capture::to_base64_jpeg_with_dims(&screenshot, 75) {
                     Ok(r) => r,
                     Err(e) => {
                         warn!("Failed to encode screenshot: {}", e);
@@ -134,8 +133,7 @@ impl PlaybookPlayer {
 
                 // Check for dedup (repeated identical actions)
                 let dedup_warning = if recent_actions.len() >= 3 {
-                    let last3: Vec<&String> =
-                        recent_actions.iter().rev().take(3).collect();
+                    let last3: Vec<&String> = recent_actions.iter().rev().take(3).collect();
                     last3.windows(2).all(|w| w[0] == w[1])
                 } else {
                     false
@@ -231,18 +229,22 @@ impl PlaybookPlayer {
                 }
 
                 // Execute the action
-                let result =
-                    match executor::execute(&scaled_action, settings.cli_timeout, kill_switch).await
-                    {
-                        Ok(r) => r,
-                        Err(e) => ExecutionResult {
-                            method: ExecutionMethod::Screen,
-                            success: false,
-                            output: Some(e),
-                            screenshot_path: None,
-                            duration_ms: 0,
-                        },
-                    };
+                let result = match executor::execute(
+                    &scaled_action,
+                    settings.cli_timeout,
+                    kill_switch,
+                )
+                .await
+                {
+                    Ok(r) => r,
+                    Err(e) => ExecutionResult {
+                        method: ExecutionMethod::Screen,
+                        success: false,
+                        output: Some(e),
+                        screenshot_path: None,
+                        duration_ms: 0,
+                    },
+                };
 
                 step_history.push(StepRecord {
                     step_number: attempt,
@@ -328,7 +330,10 @@ impl PlaybookPlayer {
                     if pb_file.exists() {
                         if let Ok(pb) = Self::load(&pb_file) {
                             // Avoid duplicates if the top-level json was already loaded
-                            if !playbooks.iter().any(|existing: &PlaybookFile| existing.name == pb.name) {
+                            if !playbooks
+                                .iter()
+                                .any(|existing: &PlaybookFile| existing.name == pb.name)
+                            {
                                 playbooks.push(pb);
                             }
                         }

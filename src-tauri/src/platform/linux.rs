@@ -22,7 +22,11 @@ impl PlatformProvider for LinuxPlatform {
                 content
                     .lines()
                     .find(|l| l.starts_with("PRETTY_NAME="))
-                    .map(|l| l.trim_start_matches("PRETTY_NAME=").trim_matches('"').to_string())
+                    .map(|l| {
+                        l.trim_start_matches("PRETTY_NAME=")
+                            .trim_matches('"')
+                            .to_string()
+                    })
             })
             .unwrap_or_else(|| "Linux".to_string())
     }
@@ -58,5 +62,23 @@ impl PlatformProvider for LinuxPlatform {
             .spawn()
             .map_err(|e| e.to_string())?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn linux_platform_reports_honest_capabilities() {
+        let platform = LinuxPlatform::new();
+        assert_eq!(platform.name(), "linux");
+        assert_eq!(platform.default_shell(), "bash");
+        assert!(!platform.can_capture_screen());
+        assert!(!platform.can_control_input());
+        assert!(platform
+            .app_data_dir()
+            .to_string_lossy()
+            .contains(".config"));
     }
 }

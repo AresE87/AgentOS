@@ -63,6 +63,7 @@ pub async fn start_api_server_with_stripe(
         .route("/health", get(routes::health))
         .route("/v1/status", get(routes::get_status))
         .route("/v1/message", post(routes::post_message))
+        .route("/v1/tasks", get(routes::list_tasks))
         .route("/v1/task/:id", get(routes::get_task))
         .route("/webhooks/stripe", post(routes::stripe_webhook))
         .layer(cors)

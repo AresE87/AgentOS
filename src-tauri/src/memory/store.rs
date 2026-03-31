@@ -1,12 +1,12 @@
-use serde::{Deserialize, Serialize};
 use rusqlite::Connection;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Memory {
     pub id: String,
     pub content: String,
-    pub category: String,       // "conversation", "preference", "project", "correction", "person"
-    pub importance: f64,        // 0.0-1.0
+    pub category: String, // "conversation", "preference", "project", "correction", "person"
+    pub importance: f64,  // 0.0-1.0
     pub access_count: u32,
     pub created_at: String,
     pub last_accessed: Option<String>,
@@ -167,11 +167,7 @@ impl MemoryStore {
     }
 
     /// Search memories by keyword (simple text matching) -- LIKE fallback
-    pub fn search(
-        conn: &Connection,
-        query: &str,
-        limit: usize,
-    ) -> Result<Vec<Memory>, String> {
+    pub fn search(conn: &Connection, query: &str, limit: usize) -> Result<Vec<Memory>, String> {
         Self::ensure_table(conn)?;
         let pattern = format!("%{}%", query);
         let mut stmt = conn.prepare(
@@ -254,7 +250,9 @@ impl MemoryStore {
             .map_err(|e| e.to_string())?;
 
         let rows = stmt
-            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
             .map_err(|e| e.to_string())?
             .filter_map(|r| r.ok())
             .collect();
@@ -263,7 +261,11 @@ impl MemoryStore {
     }
 
     /// Update embedding for a single memory by ID (sync)
-    pub fn update_embedding(conn: &Connection, id: &str, embedding_blob: &[u8]) -> Result<(), String> {
+    pub fn update_embedding(
+        conn: &Connection,
+        id: &str,
+        embedding_blob: &[u8],
+    ) -> Result<(), String> {
         conn.execute(
             "UPDATE agent_memories SET embedding = ?1 WHERE id = ?2",
             rusqlite::params![embedding_blob, id],
@@ -376,8 +378,9 @@ impl MemoryStore {
 
     pub fn forget_all(conn: &Connection) -> Result<u64, String> {
         Self::ensure_table(conn)?;
-        let count =
-            conn.execute("DELETE FROM agent_memories", []).map_err(|e| e.to_string())? as u64;
+        let count = conn
+            .execute("DELETE FROM agent_memories", [])
+            .map_err(|e| e.to_string())? as u64;
         Ok(count)
     }
 

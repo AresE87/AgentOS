@@ -1,138 +1,112 @@
-# AgentOS JavaScript / Node.js SDK
+# AgentOS JavaScript SDK Reference Client
 
-Lightweight client for the AgentOS REST API, compatible with Node.js and modern browsers.
+This is the minimal reference client for the local AgentOS API. It matches the real HTTP contract implemented in `src-tauri/src/api/routes.rs`.
 
-## Installation
-
-```bash
-npm install agentos-sdk
-```
-
-## Quick Start
-
-```javascript
-import { AgentOS } from 'agentos-sdk';
-
-const agent = new AgentOS({
-  host: 'http://localhost:8080',
-  apiKey: 'aos_yourkey',
-});
-
-const result = await agent.sendTask('check disk space');
-console.log(result);
-```
-
-## Configuration
-
-```javascript
-const agent = new AgentOS({
-  host: 'http://localhost:8080',  // AgentOS server address
-  apiKey: 'aos_yourkey',          // API key from Settings > API Keys
-});
-```
-
-| Parameter | Type     | Default                  | Description              |
-|-----------|----------|--------------------------|--------------------------|
-| `host`    | `string` | `http://localhost:8080`  | AgentOS server URL       |
-| `apiKey`  | `string` | `""`                     | Bearer token for auth    |
-
-## Methods
-
-### `agent.health(): Promise<object>`
-Check if AgentOS is running.
-
-```javascript
-const status = await agent.health();
-// { status: 'ok', version: '0.47.0' }
-```
-
-### `agent.status(): Promise<object>`
-Get current agent status.
-
-```javascript
-const info = await agent.status();
-// { state: 'idle', tasks_completed: 42, uptime: 3600 }
-```
-
-### `agent.sendTask(text: string): Promise<object>`
-Send a natural-language task.
-
-```javascript
-const result = await agent.sendTask('list running processes');
-// { task_id: 't_abc123', status: 'completed', result: '...' }
-```
-
-### `agent.getTask(taskId: string): Promise<object>`
-Check the result of a previously submitted task.
-
-```javascript
-const task = await agent.getTask('t_abc123');
-// { task_id: 't_abc123', status: 'completed', result: '...' }
-```
-
-## Error Handling
-
-```javascript
-try {
-  const result = await agent.sendTask('check disk space');
-} catch (error) {
-  if (error.code === 'ECONNREFUSED') {
-    console.error('Cannot connect to AgentOS — is it running?');
-  } else {
-    console.error('API error:', error.message);
-  }
-}
-```
-
-## CommonJS Usage
-
-```javascript
-const { AgentOS } = require('agentos-sdk');
-
-const agent = new AgentOS({ apiKey: 'aos_yourkey' });
-agent.sendTask('check disk space').then(console.log);
-```
-
-## Browser Usage
-
-```html
-<script type="module">
-  import { AgentOS } from './agentos-sdk.mjs';
-
-  const agent = new AgentOS({
-    host: 'http://localhost:8080',
-    apiKey: 'aos_yourkey',
-  });
-
-  const result = await agent.sendTask('check disk space');
-  document.getElementById('output').textContent = JSON.stringify(result, null, 2);
-</script>
-```
-
-## Reference Implementation
+## Quick start
 
 ```javascript
 class AgentOS {
-  constructor({ host = 'http://localhost:8080', apiKey = '' } = {}) {
-    this.host = host.replace(/\/+$/, '');
+  constructor({ host = "http://localhost:8080", apiKey }) {
+    this.host = host.replace(/\/+$/, "");
     this.apiKey = apiKey;
   }
 
-  async _fetch(method, path, body) {
-    const headers = { 'Content-Type': 'application/json' };
-    if (this.apiKey) headers['Authorization'] = `Bearer ${this.apiKey}`;
-    const opts = { method, headers };
-    if (body) opts.body = JSON.stringify(body);
-    const res = await fetch(`${this.host}${path}`, opts);
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-    return res.json();
+  async request(method, path, body) {
+    const headers = { "Content-Type": "application/json" };
+    if (this.apiKey) headers.Authorization = `Bearer ${this.apiKey}`;
+
+    const response = await fetch(`${this.host}${path}`, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const error = new Error(payload.message || `HTTP ${response.status}`);
+      error.status = response.status;
+      error.code = payload.error || "http_error";
+      throw error;
+    }
+    return payload;
   }
 
-  health()            { return this._fetch('GET', '/health'); }
-  status()            { return this._fetch('GET', '/v1/status'); }
-  sendTask(text)      { return this._fetch('POST', '/v1/message', { text }); }
-  getTask(taskId)     { return this._fetch('GET', `/v1/task/${taskId}`); }
-}
+  health() {
+    return this.request("GET", "/health");
+  }
 
-export { AgentOS };
+  status() {
+    return this.request("GET", "/v1/status");
+  }
+
+  sendTask(text) {
+    return this.request("POST", "/v1/message", { text });
+  }
+
+  listTasks({ limit = 20, status } = {}) {
+    const params = new URLSearchParams();
+    params.set("limit", String(limit));
+    if (status) params.set("status", status);
+    return this.request("GET", `/v1/tasks?${params.toString()}`);
+  }
+
+  getTask(taskId) {
+    return this.request("GET", `/v1/task/${encodeURIComponent(taskId)}`);
+  }
+}
+```
+
+## Expected usage
+
+```javascript
+const client = new AgentOS({
+  host: "http://localhost:8080",
+  apiKey: "aos_your_key_here",
+});
+
+const queued = await client.sendTask("summarize today's CPU usage");
+console.log(queued);
+
+const task = await client.getTask(queued.task_id);
+console.log(task.status, task.result);
+```
+
+## Real response shapes
+
+`sendTask(text)`:
+
+```json
+{
+  "task_id": "8d8c7a20-34cf-4f75-9d64-9b1e2d7e16dd",
+  "status": "queued"
+}
+```
+
+`listTasks()`:
+
+```json
+{
+  "tasks": [
+    {
+      "task_id": "8d8c7a20-34cf-4f75-9d64-9b1e2d7e16dd",
+      "status": "running",
+      "text": "summarize today's CPU usage",
+      "created_at": "2026-03-31T12:00:00Z",
+      "has_result": false
+    }
+  ],
+  "total": 1
+}
+```
+
+## Error handling
+
+The reference client preserves the API error code from the JSON payload:
+
+```javascript
+try {
+  await client.status();
+} catch (error) {
+  console.error(error.code, error.message);
+}
 ```

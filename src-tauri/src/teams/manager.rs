@@ -61,11 +61,7 @@ impl TeamManager {
         .map_err(|e| e.to_string())
     }
 
-    pub fn create_team(
-        conn: &Connection,
-        name: &str,
-        owner_id: &str,
-    ) -> Result<Team, String> {
+    pub fn create_team(conn: &Connection, name: &str, owner_id: &str) -> Result<Team, String> {
         let id = uuid::Uuid::new_v4().to_string();
         let created_at = chrono::Utc::now().to_rfc3339();
 
@@ -201,11 +197,7 @@ impl TeamManager {
         Ok(members)
     }
 
-    pub fn update_role(
-        conn: &Connection,
-        member_id: &str,
-        new_role: &str,
-    ) -> Result<(), String> {
+    pub fn update_role(conn: &Connection, member_id: &str, new_role: &str) -> Result<(), String> {
         conn.execute(
             "UPDATE team_members SET role = ?1 WHERE id = ?2",
             rusqlite::params![new_role, member_id],

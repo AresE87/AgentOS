@@ -112,8 +112,7 @@ impl MeshOrchestrator {
 
     /// Group subtasks into parallel execution waves based on dependencies
     pub fn get_parallel_groups(&self, subtasks: &[SubTask]) -> Vec<Vec<String>> {
-        let mut completed: std::collections::HashSet<String> =
-            std::collections::HashSet::new();
+        let mut completed: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut groups: Vec<Vec<String>> = vec![];
         let mut remaining: Vec<&SubTask> = subtasks.iter().collect();
 

@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use rusqlite::Connection;
+use serde::{Deserialize, Serialize};
 
 pub struct GDPRManager;
 
@@ -101,11 +101,7 @@ impl GDPRManager {
             ("feedback", "User feedback", "Task ratings and comments"),
             ("audit_log", "Audit log", "System activity records"),
             ("api_keys", "API keys", "External access credentials"),
-            (
-                "marketplace_installs",
-                "Marketplace",
-                "Installed packages",
-            ),
+            ("marketplace_installs", "Marketplace", "Installed packages"),
             ("marketplace_reviews", "Reviews", "Package reviews"),
         ];
 

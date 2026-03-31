@@ -260,10 +260,7 @@ async fn connect_gateway(
     let (mut write, mut read) = ws_stream.split();
 
     // Step 1: Receive Hello (opcode 10)
-    let hello_msg = read
-        .next()
-        .await
-        .ok_or("Gateway closed before Hello")??;
+    let hello_msg = read.next().await.ok_or("Gateway closed before Hello")??;
 
     let hello: GatewayPayload = serde_json::from_str(&hello_msg.to_string())?;
     if hello.op != 10 {
@@ -276,7 +273,10 @@ async fn connect_gateway(
         .and_then(|d| d["heartbeat_interval"].as_u64())
         .unwrap_or(41250);
 
-    info!(heartbeat_interval_ms = heartbeat_interval, "Received Hello from Discord Gateway");
+    info!(
+        heartbeat_interval_ms = heartbeat_interval,
+        "Received Hello from Discord Gateway"
+    );
 
     // Step 2: Send Identify (opcode 2)
     let identify = GatewayIdentify {
@@ -428,7 +428,10 @@ async fn handle_message_create(
 
     let content = data["content"].as_str().unwrap_or("").to_string();
     let channel_id = data["channel_id"].as_str().unwrap_or("").to_string();
-    let author_name = data["author"]["username"].as_str().unwrap_or("unknown").to_string();
+    let author_name = data["author"]["username"]
+        .as_str()
+        .unwrap_or("unknown")
+        .to_string();
     let guild_id = data["guild_id"].as_str(); // None for DMs
 
     if content.is_empty() || channel_id.is_empty() {

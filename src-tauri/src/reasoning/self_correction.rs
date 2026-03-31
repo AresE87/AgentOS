@@ -42,8 +42,12 @@ impl SelfCorrector {
         }
         // Check for incomplete sentences (ends mid-word)
         let trimmed = output.trim();
-        if !trimmed.is_empty() && !trimmed.ends_with('.') && !trimmed.ends_with('!')
-            && !trimmed.ends_with('?') && !trimmed.ends_with('}') && !trimmed.ends_with('"')
+        if !trimmed.is_empty()
+            && !trimmed.ends_with('.')
+            && !trimmed.ends_with('!')
+            && !trimmed.ends_with('?')
+            && !trimmed.ends_with('}')
+            && !trimmed.ends_with('"')
             && !trimmed.ends_with(')')
         {
             // Might be truncated
@@ -72,7 +76,9 @@ impl SelfCorrector {
                 output
             );
         } else if issue.contains("placeholder") {
-            corrected = corrected.replace("TODO", "[resolved]").replace("FIXME", "[fixed]");
+            corrected = corrected
+                .replace("TODO", "[resolved]")
+                .replace("FIXME", "[fixed]");
         } else if issue.contains("truncated") {
             corrected = format!("{}...[completion needed]", output.trim());
         }
