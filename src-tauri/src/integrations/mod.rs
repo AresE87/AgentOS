@@ -6,4 +6,4 @@ pub mod email;
 pub use api_registry::{APIConnection, APIEndpoint, APIRegistry};
 pub use calendar::{CalendarEvent, CalendarManager, CalendarProvider, GoogleCalendarProvider, TimeSlot};
 pub use database::{DatabaseConfig, DatabaseManager, QueryResult, TableInfo, ColumnInfo};
-pub use email::{EmailManager, EmailMessage, EmailTriage};
+pub use email::{EmailManager, EmailMessage, EmailTriage, GmailProvider, GOOGLE_COMBINED_SCOPES};
