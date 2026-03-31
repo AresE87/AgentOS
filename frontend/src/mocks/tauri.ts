@@ -1,7 +1,6 @@
 /**
  * Mock Tauri invoke() for browser dev mode.
- * Returns EMPTY data so the dashboard renders proper empty states.
- * In production, the Rust backend provides real data via IPC.
+ * Returns empty or low-fidelity data so the dashboard renders honest states.
  */
 
 const MOCK_DATA: Record<string, unknown> = {
@@ -19,12 +18,8 @@ const MOCK_DATA: Record<string, unknown> = {
     cost: 0,
     duration_ms: 0,
   },
-  get_tasks: {
-    tasks: [],
-  },
-  get_playbooks: {
-    playbooks: [],
-  },
+  get_tasks: { tasks: [] },
+  get_playbooks: { playbooks: [] },
   get_settings: {
     log_level: 'INFO',
     max_cost_per_task: 1.0,
@@ -39,13 +34,11 @@ const MOCK_DATA: Record<string, unknown> = {
   },
   set_active_playbook: { ok: true },
   update_settings: { ok: true },
-
   get_usage_summary: {
     tasks_today: 0,
     tokens_today: 0,
     cost_today: 0,
   },
-
   get_analytics: {
     total_tasks: 0,
     success_rate: 0,
@@ -55,7 +48,6 @@ const MOCK_DATA: Record<string, unknown> = {
     cost_by_provider: [],
     tasks_by_type: [],
   },
-
   get_active_chain: {
     chain_id: null,
     original_task: null,
@@ -65,56 +57,256 @@ const MOCK_DATA: Record<string, unknown> = {
     total_cost: 0,
     elapsed_ms: 0,
   },
-
-  get_chain_history: {
-    chains: [],
-  },
-
+  get_chain_history: { chains: [] },
   send_chain_message: { ok: true },
   get_chain_log: { log: [] },
   decompose_task: { subtasks: [] },
-  get_analytics_by_period: { total_tasks: 0, success_rate: 0, total_cost: 0, total_tokens: 0, daily_tasks: [], cost_by_provider: [], tasks_by_type: [] },
+  get_analytics_by_period: {
+    total_tasks: 0,
+    success_rate: 0,
+    total_cost: 0,
+    total_tokens: 0,
+    daily_tasks: [],
+    cost_by_provider: [],
+    tasks_by_type: [],
+  },
   get_suggestions: { suggestions: [] },
-
-  // Playbook stubs
   get_playbook_detail: { name: '', description: '', steps: [], created_at: '' },
   start_recording: { ok: true, session_id: 'mock' },
   record_step: { ok: true },
   stop_recording: { ok: true, name: 'mock', steps_count: 0 },
   play_playbook: { ok: true },
   delete_playbook: { ok: true },
-
-  // PC Control stubs
   run_pc_task: { task_id: 'mock_task', status: 'started' },
   get_task_steps: { steps: [] },
   kill_switch: { ok: true },
   reset_kill_switch: { ok: true },
-
-  // Agents
   get_agents: { agents: [] },
   find_agent: { name: 'Assistant', category: 'general', level: 'Junior', system_prompt: '' },
-
-  // Mesh
   get_mesh_nodes: { nodes: [] },
-
-  // Channels
+  get_relay_status: { connected: false, server_url: '', server_reachable: false, nodes_count: 0 },
+  relay_list_nodes: { nodes: [] },
   get_channel_status: { channels: { telegram: { connected: false }, discord: { connected: false } } },
-
-  // Triggers
   get_triggers: { triggers: [] },
   create_trigger: { ok: true },
   delete_trigger: { ok: true },
   update_trigger: { ok: true },
   toggle_trigger: { ok: true },
-
-  // Web browsing
+  get_current_version: { version: '4.0.0' },
+  check_for_update: {
+    current_version: '4.0.0',
+    latest_version: '4.0.0',
+    update_available: false,
+    release_notes: 'Mock mode has no live GitHub release polling.',
+    download_url: null,
+    checked_at: '2026-03-31T00:00:00Z',
+  },
+  get_health: {
+    overall: 'healthy',
+    components: [
+      { name: 'Database', status: 'ok', details: 'SQLite operational' },
+      { name: 'LLM Provider', status: 'warning', details: 'Configure a provider in Settings' },
+      { name: 'API Server', status: 'ok', details: 'Mock runtime' },
+    ],
+  },
+  get_alerts: {
+    active: [],
+    all: [],
+    rules: [
+      { id: 'err-rate', name: 'High Error Rate', severity: 'warning', enabled: true },
+      { id: 'disk-low', name: 'Low Disk Space', severity: 'critical', enabled: true },
+    ],
+    active_count: 0,
+  },
+  acknowledge_alert: { ok: true },
+  get_logs: { logs: [], count: 0 },
+  export_logs: { content: '', lines: 0 },
+  workflow_list: { workflows: [] },
+  test_list_suites: [
+    {
+      id: 'suite-runtime-executor',
+      name: 'Executor runtime',
+      created_at: '2026-01-01T00:00:00Z',
+      test_cases: [{ id: 'exec-1', name: 'PowerShell stdout', description: 'Real runtime mock shape' }],
+    },
+  ],
+  test_run_suite: [
+    {
+      test_id: 'exec-1',
+      passed: true,
+      actual_output: 'agentos-runtime-ok',
+      duration_ms: 12,
+      runtime: 'executor_command',
+      error: null,
+    },
+  ],
+  swarm_list: [],
+  swarm_create: {
+    id: 'swarm-mock',
+    description: 'Mock swarm task',
+    assigned_agents: ['planner', 'qa'],
+    strategy: 'vote',
+    status: 'pending',
+    chain_id: 'chain-swarm-mock',
+    created_at: '2026-03-31T00:00:00Z',
+    consensus: null,
+    results: [],
+  },
+  swarm_execute: {
+    id: 'swarm-mock',
+    description: 'Mock swarm task',
+    assigned_agents: ['planner', 'qa'],
+    strategy: 'vote',
+    status: 'completed',
+    chain_id: 'chain-swarm-mock',
+    created_at: '2026-03-31T00:00:00Z',
+    consensus: {
+      agent_name: 'planner',
+      rationale: 'Mock consensus from a judge step.',
+      model: 'mock-model',
+    },
+    results: [
+      { agent_name: 'planner', output: 'Mock planner result', model: 'mock-model', status: 'completed', cost: 0.01, duration_ms: 120 },
+      { agent_name: 'qa', output: 'Mock QA result', model: 'mock-model', status: 'completed', cost: 0.01, duration_ms: 135 },
+    ],
+  },
+  swarm_results: {
+    task: {
+      id: 'swarm-mock',
+      description: 'Mock swarm task',
+      assigned_agents: ['planner', 'qa'],
+      strategy: 'vote',
+      status: 'completed',
+      chain_id: 'chain-swarm-mock',
+      created_at: '2026-03-31T00:00:00Z',
+      consensus: {
+        agent_name: 'planner',
+        rationale: 'Mock consensus from a judge step.',
+        model: 'mock-model',
+      },
+      results: [
+        { agent_name: 'planner', output: 'Mock planner result', model: 'mock-model', status: 'completed', cost: 0.01, duration_ms: 120 },
+        { agent_name: 'qa', output: 'Mock QA result', model: 'mock-model', status: 'completed', cost: 0.01, duration_ms: 135 },
+      ],
+    },
+    consensus: {
+      agent_name: 'planner',
+      rationale: 'Mock consensus from a judge step.',
+      model: 'mock-model',
+    },
+  },
+  debugger_list_traces: [],
+  debugger_start_trace: { trace_id: 'trace-mock', task_id: 'demo-task' },
+  debugger_get_trace: {
+    id: 'trace-mock',
+    task_id: 'demo-task',
+    input_text: 'Use one PowerShell command to print DEBUGGER_RUNTIME_OK and then finish the task.',
+    status: 'running',
+    total_duration_ms: 37,
+    total_cost: 0.0004,
+    created_at: '2026-03-31T00:00:00Z',
+    finished: false,
+    output_text: 'DEBUGGER_RUNTIME_OK',
+    steps: [
+      {
+        phase: 'llm_plan',
+        input: 'demo-task',
+        output: 'Run one command and finish.',
+        decision: 'Initial planner response from PC-control runtime',
+        duration_ms: 12,
+        cost: 0.0001,
+        tokens: 18,
+      },
+    ],
+  },
+  list_partners: [],
+  register_partner: {
+    id: 'partner-mock',
+    company: 'Mock Devices',
+    device_type: 'terminal',
+    integration_level: 'basic',
+    certified: false,
+    certification_note: null,
+    certification_evidence: null,
+    registered_at: '2026-03-31T00:00:00Z',
+  },
+  certify_partner: {
+    id: 'partner-mock',
+    company: 'Mock Devices',
+    device_type: 'terminal',
+    integration_level: 'basic',
+    certified: true,
+    certification_note: 'Certified from readiness dashboard after runtime validation.',
+    certification_evidence: 'repo://docs/partner_enablement_runbook.md',
+    registered_at: '2026-03-31T00:00:00Z',
+    certified_at: '2026-03-31T01:00:00Z',
+  },
+  infra_status: {
+    regions: [
+      { region: 'local-db', status: 'operational', latency_ms: 0, last_checked: '2026-03-31T00:00:00Z', probe_type: 'file_exists', note: 'Filesystem probe against local DB path' },
+      { region: 'local-api', status: 'down', latency_ms: 2, last_checked: '2026-03-31T00:00:00Z', probe_type: 'tcp', note: 'TCP probe failed for 127.0.0.1:8080' },
+    ],
+    global_status: 'partial',
+    uptime_pct: 0,
+    probe_mode: 'real_probe_snapshot',
+    source_note: 'Current snapshot from live probes. No rolling uptime history is stored yet.',
+  },
+  investor_metrics: {
+    arr: 417600,
+    mrr_growth_pct: 15.2,
+    gross_margin: 0.82,
+    burn_rate: 180000,
+    runway_months: 24,
+    total_users: 1000,
+    paid_users: 120,
+    ltv_cac_ratio: 7.58,
+    modeled: true,
+    source_note: 'Modeled from local tasks/tokens/cost usage. Not a finance ledger.',
+  },
+  data_room: [
+    {
+      name: 'Public SDK docs plan',
+      category: 'Technology',
+      description: 'Repo-backed publication plan for SDK and external docs.',
+      status: 'ready',
+      path: 'docs/public_sdk_docs_plan.md',
+      last_modified: '2026-03-31T00:00:00Z',
+      source_type: 'repo_document',
+    },
+    {
+      name: 'Definitive mode plan',
+      category: 'Strategy',
+      description: 'Definition of done for moving the platform to definitive mode.',
+      status: 'ready',
+      path: 'docs/definitive_mode_plan.md',
+      last_modified: '2026-03-31T00:00:00Z',
+      source_type: 'repo_document',
+    },
+  ],
+  financial_projections: [
+    { year: 2026, arr: 417600, users: 1000, revenue: 417600, costs: 2551680, modeled_note: 'Modeled from local tasks/tokens/cost usage. Not a finance ledger.' },
+    { year: 2027, arr: 1177286, users: 1800, revenue: 1177286, costs: 2707911, modeled_note: 'Modeled from local tasks/tokens/cost usage. Not a finance ledger.' },
+    { year: 2028, arr: 3313923, users: 3240, revenue: 3313923, costs: 3096494, modeled_note: 'Modeled from local tasks/tokens/cost usage. Not a finance ledger.' },
+  ],
+  readiness_artifacts: {
+    demo_tracks: [
+      'Track 1: Operator truth: Start in `Operations`: Show version, update status, health, alerts, logs, mesh, and relay',
+      'Track 2: Builder truth: Move to `Developer`: Show debugger traces, swarm vote flow, test suites, and workflow inventory',
+      'Track 3: Commercial truth: Finish in `Readiness`: Show partner registration, certification, infra posture, and data room state',
+    ],
+    evidence_docs: [
+      { name: 'Public SDK docs plan', path: 'docs/public_sdk_docs_plan.md', status: 'ready', last_modified: '2026-03-31T00:00:00Z', source_type: 'repo_document' },
+      { name: 'Partner enablement runbook', path: 'docs/partner_enablement_runbook.md', status: 'ready', last_modified: '2026-03-31T00:00:00Z', source_type: 'repo_document' },
+    ],
+    market_readiness: { name: 'Market readiness audit', path: 'docs/market_readiness_audit.md', status: 'ready', last_modified: '2026-03-31T00:00:00Z', source_type: 'repo_document' },
+    definitive_mode: { name: 'Definitive mode plan', path: 'docs/definitive_mode_plan.md', status: 'ready', last_modified: '2026-03-31T00:00:00Z', source_type: 'repo_document' },
+  },
   browse_url: { ok: true },
   web_search: { results: [] },
 };
 
 export async function invoke<T>(command: string, _args?: Record<string, unknown>): Promise<T> {
-  // Simulate network delay
-  await new Promise((r) => setTimeout(r, 200 + Math.random() * 300));
+  await new Promise((resolve) => setTimeout(resolve, 200 + Math.random() * 300));
 
   const data = MOCK_DATA[command];
   if (!data) {

@@ -1,3 +1,3 @@
 pub mod status;
 
-pub use status::{InfraMonitor, InfraStatus, RegionStatus};
+pub use status::{InfraMonitor, InfraStatus, ProbeTarget, RegionStatus};

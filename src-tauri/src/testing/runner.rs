@@ -1,36 +1,24 @@
+use crate::config::Settings;
+use crate::memory::Database;
+use crate::pipeline;
+use crate::swarm::SwarmCoordinator;
+use crate::types::{AgentAction, ShellType};
 use serde::{Deserialize, Serialize};
+use std::path::Path;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use std::time::Instant;
-
-// ── Structs ───────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TestMocks {
-    pub llm_response: Option<String>,
-    pub cli_output: Option<String>,
-    pub cli_blocked: bool,
-    pub offline: bool,
-}
-
-impl Default for TestMocks {
-    fn default() -> Self {
-        Self {
-            llm_response: None,
-            cli_output: None,
-            cli_blocked: false,
-            offline: false,
-        }
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TestCase {
     pub id: String,
     pub name: String,
     pub description: String,
+    pub runtime: String,
     pub input: String,
-    pub expected_output: Option<String>,
     pub expected_contains: Option<Vec<String>>,
-    pub mocks: TestMocks,
+    pub agents: Option<Vec<String>>,
+    pub strategy: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,186 +35,231 @@ pub struct TestResult {
     pub passed: bool,
     pub actual_output: String,
     pub duration_ms: u64,
+    pub runtime: String,
     pub error: Option<String>,
 }
-
-// ── TestRunner ────────────────────────────────────────────────────
 
 pub struct TestRunner;
 
 impl TestRunner {
-    /// Run a single test case and produce a TestResult.
-    pub fn run_single(test_case: &TestCase) -> TestResult {
-        let start = Instant::now();
-
-        // Determine the "actual" output by checking mocks
-        let actual_output = if test_case.mocks.offline {
-            "[offline] No LLM available".to_string()
-        } else if test_case.mocks.cli_blocked {
-            "[blocked] CLI execution is blocked by policy".to_string()
-        } else if let Some(ref llm) = test_case.mocks.llm_response {
-            llm.clone()
-        } else if let Some(ref cli) = test_case.mocks.cli_output {
-            cli.clone()
-        } else {
-            format!("Echo: {}", test_case.input)
-        };
-
-        // Check pass/fail
-        let mut passed = true;
-        let mut error: Option<String> = None;
-
-        if let Some(ref expected) = test_case.expected_output {
-            if actual_output != *expected {
-                passed = false;
-                error = Some(format!(
-                    "Expected '{}', got '{}'",
-                    expected, actual_output
-                ));
-            }
-        }
-
-        if let Some(ref contains) = test_case.expected_contains {
-            for needle in contains {
-                if !actual_output.contains(needle.as_str()) {
-                    passed = false;
-                    error = Some(format!(
-                        "Output missing expected substring '{}'",
-                        needle
-                    ));
-                    break;
-                }
-            }
-        }
-
-        let duration_ms = start.elapsed().as_millis() as u64;
-
-        TestResult {
-            test_id: test_case.id.clone(),
-            passed,
-            actual_output,
-            duration_ms,
-            error,
-        }
-    }
-
-    /// Run all test cases in a suite.
-    pub fn run_suite(suite: &TestSuite) -> Vec<TestResult> {
-        suite.test_cases.iter().map(|tc| Self::run_single(tc)).collect()
-    }
-
-    /// Return the two default embedded suites.
     pub fn list_suites() -> Vec<TestSuite> {
-        vec![Self::basic_chat_suite(), Self::command_execution_suite()]
+        vec![Self::executor_runtime_suite(), Self::pipeline_runtime_suite()]
     }
 
-    /// Create a blank template suite the user can fill in.
     pub fn create_template() -> TestSuite {
         TestSuite {
             id: uuid::Uuid::new_v4().to_string(),
-            name: "Custom Test Suite".to_string(),
+            name: "Runtime Test Suite".to_string(),
             test_cases: vec![TestCase {
                 id: uuid::Uuid::new_v4().to_string(),
-                name: "Example Test".to_string(),
-                description: "Replace with your test".to_string(),
-                input: "hello".to_string(),
-                expected_output: Some("Echo: hello".to_string()),
-                expected_contains: None,
-                mocks: TestMocks::default(),
+                name: "Runtime executor smoke".to_string(),
+                description: "Runs a real PowerShell command through the runtime executor.".to_string(),
+                runtime: "executor_command".to_string(),
+                input: "Write-Output 'runtime-template-ok'".to_string(),
+                expected_contains: Some(vec!["runtime-template-ok".to_string()]),
+                agents: None,
+                strategy: None,
             }],
             created_at: chrono::Utc::now().to_rfc3339(),
         }
     }
 
-    // ── Default suites ────────────────────────────────────────────
+    pub async fn run_suite(
+        suite: &TestSuite,
+        settings: &Settings,
+        kill_switch: &Arc<AtomicBool>,
+        screenshots_dir: &Path,
+        db_path: &Path,
+        app_handle: &tauri::AppHandle,
+    ) -> Vec<TestResult> {
+        let mut results = Vec::with_capacity(suite.test_cases.len());
+        for test_case in &suite.test_cases {
+            results.push(
+                Self::run_single(test_case, settings, kill_switch, screenshots_dir, db_path, app_handle).await,
+            );
+        }
+        results
+    }
 
-    fn basic_chat_suite() -> TestSuite {
-        TestSuite {
-            id: "suite-basic-chat".to_string(),
-            name: "Basic Chat".to_string(),
-            test_cases: vec![
-                TestCase {
-                    id: "bc-1".to_string(),
-                    name: "Simple greeting".to_string(),
-                    description: "Send a greeting and get a response".to_string(),
-                    input: "Hello!".to_string(),
-                    expected_output: None,
-                    expected_contains: Some(vec!["Hello".to_string()]),
-                    mocks: TestMocks {
-                        llm_response: Some("Hello! How can I help you?".to_string()),
-                        ..Default::default()
+    pub async fn run_single(
+        test_case: &TestCase,
+        settings: &Settings,
+        kill_switch: &Arc<AtomicBool>,
+        screenshots_dir: &Path,
+        db_path: &Path,
+        app_handle: &tauri::AppHandle,
+    ) -> TestResult {
+        let started_at = Instant::now();
+
+        let outcome = match test_case.runtime.as_str() {
+            "executor_command" => run_executor_command(test_case).await,
+            "pipeline_task" => run_pipeline_task(test_case, settings, kill_switch, screenshots_dir, db_path, app_handle).await,
+            "swarm_task" => run_swarm_task(test_case, settings, db_path).await,
+            other => Err(format!("Unsupported runtime '{}'", other)),
+        };
+
+        match outcome {
+            Ok(actual_output) => {
+                let passed = matches_expected(&actual_output, test_case.expected_contains.as_ref());
+                TestResult {
+                    test_id: test_case.id.clone(),
+                    passed,
+                    actual_output,
+                    duration_ms: started_at.elapsed().as_millis() as u64,
+                    runtime: test_case.runtime.clone(),
+                    error: if passed {
+                        None
+                    } else {
+                        Some("Runtime output did not satisfy expectations.".to_string())
                     },
-                },
-                TestCase {
-                    id: "bc-2".to_string(),
-                    name: "Echo fallback".to_string(),
-                    description: "Without mocks the runner echoes input".to_string(),
-                    input: "ping".to_string(),
-                    expected_output: Some("Echo: ping".to_string()),
-                    expected_contains: None,
-                    mocks: TestMocks::default(),
-                },
-                TestCase {
-                    id: "bc-3".to_string(),
-                    name: "Offline mode".to_string(),
-                    description: "When offline, the agent reports unavailability".to_string(),
-                    input: "What is the weather?".to_string(),
-                    expected_output: None,
-                    expected_contains: Some(vec!["offline".to_string()]),
-                    mocks: TestMocks {
-                        offline: true,
-                        ..Default::default()
-                    },
-                },
-            ],
-            created_at: "2026-01-01T00:00:00Z".to_string(),
+                }
+            }
+            Err(error) => TestResult {
+                test_id: test_case.id.clone(),
+                passed: false,
+                actual_output: String::new(),
+                duration_ms: started_at.elapsed().as_millis() as u64,
+                runtime: test_case.runtime.clone(),
+                error: Some(error),
+            },
         }
     }
 
-    fn command_execution_suite() -> TestSuite {
+    fn executor_runtime_suite() -> TestSuite {
         TestSuite {
-            id: "suite-cmd-exec".to_string(),
-            name: "Command Execution".to_string(),
+            id: "suite-runtime-executor".to_string(),
+            name: "Executor runtime".to_string(),
             test_cases: vec![
                 TestCase {
-                    id: "ce-1".to_string(),
-                    name: "CLI output captured".to_string(),
-                    description: "Mock CLI output is returned correctly".to_string(),
-                    input: "list files".to_string(),
-                    expected_output: Some("file1.txt\nfile2.txt".to_string()),
-                    expected_contains: None,
-                    mocks: TestMocks {
-                        cli_output: Some("file1.txt\nfile2.txt".to_string()),
-                        ..Default::default()
-                    },
+                    id: "exec-1".to_string(),
+                    name: "PowerShell stdout".to_string(),
+                    description: "Runs a real PowerShell command through pipeline executor.".to_string(),
+                    runtime: "executor_command".to_string(),
+                    input: "Write-Output 'agentos-runtime-ok'".to_string(),
+                    expected_contains: Some(vec!["agentos-runtime-ok".to_string()]),
+                    agents: None,
+                    strategy: None,
                 },
                 TestCase {
-                    id: "ce-2".to_string(),
-                    name: "CLI blocked".to_string(),
-                    description: "Blocked commands are rejected".to_string(),
-                    input: "rm -rf /".to_string(),
-                    expected_output: None,
-                    expected_contains: Some(vec!["blocked".to_string()]),
-                    mocks: TestMocks {
-                        cli_blocked: true,
-                        ..Default::default()
-                    },
-                },
-                TestCase {
-                    id: "ce-3".to_string(),
-                    name: "LLM + CLI combined".to_string(),
-                    description: "LLM response takes priority over CLI".to_string(),
-                    input: "summarize logs".to_string(),
-                    expected_output: Some("Logs look healthy".to_string()),
-                    expected_contains: None,
-                    mocks: TestMocks {
-                        llm_response: Some("Logs look healthy".to_string()),
-                        cli_output: Some("raw log data".to_string()),
-                        ..Default::default()
-                    },
+                    id: "exec-2".to_string(),
+                    name: "PowerShell environment".to_string(),
+                    description: "Reads a real environment value via runtime executor.".to_string(),
+                    runtime: "executor_command".to_string(),
+                    input: "$PSVersionTable.PSVersion.ToString()".to_string(),
+                    expected_contains: Some(vec![".".to_string()]),
+                    agents: None,
+                    strategy: None,
                 },
             ],
-            created_at: "2026-01-01T00:00:00Z".to_string(),
+            created_at: "2026-03-31T00:00:00Z".to_string(),
         }
+    }
+
+    fn pipeline_runtime_suite() -> TestSuite {
+        TestSuite {
+            id: "suite-runtime-pipeline".to_string(),
+            name: "Pipeline and swarm runtime".to_string(),
+            test_cases: vec![
+                TestCase {
+                    id: "pipe-1".to_string(),
+                    name: "Pipeline command plan".to_string(),
+                    description: "Runs the real PC pipeline on a constrained command-only task.".to_string(),
+                    runtime: "pipeline_task".to_string(),
+                    input: "Use exactly one PowerShell command to print PIPELINE_RUNTIME_OK and then finish the task.".to_string(),
+                    expected_contains: Some(vec!["PIPELINE_RUNTIME_OK".to_string()]),
+                    agents: None,
+                    strategy: None,
+                },
+                TestCase {
+                    id: "swarm-1".to_string(),
+                    name: "Swarm vote".to_string(),
+                    description: "Runs the real swarm runtime with named agents and consensus judging.".to_string(),
+                    runtime: "swarm_task".to_string(),
+                    input: "Summarize why runtime-backed observability is more trustworthy than synthetic dashboards.".to_string(),
+                    expected_contains: Some(vec!["runtime".to_string()]),
+                    agents: Some(vec!["Programmer".to_string(), "QA Tester".to_string()]),
+                    strategy: Some("vote".to_string()),
+                },
+            ],
+            created_at: "2026-03-31T00:00:00Z".to_string(),
+        }
+    }
+}
+
+async fn run_executor_command(test_case: &TestCase) -> Result<String, String> {
+    let action = AgentAction::RunCommand {
+        command: test_case.input.clone(),
+        shell: ShellType::PowerShell,
+    };
+
+    let kill_switch = Arc::new(AtomicBool::new(false));
+    let result = pipeline::executor::execute(&action, 20, &kill_switch).await?;
+    Ok(result.output.unwrap_or_default())
+}
+
+async fn run_pipeline_task(
+    test_case: &TestCase,
+    settings: &Settings,
+    kill_switch: &Arc<AtomicBool>,
+    screenshots_dir: &Path,
+    db_path: &Path,
+    app_handle: &tauri::AppHandle,
+) -> Result<String, String> {
+    let task_id = format!("test-task-{}", uuid::Uuid::new_v4());
+    let db = Database::new(db_path).map_err(|e| e.to_string())?;
+    db.create_task_pending(&task_id, &test_case.input)
+        .map_err(|e| e.to_string())?;
+
+    pipeline::engine::run_task(
+        &task_id,
+        &test_case.input,
+        settings,
+        kill_switch,
+        screenshots_dir,
+        db_path,
+        app_handle,
+    )
+    .await?;
+
+    let trace = db.get_execution_trace(&task_id).map_err(|e| e.to_string())?;
+    Ok(trace["output_text"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string())
+}
+
+async fn run_swarm_task(
+    test_case: &TestCase,
+    settings: &Settings,
+    db_path: &Path,
+) -> Result<String, String> {
+    let mut coordinator = SwarmCoordinator::new();
+    let agents = test_case
+        .agents
+        .clone()
+        .unwrap_or_else(|| vec!["Programmer".to_string(), "QA Tester".to_string()]);
+    let strategy = test_case
+        .strategy
+        .clone()
+        .unwrap_or_else(|| "vote".to_string());
+    let task = coordinator.create_swarm_task(&test_case.input, agents, &strategy);
+    let executed = coordinator.execute(&task.id, settings, db_path).await?;
+
+    if let Some(consensus) = executed.consensus {
+        Ok(format!("{}: {}", consensus.agent_name, consensus.rationale))
+    } else {
+        Ok(executed
+            .results
+            .iter()
+            .map(|result| format!("{}: {}", result.agent_name, result.output))
+            .collect::<Vec<_>>()
+            .join("\n\n"))
+    }
+}
+
+fn matches_expected(actual_output: &str, expected_contains: Option<&Vec<String>>) -> bool {
+    match expected_contains {
+        Some(needles) => needles.iter().all(|needle| actual_output.contains(needle)),
+        None => !actual_output.trim().is_empty(),
     }
 }

@@ -68,6 +68,52 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_steps_task ON task_steps(task_id);
             CREATE INDEX IF NOT EXISTS idx_llm_task ON llm_calls(task_id);
 
+            CREATE TABLE IF NOT EXISTS execution_traces (
+                task_id TEXT PRIMARY KEY REFERENCES tasks(id),
+                source TEXT NOT NULL DEFAULT 'pipeline',
+                input_text TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'running',
+                total_duration_ms INTEGER NOT NULL DEFAULT 0,
+                total_cost REAL NOT NULL DEFAULT 0,
+                total_tokens INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                finished_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS execution_trace_steps (
+                id TEXT PRIMARY KEY,
+                task_id TEXT NOT NULL REFERENCES execution_traces(task_id),
+                seq INTEGER NOT NULL,
+                phase TEXT NOT NULL,
+                input TEXT NOT NULL DEFAULT '',
+                output TEXT NOT NULL DEFAULT '',
+                decision TEXT NOT NULL DEFAULT '',
+                duration_ms INTEGER NOT NULL DEFAULT 0,
+                cost REAL NOT NULL DEFAULT 0,
+                tokens INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_execution_traces_created ON execution_traces(created_at);
+            CREATE INDEX IF NOT EXISTS idx_execution_trace_steps_task ON execution_trace_steps(task_id, seq);
+
+            CREATE TABLE IF NOT EXISTS hardware_partners (
+                id TEXT PRIMARY KEY,
+                company TEXT NOT NULL,
+                device_type TEXT NOT NULL,
+                integration_level TEXT NOT NULL,
+                certified INTEGER NOT NULL DEFAULT 0,
+                certification_note TEXT,
+                certification_evidence TEXT,
+                contact_email TEXT,
+                units_shipped INTEGER,
+                registered_at TEXT NOT NULL DEFAULT (datetime('now')),
+                certified_at TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_hardware_partners_registered ON hardware_partners(registered_at);
+            CREATE INDEX IF NOT EXISTS idx_hardware_partners_certified ON hardware_partners(certified);
+
             CREATE TABLE IF NOT EXISTS chain_log (
                 id          TEXT PRIMARY KEY,
                 chain_id    TEXT NOT NULL,
@@ -281,6 +327,38 @@ impl Database {
         Ok(())
     }
 
+    pub fn update_task_metrics(
+        &self,
+        task_id: &str,
+        model_used: Option<&str>,
+        provider: Option<&str>,
+        tokens_in: u32,
+        tokens_out: u32,
+        cost: f64,
+        duration_ms: u64,
+    ) -> Result<(), rusqlite::Error> {
+        self.conn.execute(
+            "UPDATE tasks
+             SET model_used = COALESCE(?2, model_used),
+                 provider = COALESCE(?3, provider),
+                 tokens_in = ?4,
+                 tokens_out = ?5,
+                 cost = ?6,
+                 duration_ms = ?7
+             WHERE id = ?1",
+            params![
+                task_id,
+                model_used,
+                provider,
+                tokens_in as i64,
+                tokens_out as i64,
+                cost,
+                duration_ms as i64,
+            ],
+        )?;
+        Ok(())
+    }
+
     pub fn insert_task_step(
         &self,
         task_id: &str,
@@ -309,6 +387,276 @@ impl Database {
             ],
         )?;
         Ok(())
+    }
+
+    pub fn ensure_execution_trace(
+        &self,
+        task_id: &str,
+        input_text: &str,
+        source: &str,
+    ) -> Result<(), rusqlite::Error> {
+        self.conn.execute(
+            "INSERT INTO execution_traces (task_id, input_text, source, status)
+             VALUES (?1, ?2, ?3, 'running')
+             ON CONFLICT(task_id) DO UPDATE SET
+                input_text = excluded.input_text,
+                source = excluded.source",
+            params![task_id, input_text, source],
+        )?;
+        Ok(())
+    }
+
+    pub fn append_execution_trace_step(
+        &self,
+        task_id: &str,
+        phase: &str,
+        input: &str,
+        output: &str,
+        decision: &str,
+        duration_ms: u64,
+        cost: f64,
+        tokens: u32,
+    ) -> Result<(), rusqlite::Error> {
+        let id = uuid::Uuid::new_v4().to_string();
+        let seq: i64 = self.conn.query_row(
+            "SELECT COALESCE(MAX(seq), 0) + 1 FROM execution_trace_steps WHERE task_id = ?1",
+            params![task_id],
+            |row| row.get(0),
+        )?;
+
+        self.conn.execute(
+            "INSERT INTO execution_trace_steps (id, task_id, seq, phase, input, output, decision, duration_ms, cost, tokens)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                id,
+                task_id,
+                seq,
+                phase,
+                input,
+                output,
+                decision,
+                duration_ms as i64,
+                cost,
+                tokens as i64,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn finish_execution_trace(
+        &self,
+        task_id: &str,
+        status: &str,
+        total_duration_ms: u64,
+        total_cost: f64,
+        total_tokens: u32,
+    ) -> Result<(), rusqlite::Error> {
+        self.conn.execute(
+            "UPDATE execution_traces
+             SET status = ?2,
+                 total_duration_ms = ?3,
+                 total_cost = ?4,
+                 total_tokens = ?5,
+                 finished_at = datetime('now')
+             WHERE task_id = ?1",
+            params![
+                task_id,
+                status,
+                total_duration_ms as i64,
+                total_cost,
+                total_tokens as i64,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_execution_traces(&self, limit: usize) -> Result<Value, rusqlite::Error> {
+        let mut stmt = self.conn.prepare(
+            "SELECT t.task_id, t.input_text, t.status, t.total_duration_ms, t.total_cost, t.created_at,
+                    CASE WHEN t.finished_at IS NOT NULL THEN 1 ELSE 0 END AS finished
+             FROM execution_traces t
+             ORDER BY t.created_at DESC
+             LIMIT ?1",
+        )?;
+
+        let traces: Vec<Value> = stmt
+            .query_map(params![limit as i64], |row| {
+                Ok(json!({
+                    "id": row.get::<_, String>(0)?,
+                    "task_id": row.get::<_, String>(0)?,
+                    "input_text": row.get::<_, String>(1)?,
+                    "status": row.get::<_, String>(2)?,
+                    "total_duration_ms": row.get::<_, i64>(3)?,
+                    "total_cost": row.get::<_, f64>(4)?,
+                    "created_at": row.get::<_, String>(5)?,
+                    "finished": row.get::<_, i32>(6)? == 1,
+                }))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(json!(traces))
+    }
+
+    pub fn get_execution_trace(&self, task_id: &str) -> Result<Value, rusqlite::Error> {
+        let trace = self.conn.query_row(
+            "SELECT t.task_id, t.input_text, t.status, t.total_duration_ms, t.total_cost, t.total_tokens,
+                    t.created_at, CASE WHEN t.finished_at IS NOT NULL THEN 1 ELSE 0 END AS finished,
+                    tk.output_text
+             FROM execution_traces t
+             LEFT JOIN tasks tk ON tk.id = t.task_id
+             WHERE t.task_id = ?1",
+            params![task_id],
+            |row| {
+                Ok(json!({
+                    "id": row.get::<_, String>(0)?,
+                    "task_id": row.get::<_, String>(0)?,
+                    "input_text": row.get::<_, String>(1)?,
+                    "status": row.get::<_, String>(2)?,
+                    "total_duration_ms": row.get::<_, i64>(3)?,
+                    "total_cost": row.get::<_, f64>(4)?,
+                    "total_tokens": row.get::<_, i64>(5)?,
+                    "created_at": row.get::<_, String>(6)?,
+                    "finished": row.get::<_, i32>(7)? == 1,
+                    "output_text": row.get::<_, Option<String>>(8)?,
+                }))
+            },
+        )?;
+
+        let mut stmt = self.conn.prepare(
+            "SELECT seq, phase, input, output, decision, duration_ms, cost, tokens, created_at
+             FROM execution_trace_steps
+             WHERE task_id = ?1
+             ORDER BY seq ASC",
+        )?;
+
+        let steps: Vec<Value> = stmt
+            .query_map(params![task_id], |row| {
+                Ok(json!({
+                    "seq": row.get::<_, i64>(0)?,
+                    "phase": row.get::<_, String>(1)?,
+                    "input": row.get::<_, String>(2)?,
+                    "output": row.get::<_, String>(3)?,
+                    "decision": row.get::<_, String>(4)?,
+                    "duration_ms": row.get::<_, i64>(5)?,
+                    "cost": row.get::<_, f64>(6)?,
+                    "tokens": row.get::<_, i64>(7)?,
+                    "created_at": row.get::<_, String>(8)?,
+                }))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        let mut trace_obj = trace;
+        trace_obj["steps"] = json!(steps);
+        Ok(trace_obj)
+    }
+
+    pub fn list_hardware_partners(&self) -> Result<Value, rusqlite::Error> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, company, device_type, integration_level, certified,
+                    certification_note, certification_evidence, contact_email, units_shipped,
+                    registered_at, certified_at
+             FROM hardware_partners
+             ORDER BY registered_at DESC",
+        )?;
+
+        let partners: Vec<Value> = stmt
+            .query_map([], |row| {
+                Ok(json!({
+                    "id": row.get::<_, String>(0)?,
+                    "company": row.get::<_, String>(1)?,
+                    "device_type": row.get::<_, String>(2)?,
+                    "integration_level": row.get::<_, String>(3)?,
+                    "certified": row.get::<_, i32>(4)? == 1,
+                    "certification_note": row.get::<_, Option<String>>(5)?,
+                    "certification_evidence": row.get::<_, Option<String>>(6)?,
+                    "contact_email": row.get::<_, Option<String>>(7)?,
+                    "units_shipped": row.get::<_, Option<i64>>(8)?,
+                    "registered_at": row.get::<_, String>(9)?,
+                    "certified_at": row.get::<_, Option<String>>(10)?,
+                }))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(json!(partners))
+    }
+
+    pub fn get_hardware_partner(&self, id: &str) -> Result<Option<Value>, rusqlite::Error> {
+        let result = self.conn.query_row(
+            "SELECT id, company, device_type, integration_level, certified,
+                    certification_note, certification_evidence, contact_email, units_shipped,
+                    registered_at, certified_at
+             FROM hardware_partners
+             WHERE id = ?1",
+            params![id],
+            |row| {
+                Ok(json!({
+                    "id": row.get::<_, String>(0)?,
+                    "company": row.get::<_, String>(1)?,
+                    "device_type": row.get::<_, String>(2)?,
+                    "integration_level": row.get::<_, String>(3)?,
+                    "certified": row.get::<_, i32>(4)? == 1,
+                    "certification_note": row.get::<_, Option<String>>(5)?,
+                    "certification_evidence": row.get::<_, Option<String>>(6)?,
+                    "contact_email": row.get::<_, Option<String>>(7)?,
+                    "units_shipped": row.get::<_, Option<i64>>(8)?,
+                    "registered_at": row.get::<_, String>(9)?,
+                    "certified_at": row.get::<_, Option<String>>(10)?,
+                }))
+            },
+        );
+
+        match result {
+            Ok(partner) => Ok(Some(partner)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    pub fn register_hardware_partner(
+        &self,
+        company: &str,
+        device_type: &str,
+        integration_level: &str,
+    ) -> Result<Value, rusqlite::Error> {
+        let id = uuid::Uuid::new_v4().to_string();
+        self.conn.execute(
+            "INSERT INTO hardware_partners (id, company, device_type, integration_level, certified)
+             VALUES (?1, ?2, ?3, ?4, 0)",
+            params![id, company, device_type, integration_level],
+        )?;
+
+        Ok(json!({
+            "id": id,
+            "company": company,
+            "device_type": device_type,
+            "integration_level": integration_level,
+            "certified": false,
+            "registered_at": chrono::Utc::now().to_rfc3339(),
+        }))
+    }
+
+    pub fn certify_hardware_partner(
+        &self,
+        id: &str,
+        certification_note: &str,
+        certification_evidence: &str,
+    ) -> Result<Value, rusqlite::Error> {
+        self.conn.execute(
+            "UPDATE hardware_partners
+             SET certified = 1,
+                 certification_note = ?2,
+                 certification_evidence = ?3,
+                 certified_at = datetime('now')
+             WHERE id = ?1",
+            params![id, certification_note, certification_evidence],
+        )?;
+
+        Ok(self
+            .get_hardware_partner(id)?
+            .unwrap_or_else(|| json!({ "id": id, "certified": true })))
     }
 
     pub fn get_usage_summary(&self) -> Result<Value, rusqlite::Error> {

@@ -799,6 +799,7 @@ export function useAgent() {
     const getDataRoom = () => callInvoke<any>('data_room');
     const getFinancialProjections = (years?: number) =>
         callInvoke<any>('financial_projections', { years });
+    const getReadinessArtifacts = () => callInvoke<any>('readiness_artifacts');
 
     // R91: OS Integration
     const getFileActions = () => callInvoke<any[]>('get_file_actions');
@@ -1420,7 +1421,7 @@ export function useAgent() {
         // R98: Global Infrastructure
         getInfraStatus, infraCheckRegions,
         // R99: IPO Readiness
-        getInvestorMetrics, getDataRoom, getFinancialProjections,
+        getInvestorMetrics, getDataRoom, getFinancialProjections, getReadinessArtifacts,
         // R91: OS Integration
         getFileActions, getTextActions, processFileAction, processTextAction,
         // R92: Federated Learning

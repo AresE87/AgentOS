@@ -5235,18 +5235,54 @@ async fn cmd_test_list_suites() -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
-async fn cmd_test_run_suite(suite_json: String) -> Result<serde_json::Value, String> {
+async fn cmd_test_run_suite(
+    suite_json: String,
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<serde_json::Value, String> {
     let suite: testing::TestSuite =
         serde_json::from_str(&suite_json).map_err(|e| format!("Invalid suite JSON: {}", e))?;
-    let results = testing::TestRunner::run_suite(&suite);
+    let settings = {
+        let s = state.settings.lock().map_err(|e| e.to_string())?;
+        s.clone()
+    };
+    let kill_switch = state.kill_switch.clone();
+    let screenshots_dir = state.screenshots_dir.clone();
+    let results = testing::TestRunner::run_suite(
+        &suite,
+        &settings,
+        &kill_switch,
+        &screenshots_dir,
+        &state.db_path,
+        &app_handle,
+    )
+    .await;
     serde_json::to_value(&results).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-async fn cmd_test_run_single(test_json: String) -> Result<serde_json::Value, String> {
+async fn cmd_test_run_single(
+    test_json: String,
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<serde_json::Value, String> {
     let test_case: testing::TestCase =
         serde_json::from_str(&test_json).map_err(|e| format!("Invalid test JSON: {}", e))?;
-    let result = testing::TestRunner::run_single(&test_case);
+    let settings = {
+        let s = state.settings.lock().map_err(|e| e.to_string())?;
+        s.clone()
+    };
+    let kill_switch = state.kill_switch.clone();
+    let screenshots_dir = state.screenshots_dir.clone();
+    let result = testing::TestRunner::run_single(
+        &test_case,
+        &settings,
+        &kill_switch,
+        &screenshots_dir,
+        &state.db_path,
+        &app_handle,
+    )
+    .await;
     serde_json::to_value(&result).map_err(|e| e.to_string())
 }
 
@@ -5837,7 +5873,11 @@ async fn cmd_swarm_execute(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let mut coordinator = state.swarm_coordinator.lock().await;
-    let task = coordinator.execute(&task_id)?;
+    let settings = {
+        let s = state.settings.lock().map_err(|e| e.to_string())?;
+        s.clone()
+    };
+    let task = coordinator.execute(&task_id, &settings, &state.db_path).await?;
     serde_json::to_value(&task).map_err(|e| e.to_string())
 }
 
@@ -5848,7 +5888,7 @@ async fn cmd_swarm_results(
 ) -> Result<serde_json::Value, String> {
     let coordinator = state.swarm_coordinator.lock().await;
     let task = coordinator.get_results(&task_id)?;
-    let consensus = swarm::SwarmCoordinator::vote_consensus(&task.results);
+    let consensus = task.consensus.clone();
     Ok(serde_json::json!({
         "task": task,
         "consensus": consensus,
@@ -5871,9 +5911,10 @@ async fn cmd_debugger_start_trace(
     task_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let mut dbg = state.agent_debugger.lock().await;
-    let trace_id = dbg.start_trace(&task_id);
-    Ok(serde_json::json!({ "trace_id": trace_id, "task_id": task_id }))
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.ensure_execution_trace(&task_id, &task_id, "manual")
+        .map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({ "trace_id": task_id, "task_id": task_id }))
 }
 
 #[tauri::command]
@@ -5881,11 +5922,8 @@ async fn cmd_debugger_get_trace(
     trace_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let dbg = state.agent_debugger.lock().await;
-    match dbg.get_trace(&trace_id) {
-        Some(trace) => serde_json::to_value(trace).map_err(|e| e.to_string()),
-        None => Err(format!("Trace not found: {}", trace_id)),
-    }
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.get_execution_trace(&trace_id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -5893,9 +5931,9 @@ async fn cmd_debugger_list_traces(
     limit: Option<usize>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let dbg = state.agent_debugger.lock().await;
-    let traces = dbg.list_traces(limit.unwrap_or(20));
-    serde_json::to_value(&traces).map_err(|e| e.to_string())
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.list_execution_traces(limit.unwrap_or(20))
+        .map_err(|e| e.to_string())
 }
 
 // ── R97: Revenue Optimization commands ──────────────────────────────
@@ -5929,11 +5967,50 @@ fn cmd_upsell_candidates(
 
 // ── R98: Global Infrastructure commands ─────────────────────────────
 
+fn build_infra_probes(state: &tauri::State<'_, AppState>) -> Result<Vec<infrastructure::ProbeTarget>, String> {
+    let mut probes = Vec::new();
+
+    probes.push(infrastructure::ProbeTarget {
+        region: "local-db".to_string(),
+        endpoint: state.db_path.to_string_lossy().to_string(),
+        probe_type: "file_exists".to_string(),
+    });
+
+    let settings = state.settings.lock().map_err(|e| e.to_string())?;
+    if !settings.local_llm_url.trim().is_empty() {
+        probes.push(infrastructure::ProbeTarget {
+            region: "local-llm".to_string(),
+            endpoint: settings.local_llm_url.clone(),
+            probe_type: "tcp".to_string(),
+        });
+    }
+    if !settings.relay_server_url.trim().is_empty() {
+        probes.push(infrastructure::ProbeTarget {
+            region: "relay".to_string(),
+            endpoint: settings.relay_server_url.clone(),
+            probe_type: "tcp".to_string(),
+        });
+    }
+    drop(settings);
+
+    let api_enabled = *state.api_enabled.lock().map_err(|e| e.to_string())?;
+    if api_enabled {
+        probes.push(infrastructure::ProbeTarget {
+            region: "local-api".to_string(),
+            endpoint: format!("127.0.0.1:{}", state.api_port),
+            probe_type: "tcp".to_string(),
+        });
+    }
+
+    Ok(probes)
+}
+
 #[tauri::command]
 fn cmd_infra_status(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let status = state.infra_monitor.check_regions();
+    let probes = build_infra_probes(&state)?;
+    let status = state.infra_monitor.check_regions(&probes);
     serde_json::to_value(&status).map_err(|e| e.to_string())
 }
 
@@ -5941,7 +6018,8 @@ fn cmd_infra_status(
 fn cmd_infra_check_regions(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let data = state.infra_monitor.get_status_page_data();
+    let probes = build_infra_probes(&state)?;
+    let data = state.infra_monitor.get_status_page_data(&probes);
     Ok(data)
 }
 
@@ -5972,6 +6050,14 @@ fn cmd_financial_projections(
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let projections = state.ipo_dashboard.get_projections(db.conn(), years.unwrap_or(5));
     serde_json::to_value(&projections).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn cmd_readiness_artifacts(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let artifacts = state.ipo_dashboard.get_readiness_artifacts();
+    serde_json::to_value(&artifacts).map_err(|e| e.to_string())
 }
 
 /// Simple non-cryptographic hash for referral IDs (not security-sensitive).
@@ -6610,9 +6696,8 @@ async fn cmd_email_client_send(
 async fn cmd_list_partners(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let registry = state.partner_registry.lock().await;
-    let partners = registry.list_partners();
-    serde_json::to_value(&partners).map_err(|e| e.to_string())
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.list_hardware_partners().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -6620,9 +6705,9 @@ async fn cmd_get_partner(
     id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let registry = state.partner_registry.lock().await;
-    match registry.get_partner(&id) {
-        Some(p) => serde_json::to_value(&p).map_err(|e| e.to_string()),
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    match db.get_hardware_partner(&id).map_err(|e| e.to_string())? {
+        Some(p) => Ok(p),
         None => Err(format!("Partner not found: {}", id)),
     }
 }
@@ -6635,14 +6720,12 @@ async fn cmd_register_partner(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let level = match integration_level.as_str() {
-        "basic" => partnerships::registry::IntegrationLevel::Basic,
-        "premium" => partnerships::registry::IntegrationLevel::Premium,
-        "exclusive" => partnerships::registry::IntegrationLevel::Exclusive,
+        "basic" | "premium" | "exclusive" => integration_level.as_str(),
         _ => return Err(format!("Invalid integration level: {}", integration_level)),
     };
-    let mut registry = state.partner_registry.lock().await;
-    let partner = registry.register_partner(company, device_type, level);
-    serde_json::to_value(&partner).map_err(|e| e.to_string())
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.register_hardware_partner(&company, &device_type, level)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -6650,9 +6733,13 @@ async fn cmd_certify_partner(
     id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let mut registry = state.partner_registry.lock().await;
-    let partner = registry.certify(&id)?;
-    serde_json::to_value(&partner).map_err(|e| e.to_string())
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.certify_hardware_partner(
+        &id,
+        "Certified from readiness dashboard after runtime validation.",
+        "repo://docs/partner_enablement_runbook.md",
+    )
+    .map_err(|e| e.to_string())
 }
 
 // ── R111: Autonomous Inbox commands ──────────────────────────────────
@@ -9361,6 +9448,7 @@ pub fn run() {
             cmd_investor_metrics,
             cmd_data_room,
             cmd_financial_projections,
+            cmd_readiness_artifacts,
             // R91: OS Integration commands
             cmd_get_file_actions,
             cmd_get_text_actions,

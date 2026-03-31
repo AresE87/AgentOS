@@ -1,4 +1,4 @@
-use crate::brain::Gateway;
+use crate::brain::{Gateway, LLMResponse};
 use crate::config::Settings;
 use crate::eyes::{capture, vision};
 use crate::hands;
@@ -229,8 +229,25 @@ pub async fn run_task(
     let mut accumulated_output = String::new();
     let mut conversation: Vec<(String, String)> = Vec::new(); // (role, content) history
     let mut browser_opens: u32 = 0;
+    let mut total_cost = 0.0;
+    let mut total_tokens_in = 0u32;
+    let mut total_tokens_out = 0u32;
+    let mut primary_model: Option<String> = None;
+    let mut primary_provider: Option<String> = None;
 
     info!(task_id, description, "Starting PC task");
+    ensure_execution_trace(db_path, task_id, description, "pipeline");
+    append_trace_step(
+        db_path,
+        task_id,
+        "prompt_build",
+        description,
+        "Prepared PC-control system prompt for runtime execution.",
+        "Task entered pipeline",
+        0,
+        0.0,
+        0,
+    );
 
     emit(app_handle, "agent:step_started", task_id, 0, "Planning...");
 
@@ -239,6 +256,22 @@ pub async fn run_task(
     let plan = gateway.complete_as_agent(description, SYSTEM_PROMPT, settings)
         .await
         .map_err(|e| { fail(db_path, task_id, &e); e })?;
+    absorb_llm_metrics(
+        &plan,
+        &mut total_cost,
+        &mut total_tokens_in,
+        &mut total_tokens_out,
+        &mut primary_model,
+        &mut primary_provider,
+    );
+    record_llm_response(
+        db_path,
+        task_id,
+        "llm_plan",
+        description,
+        "Initial planner response from PC-control runtime",
+        &plan,
+    );
 
     let mut current_response = plan.content.trim().to_string();
     conversation.push(("user".into(), description.to_string()));
@@ -255,6 +288,17 @@ pub async fn run_task(
             Some(j) => j,
             None => {
                 // Raw text response — treat as chat
+                append_trace_step(
+                    db_path,
+                    task_id,
+                    "parse_response",
+                    &current_response,
+                    "LLM returned raw text instead of structured JSON.",
+                    "Fallback to raw text completion",
+                    0,
+                    0.0,
+                    0,
+                );
                 accumulated_output = current_response.clone();
                 update_task_status(db_path, task_id, "completed");
                 break;
@@ -262,6 +306,17 @@ pub async fn run_task(
         };
 
         let mode = plan_json["mode"].as_str().unwrap_or("command");
+        append_trace_step(
+            db_path,
+            task_id,
+            "parse_response",
+            &current_response,
+            mode,
+            "Parsed structured runtime plan",
+            0,
+            0.0,
+            0,
+        );
         info!(task_id, turn, mode, "Processing turn");
 
         match mode {
@@ -301,6 +356,7 @@ pub async fn run_task(
 
                     let is_gui = script.to_lowercase().contains("start-process");
                     let timeout = if is_gui { 30 } else { settings.cli_timeout };
+                    let step_started_at = Instant::now();
 
                     let (success, output) = execute_with_retry(
                         &script, timeout, description, &gateway, settings, task_id,
@@ -315,7 +371,7 @@ pub async fn run_task(
                     let result = ExecutionResult {
                         method: ExecutionMethod::Terminal, success,
                         output: Some(output.clone()), screenshot_path: sp_str.clone(),
-                        duration_ms: start.elapsed().as_millis() as u64,
+                        duration_ms: step_started_at.elapsed().as_millis() as u64,
                     };
                     save_step(db_path, task_id, step_num, &action, &sp.unwrap_or_default(), &result);
 
@@ -336,6 +392,22 @@ pub async fn run_task(
                         conversation.push(("user".into(), followup.clone()));
 
                         if let Ok(fix) = gateway.complete_as_agent(&followup, SYSTEM_PROMPT, settings).await {
+                            absorb_llm_metrics(
+                                &fix,
+                                &mut total_cost,
+                                &mut total_tokens_in,
+                                &mut total_tokens_out,
+                                &mut primary_model,
+                                &mut primary_provider,
+                            );
+                            record_llm_response(
+                                db_path,
+                                task_id,
+                                "llm_replan",
+                                &followup,
+                                "Planner generated retry/skip guidance after multi-step failure",
+                                &fix,
+                            );
                             current_response = fix.content.trim().to_string();
                             conversation.push(("assistant".into(), current_response.clone()));
                             // Will be processed in the next turn
@@ -389,6 +461,7 @@ pub async fn run_task(
 
                 let is_gui = script.to_lowercase().contains("start-process");
                 let timeout = if is_gui { 30 } else { settings.cli_timeout };
+                let step_started_at = Instant::now();
 
                 let (success, output) = execute_with_retry(
                     &script, timeout, description, &gateway, settings, task_id,
@@ -403,7 +476,7 @@ pub async fn run_task(
                 let result = ExecutionResult {
                     method: ExecutionMethod::Terminal, success,
                     output: Some(output.clone()), screenshot_path: sp_str.clone(),
-                    duration_ms: start.elapsed().as_millis() as u64,
+                    duration_ms: step_started_at.elapsed().as_millis() as u64,
                 };
                 save_step(db_path, task_id, step_num, &action, &sp.unwrap_or_default(), &result);
                 emit(app_handle, "agent:step_completed", task_id, step_num, &format!("success={}", success));
@@ -433,6 +506,22 @@ pub async fn run_task(
                     conversation.push(("user".into(), followup.clone()));
 
                     if let Ok(next) = gateway.complete_as_agent(&followup, SYSTEM_PROMPT, settings).await {
+                        absorb_llm_metrics(
+                            &next,
+                            &mut total_cost,
+                            &mut total_tokens_in,
+                            &mut total_tokens_out,
+                            &mut primary_model,
+                            &mut primary_provider,
+                        );
+                        record_llm_response(
+                            db_path,
+                            task_id,
+                            "llm_followup",
+                            &followup,
+                            "Planner evaluated command result and decided next turn",
+                            &next,
+                        );
                         current_response = next.content.trim().to_string();
                         conversation.push(("assistant".into(), current_response.clone()));
                         continue; // Next turn
@@ -474,6 +563,7 @@ pub async fn run_task(
 
                     let is_gui = script.to_lowercase().contains("start-process");
                     let timeout = if is_gui { 30 } else { settings.cli_timeout };
+                    let step_started_at = Instant::now();
                     let (success, output) = execute_with_retry(&script, timeout, description, &gateway, settings, task_id).await;
 
                     if is_gui { tokio::time::sleep(std::time::Duration::from_secs(3)).await; }
@@ -484,7 +574,7 @@ pub async fn run_task(
                     let result = ExecutionResult {
                         method: ExecutionMethod::Terminal, success,
                         output: Some(output.clone()), screenshot_path: sp_str.clone(),
-                        duration_ms: start.elapsed().as_millis() as u64,
+                        duration_ms: step_started_at.elapsed().as_millis() as u64,
                     };
                     save_step(db_path, task_id, 1, &action, &sp.unwrap_or_default(), &result);
                     step_history.push(StepRecord {
@@ -697,6 +787,7 @@ pub async fn run_task(
                 let step_num = (turn + 1) as u32;
                 emit(app_handle, "agent:step_started", task_id, step_num, expl);
                 info!(task_id, url, "Browse mode: fetching page");
+                let step_started_at = Instant::now();
 
                 match web::browser::fetch_page(url).await {
                     Ok(page) => {
@@ -707,6 +798,22 @@ pub async fn run_task(
                         );
 
                         if let Ok(analysis) = gateway.complete_as_agent(&prompt, SYSTEM_PROMPT, settings).await {
+                            absorb_llm_metrics(
+                                &analysis,
+                                &mut total_cost,
+                                &mut total_tokens_in,
+                                &mut total_tokens_out,
+                                &mut primary_model,
+                                &mut primary_provider,
+                            );
+                            record_llm_response(
+                                db_path,
+                                task_id,
+                                "llm_browse_analysis",
+                                &prompt,
+                                "Summarized fetched page content for the task",
+                                &analysis,
+                            );
                             accumulated_output = analysis.content;
                         } else {
                             accumulated_output = format!("Page content from {} (title: {}):\n{}", url, page.title, page_text);
@@ -720,7 +827,7 @@ pub async fn run_task(
                             method: ExecutionMethod::Terminal, success: true,
                             output: Some(accumulated_output.clone()),
                             screenshot_path: None,
-                            duration_ms: start.elapsed().as_millis() as u64,
+                            duration_ms: step_started_at.elapsed().as_millis() as u64,
                         };
                         save_step(db_path, task_id, step_num, &action, &std::path::PathBuf::new(), &result);
                         emit(app_handle, "agent:step_completed", task_id, step_num, "success=true");
@@ -750,6 +857,7 @@ pub async fn run_task(
                 let step_num = (turn + 1) as u32;
                 emit(app_handle, "agent:step_started", task_id, step_num, expl);
                 info!(task_id, query, "Search_web mode: searching");
+                let step_started_at = Instant::now();
 
                 match web::browser::web_search(query).await {
                     Ok(results) => {
@@ -763,6 +871,22 @@ pub async fn run_task(
                         );
 
                         if let Ok(analysis) = gateway.complete_as_agent(&prompt, SYSTEM_PROMPT, settings).await {
+                            absorb_llm_metrics(
+                                &analysis,
+                                &mut total_cost,
+                                &mut total_tokens_in,
+                                &mut total_tokens_out,
+                                &mut primary_model,
+                                &mut primary_provider,
+                            );
+                            record_llm_response(
+                                db_path,
+                                task_id,
+                                "llm_search_analysis",
+                                &prompt,
+                                "Summarized search results for the task",
+                                &analysis,
+                            );
                             accumulated_output = analysis.content;
                         } else {
                             accumulated_output = format!("Search results for \"{}\":\n{}", query, results_text);
@@ -776,7 +900,7 @@ pub async fn run_task(
                             method: ExecutionMethod::Terminal, success: true,
                             output: Some(accumulated_output.clone()),
                             screenshot_path: None,
-                            duration_ms: start.elapsed().as_millis() as u64,
+                            duration_ms: step_started_at.elapsed().as_millis() as u64,
                         };
                         save_step(db_path, task_id, step_num, &action, &std::path::PathBuf::new(), &result);
                         emit(app_handle, "agent:step_completed", task_id, step_num, "success=true");
@@ -829,6 +953,35 @@ pub async fn run_task(
 
     let duration_ms = start.elapsed().as_millis() as u64;
     let success = step_history.last().map(|s| s.result.success).unwrap_or(!accumulated_output.is_empty());
+    append_trace_step(
+        db_path,
+        task_id,
+        "verify",
+        description,
+        &accumulated_output,
+        if success { "Task finished successfully" } else { "Task finished with errors" },
+        0,
+        0.0,
+        0,
+    );
+    update_task_metrics(
+        db_path,
+        task_id,
+        primary_model.as_deref(),
+        primary_provider.as_deref(),
+        total_tokens_in,
+        total_tokens_out,
+        total_cost,
+        duration_ms,
+    );
+    finish_trace(
+        db_path,
+        task_id,
+        if success { "completed" } else { "failed" },
+        duration_ms,
+        total_cost,
+        total_tokens_in + total_tokens_out,
+    );
 
     let _ = app_handle.emit("agent:task_completed", serde_json::json!({
         "task_id": task_id, "success": success, "output": accumulated_output,
@@ -837,7 +990,7 @@ pub async fn run_task(
 
     Ok(TaskExecutionResult {
         task_id: task_id.to_string(), success,
-        steps: step_history, total_cost: 0.0, duration_ms,
+        steps: step_history, total_cost, duration_ms,
     })
 }
 
@@ -904,6 +1057,88 @@ fn count_browser_opens(script: &str) -> u32 {
     count
 }
 
+fn absorb_llm_metrics(
+    response: &LLMResponse,
+    total_cost: &mut f64,
+    total_tokens_in: &mut u32,
+    total_tokens_out: &mut u32,
+    primary_model: &mut Option<String>,
+    primary_provider: &mut Option<String>,
+) {
+    *total_cost += response.cost;
+    *total_tokens_in += response.tokens_in;
+    *total_tokens_out += response.tokens_out;
+    if primary_model.is_none() {
+        *primary_model = Some(response.model.clone());
+    }
+    if primary_provider.is_none() {
+        *primary_provider = Some(response.provider.clone());
+    }
+}
+
+fn ensure_execution_trace(p: &Path, task_id: &str, input_text: &str, source: &str) {
+    if let Ok(db) = Database::new(p) {
+        let _ = db.ensure_execution_trace(task_id, input_text, source);
+    }
+}
+
+fn append_trace_step(
+    p: &Path,
+    task_id: &str,
+    phase: &str,
+    input: &str,
+    output: &str,
+    decision: &str,
+    duration_ms: u64,
+    cost: f64,
+    tokens: u32,
+) {
+    if let Ok(db) = Database::new(p) {
+        let _ = db.append_execution_trace_step(
+            task_id,
+            phase,
+            input,
+            output,
+            decision,
+            duration_ms,
+            cost,
+            tokens,
+        );
+    }
+}
+
+fn record_llm_response(
+    p: &Path,
+    task_id: &str,
+    phase: &str,
+    input: &str,
+    decision: &str,
+    response: &LLMResponse,
+) {
+    if let Ok(db) = Database::new(p) {
+        let _ = db.insert_llm_call(
+            task_id,
+            &response.provider,
+            &response.model,
+            response.tokens_in,
+            response.tokens_out,
+            response.cost,
+            response.duration_ms,
+        );
+    }
+    append_trace_step(
+        p,
+        task_id,
+        phase,
+        input,
+        &response.content,
+        decision,
+        response.duration_ms,
+        response.cost,
+        response.tokens_in + response.tokens_out,
+    );
+}
+
 /// Decompose a complex task into subtasks using LLM
 pub async fn decompose_task(
     description: &str,
@@ -953,6 +1188,17 @@ fn emit(app: &tauri::AppHandle, event: &str, task_id: &str, step: u32, desc: &st
 
 fn fail(db_path: &Path, task_id: &str, error: &str) {
     save_task_output(db_path, task_id, &format!("Error: {}", error));
+    append_trace_step(
+        db_path,
+        task_id,
+        "verify",
+        task_id,
+        error,
+        "Pipeline failed before completion",
+        0,
+        0.0,
+        0,
+    );
     update_task_status(db_path, task_id, "failed");
 }
 
@@ -971,6 +1217,27 @@ fn save_task_output(p: &Path, id: &str, o: &str) {
     if let Ok(db) = Database::new(p) { let _ = db.update_task_output(id, o); }
 }
 
+fn update_task_metrics(
+    p: &Path,
+    id: &str,
+    model_used: Option<&str>,
+    provider: Option<&str>,
+    tokens_in: u32,
+    tokens_out: u32,
+    cost: f64,
+    duration_ms: u64,
+) {
+    if let Ok(db) = Database::new(p) {
+        let _ = db.update_task_metrics(id, model_used, provider, tokens_in, tokens_out, cost, duration_ms);
+    }
+}
+
+fn finish_trace(p: &Path, id: &str, status: &str, total_duration_ms: u64, total_cost: f64, total_tokens: u32) {
+    if let Ok(db) = Database::new(p) {
+        let _ = db.finish_execution_trace(id, status, total_duration_ms, total_cost, total_tokens);
+    }
+}
+
 fn save_step(p: &Path, id: &str, n: u32, a: &AgentAction, sp: &Path, r: &ExecutionResult) {
     if let Ok(db) = Database::new(p) {
         let at = match a {
@@ -984,4 +1251,15 @@ fn save_step(p: &Path, id: &str, n: u32, a: &AgentAction, sp: &Path, r: &Executi
         let _ = db.insert_task_step(id, n, at, &serde_json::to_string(a).unwrap_or_default(),
             &sp.to_string_lossy(), em, r.success, r.duration_ms);
     }
+    append_trace_step(
+        p,
+        id,
+        "execute",
+        &serde_json::to_string(a).unwrap_or_default(),
+        &r.output.clone().unwrap_or_default(),
+        if r.success { "Execution succeeded" } else { "Execution failed" },
+        r.duration_ms,
+        0.0,
+        0,
+    );
 }

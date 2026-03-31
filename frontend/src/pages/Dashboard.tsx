@@ -6,6 +6,7 @@ import {
   Network,
   LayoutDashboard,
   BarChart3,
+  ShieldCheck,
   Code2,
   Settings,
   Bell,
@@ -13,6 +14,7 @@ import {
   PanelLeft,
   Clock,
   ThumbsUp,
+  Rocket,
 } from 'lucide-react';
 import { useAgent } from '../hooks/useAgent';
 import HomePg from './dashboard/Home';
@@ -25,31 +27,55 @@ import Analytics from './dashboard/Analytics';
 import Developer from './dashboard/Developer';
 import ScheduledTasks from './dashboard/ScheduledTasks';
 import FeedbackInsights from './dashboard/FeedbackInsights';
+import Operations from './dashboard/Operations';
+import Readiness from './dashboard/Readiness';
 
-type Tab = 'home' | 'playbooks' | 'chat' | 'board' | 'mesh' | 'analytics' | 'developer' | 'triggers' | 'settings' | 'feedback';
+type Tab =
+  | 'home'
+  | 'playbooks'
+  | 'chat'
+  | 'board'
+  | 'operations'
+  | 'mesh'
+  | 'analytics'
+  | 'developer'
+  | 'triggers'
+  | 'settings'
+  | 'readiness'
+  | 'feedback';
+
+type NavSection = 'core' | 'operate' | 'build' | 'more';
 
 interface NavItem {
   id: Tab;
   label: string;
   icon: typeof Home;
-  section?: 'main' | 'more';
+  section: NavSection;
 }
 
-// Only pages backed by real working backends are listed here.
-// Recorder was merged into Playbooks (R4) and removed from nav.
 const NAV_ITEMS: NavItem[] = [
-  { id: 'home', label: 'Home', icon: Home, section: 'main' },
-  { id: 'playbooks', label: 'Playbooks', icon: BookOpen, section: 'main' },
-  { id: 'chat', label: 'Chat', icon: MessageSquare, section: 'main' },
-  { id: 'board', label: 'Board', icon: LayoutDashboard, section: 'main' },
-  { id: 'mesh', label: 'Mesh', icon: Network, section: 'main' },
-  { id: 'analytics', label: 'Analytics', icon: BarChart3, section: 'main' },
-  { id: 'developer', label: 'Developer', icon: Code2, section: 'main' },
-  { id: 'triggers', label: 'Triggers', icon: Clock, section: 'main' },
-  { id: 'settings', label: 'Settings', icon: Settings, section: 'main' },
-  // More section — only pages with real backend support
+  { id: 'home', label: 'Home', icon: Home, section: 'core' },
+  { id: 'chat', label: 'Chat', icon: MessageSquare, section: 'core' },
+  { id: 'playbooks', label: 'Playbooks', icon: BookOpen, section: 'core' },
+  { id: 'board', label: 'Board', icon: LayoutDashboard, section: 'core' },
+  { id: 'operations', label: 'Operations', icon: ShieldCheck, section: 'operate' },
+  { id: 'mesh', label: 'Mesh', icon: Network, section: 'operate' },
+  { id: 'analytics', label: 'Analytics', icon: BarChart3, section: 'operate' },
+  { id: 'triggers', label: 'Triggers', icon: Clock, section: 'operate' },
+  { id: 'developer', label: 'Developer', icon: Code2, section: 'build' },
+  { id: 'settings', label: 'Settings', icon: Settings, section: 'build' },
+  { id: 'readiness', label: 'Readiness', icon: Rocket, section: 'more' },
   { id: 'feedback', label: 'Feedback', icon: ThumbsUp, section: 'more' },
 ];
+
+const SECTION_ORDER: NavSection[] = ['core', 'operate', 'build', 'more'];
+
+const SECTION_LABELS: Record<NavSection, string> = {
+  core: 'Core',
+  operate: 'Operate',
+  build: 'Build',
+  more: 'Readiness',
+};
 
 interface DashboardProps {
   onResetWizard?: () => void;
@@ -62,7 +88,6 @@ export default function Dashboard({ onResetWizard }: DashboardProps) {
   const [setupIncomplete, setSetupIncomplete] = useState(false);
   const { getStatus } = useAgent();
 
-  // Check if setup is complete (has at least one provider)
   useEffect(() => {
     getStatus()
       .then((status) => {
@@ -73,15 +98,13 @@ export default function Dashboard({ onResetWizard }: DashboardProps) {
       .catch(() => setSetupIncomplete(true));
   }, []);
 
-  const sidebarWidth = collapsed ? 'w-[52px]' : 'w-[210px]';
+  const sidebarWidth = collapsed ? 'w-[52px]' : 'w-[224px]';
 
   return (
     <div className="flex h-screen bg-bg-primary">
-      {/* Sidebar */}
       <aside
         className={`${sidebarWidth} shrink-0 flex flex-col border-r border-[#1A1E26] bg-bg-surface transition-all duration-200 ease-out`}
       >
-        {/* Logo + collapse toggle */}
         <div className="flex items-center justify-between px-3 py-4">
           <div className="flex items-center gap-2 overflow-hidden">
             <div className="h-7 w-7 shrink-0 rounded-lg bg-cyan/20 flex items-center justify-center">
@@ -100,13 +123,18 @@ export default function Dashboard({ onResetWizard }: DashboardProps) {
               </svg>
             </div>
             {!collapsed && (
-              <span className="text-sm font-bold text-text-primary tracking-wide whitespace-nowrap">
-                AgentOS
-              </span>
+              <div className="overflow-hidden">
+                <span className="block text-sm font-bold tracking-wide text-text-primary whitespace-nowrap">
+                  AgentOS
+                </span>
+                <span className="block text-[10px] uppercase tracking-[0.28em] text-[#3D4F5F]">
+                  Definitive
+                </span>
+              </div>
             )}
           </div>
           <button
-            onClick={() => setCollapsed((c) => !c)}
+            onClick={() => setCollapsed((current) => !current)}
             className="shrink-0 p-1 rounded text-text-muted hover:text-text-secondary transition-colors"
             title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           >
@@ -114,68 +142,50 @@ export default function Dashboard({ onResetWizard }: DashboardProps) {
           </button>
         </div>
 
-        {/* Navigation */}
-        <nav className="flex-1 px-2 space-y-0.5 overflow-y-auto">
-          {NAV_ITEMS.filter((i) => i.section === 'main').map((item) => {
-            const Icon = item.icon;
-            const isActive = activeTab === item.id;
-            return (
-              <button
-                key={item.id}
-                onClick={() => setActiveTab(item.id)}
-                title={collapsed ? item.label : undefined}
-                className={`w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium
-                  transition-all duration-150 ease-out
-                  ${
-                    isActive
-                      ? 'bg-[rgba(0,229,229,0.08)] text-cyan border-l-2 border-cyan'
-                      : 'text-text-secondary hover:bg-[rgba(0,229,229,0.04)] hover:text-text-primary border-l-2 border-transparent'
-                  }
-                  ${collapsed ? 'justify-center px-0' : ''}
-                `}
-              >
-                <Icon size={16} className="shrink-0" />
-                {!collapsed && <span className="truncate">{item.label}</span>}
-              </button>
-            );
-          })}
+        <nav className="flex-1 px-2 space-y-2 overflow-y-auto">
+          {SECTION_ORDER.map((section) => {
+            const items = NAV_ITEMS.filter((item) => item.section === section);
+            if (items.length === 0) {
+              return null;
+            }
 
-          {/* More section divider */}
-          <div className="pt-2 pb-1">
-            <div className="border-t border-[#1A1E26]" />
-            {!collapsed && (
-              <p className="text-[9px] uppercase tracking-widest text-[#3D4F5F] mt-2 px-3">More</p>
-            )}
-          </div>
-
-          {NAV_ITEMS.filter((i) => i.section === 'more').map((item) => {
-            const Icon = item.icon;
-            const isActive = activeTab === item.id;
             return (
-              <button
-                key={item.id}
-                onClick={() => setActiveTab(item.id)}
-                title={collapsed ? item.label : undefined}
-                className={`w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium
-                  transition-all duration-150 ease-out
-                  ${
-                    isActive
-                      ? 'bg-[rgba(0,229,229,0.08)] text-cyan border-l-2 border-cyan'
-                      : 'text-text-secondary hover:bg-[rgba(0,229,229,0.04)] hover:text-text-primary border-l-2 border-transparent'
-                  }
-                  ${collapsed ? 'justify-center px-0' : ''}
-                `}
-              >
-                <Icon size={16} className="shrink-0" />
-                {!collapsed && <span className="truncate">{item.label}</span>}
-              </button>
+              <div key={section} className="space-y-0.5">
+                {!collapsed && (
+                  <p className="px-3 pt-2 text-[9px] uppercase tracking-[0.24em] text-[#3D4F5F]">
+                    {SECTION_LABELS[section]}
+                  </p>
+                )}
+                {items.map((item) => {
+                  const Icon = item.icon;
+                  const isActive = activeTab === item.id;
+
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => setActiveTab(item.id)}
+                      title={collapsed ? item.label : undefined}
+                      className={`w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium
+                        transition-all duration-150 ease-out
+                        ${
+                          isActive
+                            ? 'bg-[rgba(0,229,229,0.08)] text-cyan border-l-2 border-cyan'
+                            : 'text-text-secondary hover:bg-[rgba(0,229,229,0.04)] hover:text-text-primary border-l-2 border-transparent'
+                        }
+                        ${collapsed ? 'justify-center px-0' : ''}
+                      `}
+                    >
+                      <Icon size={16} className="shrink-0" />
+                      {!collapsed && <span className="truncate">{item.label}</span>}
+                    </button>
+                  );
+                })}
+              </div>
             );
           })}
         </nav>
 
-        {/* Bottom section */}
         <div className="px-2 pb-3 space-y-2">
-          {/* Notification bell */}
           <button
             className={`w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-text-secondary
               hover:bg-[rgba(0,229,229,0.04)] hover:text-text-primary transition-all duration-150 ease-out
@@ -193,7 +203,6 @@ export default function Dashboard({ onResetWizard }: DashboardProps) {
             {!collapsed && <span className="truncate">Notifications</span>}
           </button>
 
-          {/* Agent status */}
           <div
             className={`flex items-center gap-2 rounded-lg px-3 py-2 ${collapsed ? 'justify-center px-0' : ''}`}
           >
@@ -203,21 +212,20 @@ export default function Dashboard({ onResetWizard }: DashboardProps) {
             )}
           </div>
 
-          {/* Version */}
           {!collapsed && (
-            <div className="px-3 py-1 text-[10px] font-mono text-text-muted">v1.0.0</div>
+            <div className="px-3 py-1 text-[10px] font-mono text-text-muted">shell: definitive mode</div>
           )}
         </div>
       </aside>
 
-      {/* Content */}
       <main className="flex-1 overflow-y-auto">
-        {/* Setup incomplete banner */}
         {setupIncomplete && (
           <div className="mx-6 mt-4 flex items-center justify-between rounded-lg border border-[#F39C12]/30 bg-[#F39C12]/10 px-4 py-3">
             <div className="flex items-center gap-3">
               <span className="text-[#F39C12] text-sm font-medium">Setup incomplete</span>
-              <span className="text-[#C5D0DC] text-xs">No AI providers configured. The agent needs at least one API key to work.</span>
+              <span className="text-[#C5D0DC] text-xs">
+                No AI providers configured. The agent needs at least one API key to work.
+              </span>
             </div>
             {onResetWizard && (
               <button
@@ -233,11 +241,13 @@ export default function Dashboard({ onResetWizard }: DashboardProps) {
         {activeTab === 'playbooks' && <Playbooks />}
         {activeTab === 'chat' && <Chat />}
         {activeTab === 'board' && <Board />}
+        {activeTab === 'operations' && <Operations />}
         {activeTab === 'mesh' && <Mesh />}
         {activeTab === 'analytics' && <Analytics />}
         {activeTab === 'developer' && <Developer />}
         {activeTab === 'triggers' && <ScheduledTasks />}
         {activeTab === 'settings' && <SettingsPg onResetWizard={onResetWizard} />}
+        {activeTab === 'readiness' && <Readiness />}
         {activeTab === 'feedback' && <FeedbackInsights />}
       </main>
     </div>
