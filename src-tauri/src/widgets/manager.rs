@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use tauri::Manager;
+use tracing::info;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WidgetConfig {
@@ -88,4 +90,65 @@ impl WidgetManager {
             .map(|w| { w.opacity = opacity.clamp(0.1, 1.0); })
             .ok_or_else(|| format!("Widget '{}' not found", id))
     }
+}
+
+/// Create or show a widget as a Tauri secondary window.
+/// Returns Ok(true) if a new window was created, Ok(false) if an existing one was shown.
+pub fn show_widget_window(
+    app: &tauri::AppHandle,
+    config: &WidgetConfig,
+) -> Result<bool, String> {
+    let label = &config.id;
+
+    // If the window already exists, just show + focus it
+    if let Some(win) = app.get_webview_window(label) {
+        win.show().map_err(|e| e.to_string())?;
+        win.set_focus().map_err(|e| e.to_string())?;
+        info!(widget = label, "Widget window shown (existing)");
+        return Ok(false);
+    }
+
+    // Build the route path for the widget frontend page
+    let route = format!("/widget/{}", label);
+    let url = tauri::WebviewUrl::App(route.into());
+
+    let mut builder = tauri::WebviewWindowBuilder::new(app, label, url)
+        .title(match config.widget_type {
+            WidgetType::QuickTask => "Quick Task",
+            WidgetType::Status => "Agent Status",
+            WidgetType::Notification => "Notifications",
+        })
+        .inner_size(config.width as f64, config.height as f64)
+        .always_on_top(config.always_on_top)
+        .decorations(false)
+        .resizable(false)
+        .skip_taskbar(true);
+
+    // Position: -1 means auto (let OS decide), otherwise use explicit coords
+    if config.x >= 0 && config.y >= 0 {
+        builder = builder.position(config.x as f64, config.y as f64);
+    }
+
+    builder.build().map_err(|e| e.to_string())?;
+
+    info!(widget = label, width = config.width, height = config.height, "Widget window created");
+    Ok(true)
+}
+
+/// Hide (close) a widget window.
+pub fn hide_widget_window(app: &tauri::AppHandle, widget_id: &str) -> Result<(), String> {
+    if let Some(win) = app.get_webview_window(widget_id) {
+        win.hide().map_err(|e| e.to_string())?;
+        info!(widget = widget_id, "Widget window hidden");
+    }
+    Ok(())
+}
+
+/// Destroy a widget window entirely (removes it from the window list).
+pub fn destroy_widget_window(app: &tauri::AppHandle, widget_id: &str) -> Result<(), String> {
+    if let Some(win) = app.get_webview_window(widget_id) {
+        win.destroy().map_err(|e| e.to_string())?;
+        info!(widget = widget_id, "Widget window destroyed");
+    }
+    Ok(())
 }

@@ -1857,6 +1857,51 @@ async fn cmd_web_search(query: String) -> Result<serde_json::Value, String> {
     }))
 }
 
+// ── C10: Headless Browser commands ───────────────────────────
+
+#[tauri::command]
+async fn cmd_detect_browser() -> Result<serde_json::Value, String> {
+    let info = web::browser::detect_browser();
+    Ok(serde_json::json!({
+        "available": info.available,
+        "browser_path": info.browser_path,
+        "browser_name": info.browser_name,
+    }))
+}
+
+#[tauri::command]
+async fn cmd_browse_with_js(url: String) -> Result<serde_json::Value, String> {
+    let page = web::browser::fetch_with_browser(&url).await?;
+    let text_preview = &page.text[..page.text.len().min(4000)];
+    Ok(serde_json::json!({
+        "url": page.url,
+        "title": page.title,
+        "text": text_preview,
+        "status": page.status,
+    }))
+}
+
+#[tauri::command]
+async fn cmd_screenshot_url(
+    url: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let output_dir = state.screenshots_dir.clone();
+    let filename = format!("web_{}.png", chrono::Utc::now().format("%Y%m%d_%H%M%S"));
+    let output_path = output_dir.join(&filename);
+
+    // Ensure the screenshots directory exists
+    std::fs::create_dir_all(&output_dir)
+        .map_err(|e| format!("Failed to create screenshots dir: {}", e))?;
+
+    let path = web::browser::screenshot_url(&url, &output_path).await?;
+    Ok(serde_json::json!({
+        "ok": true,
+        "path": path.display().to_string(),
+        "url": url,
+    }))
+}
+
 // ── R18: Trigger / automation commands ──────────────────────
 
 #[tauri::command]
@@ -3427,6 +3472,55 @@ async fn cmd_update_widget_opacity(
     mgr.set_opacity(&id, opacity)?;
     let widget = mgr.get(&id).cloned();
     Ok(serde_json::json!({ "ok": true, "widget": widget }))
+}
+
+// ── C9: Desktop Widget Window commands ───────────────────────
+
+#[tauri::command]
+async fn cmd_show_quick_task(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.widget_manager.lock().await;
+    let config = mgr.get("quick-task")
+        .cloned()
+        .ok_or_else(|| "quick-task widget config not found".to_string())?;
+    drop(mgr);
+    let created = widgets::manager::show_widget_window(&app, &config)?;
+    Ok(serde_json::json!({ "ok": true, "created": created }))
+}
+
+#[tauri::command]
+async fn cmd_hide_quick_task(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    widgets::manager::hide_widget_window(&app, "quick-task")?;
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+#[tauri::command]
+async fn cmd_show_widget(
+    id: String,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.widget_manager.lock().await;
+    let config = mgr.get(&id)
+        .cloned()
+        .ok_or_else(|| format!("Widget '{}' not found", id))?;
+    drop(mgr);
+    let created = widgets::manager::show_widget_window(&app, &config)?;
+    Ok(serde_json::json!({ "ok": true, "created": created, "widget_id": id }))
+}
+
+#[tauri::command]
+async fn cmd_hide_widget(id: String, app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    widgets::manager::hide_widget_window(&app, &id)?;
+    Ok(serde_json::json!({ "ok": true, "widget_id": id }))
+}
+
+#[tauri::command]
+async fn cmd_destroy_widget(id: String, app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    widgets::manager::destroy_widget_window(&app, &id)?;
+    Ok(serde_json::json!({ "ok": true, "widget_id": id }))
 }
 
 // ── R51: Multi-Agent Conversations commands ───────────────────────
@@ -8885,6 +8979,10 @@ pub fn run() {
             // R19: Web browsing commands
             cmd_browse_url,
             cmd_web_search,
+            // C10: Headless Browser commands
+            cmd_detect_browser,
+            cmd_browse_with_js,
+            cmd_screenshot_url,
             // R18: Trigger/automation commands
             cmd_get_triggers,
             cmd_create_trigger,
@@ -9024,6 +9122,12 @@ pub fn run() {
             cmd_toggle_widget,
             cmd_update_widget_position,
             cmd_update_widget_opacity,
+            // C9: Desktop Widget Window commands
+            cmd_show_quick_task,
+            cmd_hide_quick_task,
+            cmd_show_widget,
+            cmd_hide_widget,
+            cmd_destroy_widget,
             // R51: Multi-Agent Conversations commands
             cmd_start_conversation,
             cmd_get_conversation,

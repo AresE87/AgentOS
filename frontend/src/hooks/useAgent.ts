@@ -396,6 +396,11 @@ export function useAgent() {
     const hideWidget = (id: string) => callInvoke<any>('hide_widget', { id });
     const destroyWidget = (id: string) => callInvoke<any>('destroy_widget', { id });
 
+    // C10: Headless Browser
+    const detectBrowser = () => callInvoke<{ available: boolean; browser_path: string | null; browser_name: string | null }>('detect_browser');
+    const browseWithJs = (url: string) => callInvoke<{ url: string; title: string; text: string; status: number }>('browse_with_js', { url });
+    const screenshotUrl = (url: string) => callInvoke<{ ok: boolean; path: string; url: string }>('screenshot_url', { url });
+
     // R52: Screen Recording & Replay
     const startScreenRecording = (taskId: string, description: string) =>
         callInvoke<{ id: string }>('start_screen_recording', { task_id: taskId, description });
@@ -1326,6 +1331,8 @@ export function useAgent() {
         getWidgets, toggleWidget, updateWidgetPosition, updateWidgetOpacity,
         // C9: Desktop Widget Windows
         showQuickTask, hideQuickTask, showWidget, hideWidget, destroyWidget,
+        // C10: Headless Browser
+        detectBrowser, browseWithJs, screenshotUrl,
         // R51: Multi-Agent Conversations
         startConversation, getConversation, listConversations, addConversationMessage,
         // R52: Screen Recording & Replay
