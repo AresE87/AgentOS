@@ -1,4 +1,4 @@
-use rusqlite::Connection;
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,6 +38,12 @@ impl OrgManager {
                 role TEXT NOT NULL DEFAULT 'member',
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (org_id) REFERENCES organizations(id)
+            );
+            CREATE TABLE IF NOT EXISTS org_runtime_context (
+                context_key TEXT PRIMARY KEY,
+                org_id TEXT,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (org_id) REFERENCES organizations(id)
             );",
         )
         .map_err(|e| e.to_string())
@@ -48,52 +54,114 @@ impl OrgManager {
         name: &str,
         plan_type: &str,
     ) -> Result<Organization, String> {
+        Self::ensure_tables(conn)?;
         let id = uuid::Uuid::new_v4().to_string();
         let created_at = chrono::Utc::now().to_rfc3339();
 
         conn.execute(
             "INSERT INTO organizations (id, name, plan_type, seat_count, created_at)
              VALUES (?1, ?2, ?3, 1, ?4)",
-            rusqlite::params![id, name, plan_type, created_at],
+            params![id, name, plan_type, created_at],
         )
         .map_err(|e| e.to_string())?;
 
-        Ok(Organization {
+        let org = Organization {
             id,
             name: name.to_string(),
             plan_type: plan_type.to_string(),
             seat_count: 1,
             created_at,
-        })
+        };
+
+        if Self::get_current_org_id(conn)?.is_none() {
+            Self::set_current_org(conn, &org.id)?;
+        }
+
+        Ok(org)
     }
 
-    pub fn get_current_org(conn: &Connection) -> Result<Option<Organization>, String> {
+    pub fn list_orgs(conn: &Connection) -> Result<Vec<Organization>, String> {
+        Self::ensure_tables(conn)?;
         let mut stmt = conn
             .prepare(
                 "SELECT id, name, plan_type, seat_count, created_at
                  FROM organizations
-                 ORDER BY created_at ASC
-                 LIMIT 1",
+                 ORDER BY created_at ASC",
             )
             .map_err(|e| e.to_string())?;
 
-        let mut rows = stmt
-            .query_map([], |row| {
-                Ok(Organization {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    plan_type: row.get(2)?,
-                    seat_count: row.get::<_, i64>(3)? as u32,
-                    created_at: row.get(4)?,
-                })
-            })
+        let rows = stmt
+            .query_map([], map_org)
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        Ok(rows)
+    }
+
+    pub fn set_current_org(conn: &Connection, org_id: &str) -> Result<(), String> {
+        Self::ensure_tables(conn)?;
+        let exists: Option<String> = conn
+            .query_row(
+                "SELECT id FROM organizations WHERE id = ?1",
+                params![org_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        if exists.is_none() {
+            return Err(format!("Organization '{}' not found", org_id));
+        }
+
+        conn.execute(
+            "INSERT INTO org_runtime_context (context_key, org_id, updated_at)
+             VALUES ('current_org', ?1, ?2)
+             ON CONFLICT(context_key) DO UPDATE SET org_id = excluded.org_id, updated_at = excluded.updated_at",
+            params![org_id, chrono::Utc::now().to_rfc3339()],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn get_current_org_id(conn: &Connection) -> Result<Option<String>, String> {
+        Self::ensure_tables(conn)?;
+        let selected: Option<String> = conn
+            .query_row(
+                "SELECT org_id FROM org_runtime_context WHERE context_key = 'current_org'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
             .map_err(|e| e.to_string())?;
 
-        if let Some(row) = rows.next() {
-            Ok(Some(row.map_err(|e| e.to_string())?))
-        } else {
-            Ok(None)
+        if selected.is_some() {
+            return Ok(selected);
         }
+
+        conn.query_row(
+            "SELECT id FROM organizations ORDER BY created_at ASC LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())
+    }
+
+    pub fn get_current_org(conn: &Connection) -> Result<Option<Organization>, String> {
+        Self::ensure_tables(conn)?;
+        let current_id = match Self::get_current_org_id(conn)? {
+            Some(org_id) => org_id,
+            None => return Ok(None),
+        };
+
+        conn.query_row(
+            "SELECT id, name, plan_type, seat_count, created_at
+             FROM organizations
+             WHERE id = ?1",
+            params![current_id],
+            map_org,
+        )
+        .optional()
+        .map_err(|e| e.to_string())
     }
 
     pub fn add_member(
@@ -102,24 +170,18 @@ impl OrgManager {
         email: &str,
         role: &str,
     ) -> Result<OrgMember, String> {
+        Self::ensure_tables(conn)?;
         let id = uuid::Uuid::new_v4().to_string();
         let created_at = chrono::Utc::now().to_rfc3339();
 
         conn.execute(
             "INSERT INTO org_members (id, org_id, email, role, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5)",
-            rusqlite::params![id, org_id, email, role, created_at],
+            params![id, org_id, email, role, created_at],
         )
         .map_err(|e| e.to_string())?;
 
-        // Update seat_count
-        conn.execute(
-            "UPDATE organizations SET seat_count = (
-                SELECT COUNT(*) FROM org_members WHERE org_id = ?1
-             ) WHERE id = ?1",
-            rusqlite::params![org_id],
-        )
-        .map_err(|e| e.to_string())?;
+        Self::refresh_seat_count(conn, org_id)?;
 
         Ok(OrgMember {
             id,
@@ -131,6 +193,7 @@ impl OrgManager {
     }
 
     pub fn list_members(conn: &Connection, org_id: &str) -> Result<Vec<OrgMember>, String> {
+        Self::ensure_tables(conn)?;
         let mut stmt = conn
             .prepare(
                 "SELECT id, org_id, email, role, created_at
@@ -141,7 +204,7 @@ impl OrgManager {
             .map_err(|e| e.to_string())?;
 
         let members = stmt
-            .query_map(rusqlite::params![org_id], |row| {
+            .query_map(params![org_id], |row| {
                 Ok(OrgMember {
                     id: row.get(0)?,
                     org_id: row.get(1)?,
@@ -153,37 +216,81 @@ impl OrgManager {
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())?;
-
         Ok(members)
     }
 
     pub fn remove_member(conn: &Connection, member_id: &str) -> Result<(), String> {
-        // Get org_id before deleting for seat_count update
+        Self::ensure_tables(conn)?;
         let org_id: Option<String> = conn
             .query_row(
                 "SELECT org_id FROM org_members WHERE id = ?1",
-                rusqlite::params![member_id],
+                params![member_id],
                 |row| row.get(0),
             )
-            .ok();
-
-        conn.execute(
-            "DELETE FROM org_members WHERE id = ?1",
-            rusqlite::params![member_id],
-        )
-        .map_err(|e| e.to_string())?;
-
-        // Update seat_count
-        if let Some(oid) = org_id {
-            conn.execute(
-                "UPDATE organizations SET seat_count = (
-                    SELECT COUNT(*) FROM org_members WHERE org_id = ?1
-                 ) WHERE id = ?1",
-                rusqlite::params![oid],
-            )
+            .optional()
             .map_err(|e| e.to_string())?;
+
+        conn.execute("DELETE FROM org_members WHERE id = ?1", params![member_id])
+            .map_err(|e| e.to_string())?;
+
+        if let Some(org_id) = org_id {
+            Self::refresh_seat_count(conn, &org_id)?;
         }
 
         Ok(())
+    }
+
+    fn refresh_seat_count(conn: &Connection, org_id: &str) -> Result<(), String> {
+        conn.execute(
+            "UPDATE organizations SET seat_count = (
+                SELECT COUNT(*) FROM org_members WHERE org_id = ?1
+             ) WHERE id = ?1",
+            params![org_id],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+}
+
+fn map_org(row: &rusqlite::Row<'_>) -> rusqlite::Result<Organization> {
+    Ok(Organization {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        plan_type: row.get(2)?,
+        seat_count: row.get::<_, i64>(3)? as u32,
+        created_at: row.get(4)?,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::OrgManager;
+
+    #[test]
+    fn first_org_becomes_current_scope() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        OrgManager::ensure_tables(&conn).unwrap();
+
+        let org = OrgManager::create_org(&conn, "Acme", "team").unwrap();
+        let current = OrgManager::get_current_org(&conn).unwrap().unwrap();
+
+        assert_eq!(current.id, org.id);
+    }
+
+    #[test]
+    fn switching_current_org_changes_scope() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        OrgManager::ensure_tables(&conn).unwrap();
+
+        let first = OrgManager::create_org(&conn, "Acme", "team").unwrap();
+        let second = OrgManager::create_org(&conn, "Northwind", "pro").unwrap();
+
+        OrgManager::set_current_org(&conn, &second.id).unwrap();
+        let current = OrgManager::get_current_org(&conn).unwrap().unwrap();
+        let orgs = OrgManager::list_orgs(&conn).unwrap();
+
+        assert_eq!(current.id, second.id);
+        assert_eq!(orgs.len(), 2);
+        assert_ne!(current.id, first.id);
     }
 }

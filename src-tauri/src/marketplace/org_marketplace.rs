@@ -118,6 +118,19 @@ impl OrgMarketplace {
         Ok(())
     }
 
+    pub fn approve_for_org(&self, listing_id: &str, org_id: &str) -> Result<(), String> {
+        let listing = self
+            .get_listing(listing_id)?
+            .ok_or_else(|| format!("Listing not found: {}", listing_id))?;
+        if listing.org_id != org_id {
+            return Err(format!(
+                "Tenant '{}' cannot approve listing owned by '{}'",
+                org_id, listing.org_id
+            ));
+        }
+        self.approve(listing_id)
+    }
+
     pub fn remove(&self, listing_id: &str) -> Result<(), String> {
         let conn = self.open()?;
         let changed = conn
@@ -130,6 +143,19 @@ impl OrgMarketplace {
             return Err(format!("Listing not found: {}", listing_id));
         }
         Ok(())
+    }
+
+    pub fn remove_for_org(&self, listing_id: &str, org_id: &str) -> Result<(), String> {
+        let listing = self
+            .get_listing(listing_id)?
+            .ok_or_else(|| format!("Listing not found: {}", listing_id))?;
+        if listing.org_id != org_id {
+            return Err(format!(
+                "Tenant '{}' cannot remove listing owned by '{}'",
+                org_id, listing.org_id
+            ));
+        }
+        self.remove(listing_id)
     }
 
     pub fn search(&self, query: &str, org_id: &str) -> Result<Vec<OrgListing>, String> {
@@ -364,5 +390,30 @@ mod tests {
         let acme_results = market.search("invoice", "acme").unwrap();
         assert_eq!(acme_results.len(), 1);
         assert_eq!(acme_results[0].resource_id, "invoice-reconciliation");
+    }
+
+    #[test]
+    fn tenant_cannot_remove_or_approve_other_org_listing() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("org-marketplace-guard.db");
+        let market = OrgMarketplace::new(db_path).unwrap();
+
+        let listing = market
+            .publish(OrgListing {
+                id: String::new(),
+                org_id: "northwind".to_string(),
+                resource_type: "playbook".to_string(),
+                resource_id: "northwind-internal".to_string(),
+                visibility: "org_only".to_string(),
+                approved: false,
+                created_at: String::new(),
+            })
+            .unwrap();
+
+        let approve_error = market.approve_for_org(&listing.id, "acme").unwrap_err();
+        let remove_error = market.remove_for_org(&listing.id, "acme").unwrap_err();
+
+        assert!(approve_error.contains("cannot approve"));
+        assert!(remove_error.contains("cannot remove"));
     }
 }

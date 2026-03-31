@@ -517,7 +517,8 @@ async fn cmd_get_branding(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let branding = state.branding.read().await.clone();
-    if let Some(org_id) = org_id {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    if let Some(org_id) = resolve_org_scope(&conn, org_id.as_deref())? {
         let marketplace = state.org_marketplace.lock().await;
         let tenant_branding = marketplace.get_branding(&org_id)?.unwrap_or(branding);
         serde_json::to_value(&tenant_branding).map_err(|e| e.to_string())
@@ -534,7 +535,8 @@ async fn cmd_update_branding(
 ) -> Result<serde_json::Value, String> {
     let new_config: branding::BrandingConfig =
         serde_json::from_value(config).map_err(|e| format!("Invalid branding config: {}", e))?;
-    if let Some(org_id) = org_id {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    if let Some(org_id) = resolve_org_scope(&conn, org_id.as_deref())? {
         let marketplace = state.org_marketplace.lock().await;
         let saved = marketplace.set_branding(&org_id, &new_config)?;
         serde_json::to_value(&saved).map_err(|e| e.to_string())
@@ -553,7 +555,8 @@ async fn cmd_get_css_variables(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let branding = state.branding.read().await.clone();
-    if let Some(org_id) = org_id {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    if let Some(org_id) = resolve_org_scope(&conn, org_id.as_deref())? {
         let marketplace = state.org_marketplace.lock().await;
         let tenant_branding = marketplace.get_branding(&org_id)?.unwrap_or(branding);
         Ok(serde_json::json!({ "css": tenant_branding.to_css_variables() }))
@@ -567,7 +570,8 @@ async fn cmd_reset_branding(
     org_id: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    if let Some(org_id) = org_id {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    if let Some(org_id) = resolve_org_scope(&conn, org_id.as_deref())? {
         let default_config = state.branding.read().await.clone();
         let marketplace = state.org_marketplace.lock().await;
         marketplace.reset_branding(&org_id)?;
@@ -2940,6 +2944,27 @@ fn open_enterprise_conn(db_path: &std::path::Path) -> Result<rusqlite::Connectio
     rusqlite::Connection::open(db_path).map_err(|e| format!("DB open error: {}", e))
 }
 
+fn resolve_org_scope(
+    conn: &rusqlite::Connection,
+    requested_org_id: Option<&str>,
+) -> Result<Option<String>, String> {
+    enterprise::OrgManager::ensure_tables(conn)?;
+    let requested_org_id = requested_org_id
+        .map(str::trim)
+        .filter(|org_id| !org_id.is_empty());
+    let current_org_id = enterprise::OrgManager::get_current_org_id(conn)?;
+
+    match (requested_org_id, current_org_id) {
+        (Some(requested), Some(current)) if requested != current => Err(format!(
+            "Tenant scope violation: current org is '{}' but '{}' was requested",
+            current, requested
+        )),
+        (Some(requested), _) => Ok(Some(requested.to_string())),
+        (None, Some(current)) => Ok(Some(current)),
+        (None, None) => Ok(None),
+    }
+}
+
 #[tauri::command]
 async fn cmd_get_audit_log(
     limit: Option<usize>,
@@ -2990,6 +3015,26 @@ async fn cmd_create_org(
         serde_json::json!({ "org_name": name, "plan_type": plan_type }),
     )?;
     Ok(serde_json::to_value(&org).map_err(|e| e.to_string())?)
+}
+
+#[tauri::command]
+async fn cmd_list_orgs(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    enterprise::OrgManager::ensure_tables(&conn)?;
+    let orgs = enterprise::OrgManager::list_orgs(&conn)?;
+    Ok(serde_json::json!({ "orgs": orgs }))
+}
+
+#[tauri::command]
+async fn cmd_set_current_org(
+    org_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    enterprise::OrgManager::ensure_tables(&conn)?;
+    enterprise::OrgManager::set_current_org(&conn, &org_id)?;
+    let current = enterprise::OrgManager::get_current_org(&conn)?;
+    Ok(serde_json::json!({ "current_org": current }))
 }
 
 #[tauri::command]
@@ -3081,6 +3126,10 @@ async fn cmd_plugin_list(state: tauri::State<'_, AppState>) -> Result<serde_json
                 "author": p.manifest.author,
                 "permissions": p.manifest.permissions,
                 "enabled": p.enabled,
+                "lifecycle_state": p.lifecycle.state,
+                "installed_at": p.lifecycle.installed_at,
+                "last_updated_at": p.lifecycle.last_updated_at,
+                "rollback_version": p.lifecycle.rollback_version,
             })
         })
         .collect();
@@ -3100,6 +3149,41 @@ async fn cmd_plugin_install(
         "ok": true,
         "name": manifest.name,
         "version": manifest.version,
+    }))
+}
+
+#[tauri::command]
+async fn cmd_plugin_update(
+    name: String,
+    path: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let _decision =
+        enforce_permission(&state, approvals::PermissionCapability::PluginManage, Some(&name))?;
+    let mut mgr = state.plugin_manager.lock().await;
+    let manifest = mgr.update(&name, &std::path::PathBuf::from(path))?;
+    Ok(serde_json::json!({
+        "ok": true,
+        "name": manifest.name,
+        "version": manifest.version,
+        "state": "updated",
+    }))
+}
+
+#[tauri::command]
+async fn cmd_plugin_rollback(
+    name: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let _decision =
+        enforce_permission(&state, approvals::PermissionCapability::PluginManage, Some(&name))?;
+    let mut mgr = state.plugin_manager.lock().await;
+    let manifest = mgr.rollback(&name)?;
+    Ok(serde_json::json!({
+        "ok": true,
+        "name": manifest.name,
+        "version": manifest.version,
+        "state": "rolled_back",
     }))
 }
 
@@ -7568,9 +7652,12 @@ async fn cmd_org_marketplace_publish(
     visibility: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    let scoped_org_id = resolve_org_scope(&conn, Some(&org_id))?
+        .ok_or_else(|| "No organization selected for marketplace publish".to_string())?;
     let listing = marketplace::OrgListing {
         id: String::new(),
-        org_id,
+        org_id: scoped_org_id,
         resource_type,
         resource_id,
         visibility,
@@ -7587,8 +7674,11 @@ async fn cmd_org_marketplace_list(
     org_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    let scoped_org_id = resolve_org_scope(&conn, Some(&org_id))?
+        .ok_or_else(|| "No organization selected for marketplace list".to_string())?;
     let mp = state.org_marketplace.lock().await;
-    let listings = mp.list_for_org(&org_id)?;
+    let listings = mp.list_for_org(&scoped_org_id)?;
     serde_json::to_value(&listings).map_err(|e| e.to_string())
 }
 
@@ -7597,8 +7687,11 @@ async fn cmd_org_marketplace_approve(
     listing_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    let org_id = enterprise::OrgManager::get_current_org_id(&conn)?
+        .ok_or_else(|| "No organization selected for marketplace approval".to_string())?;
     let mp = state.org_marketplace.lock().await;
-    mp.approve(&listing_id)?;
+    mp.approve_for_org(&listing_id, &org_id)?;
     Ok(serde_json::json!({ "ok": true, "listing_id": listing_id }))
 }
 
@@ -7607,8 +7700,11 @@ async fn cmd_org_marketplace_remove(
     listing_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    let org_id = enterprise::OrgManager::get_current_org_id(&conn)?
+        .ok_or_else(|| "No organization selected for marketplace removal".to_string())?;
     let mp = state.org_marketplace.lock().await;
-    mp.remove(&listing_id)?;
+    mp.remove_for_org(&listing_id, &org_id)?;
     Ok(serde_json::json!({ "ok": true }))
 }
 
@@ -7618,8 +7714,11 @@ async fn cmd_org_marketplace_search(
     org_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    let scoped_org_id = resolve_org_scope(&conn, Some(&org_id))?
+        .ok_or_else(|| "No organization selected for marketplace search".to_string())?;
     let mp = state.org_marketplace.lock().await;
-    let results = mp.search(&query, &org_id)?;
+    let results = mp.search(&query, &scoped_org_id)?;
     serde_json::to_value(&results).map_err(|e| e.to_string())
 }
 
@@ -7628,9 +7727,12 @@ async fn cmd_org_marketplace_view(
     org_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    let conn = open_enterprise_conn(&state.db_path)?;
+    let scoped_org_id = resolve_org_scope(&conn, Some(&org_id))?
+        .ok_or_else(|| "No organization selected for marketplace view".to_string())?;
     let fallback_branding = state.branding.read().await.clone();
     let mp = state.org_marketplace.lock().await;
-    let view = mp.get_view_for_org(&org_id, &fallback_branding)?;
+    let view = mp.get_view_for_org(&scoped_org_id, &fallback_branding)?;
     serde_json::to_value(&view).map_err(|e| e.to_string())
 }
 
@@ -10616,6 +10718,8 @@ pub fn run() {
             cmd_export_audit_log,
             cmd_get_org,
             cmd_create_org,
+            cmd_list_orgs,
+            cmd_set_current_org,
             cmd_list_org_members,
             cmd_add_org_member,
             cmd_get_sso_auth_url,
@@ -10637,6 +10741,8 @@ pub fn run() {
             // R34: Plugin commands
             cmd_plugin_list,
             cmd_plugin_install,
+            cmd_plugin_update,
+            cmd_plugin_rollback,
             cmd_plugin_uninstall,
             cmd_plugin_toggle,
             cmd_plugin_execute,

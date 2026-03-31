@@ -1,120 +1,101 @@
-# AgentOS Python SDK
+# AgentOS Python SDK Reference Client
 
-Lightweight Python client for the AgentOS REST API.
-
-## Installation
-
-```bash
-pip install agentos-sdk
-```
-
-Or install from source:
-```bash
-git clone https://github.com/AresEkb/AgentOS.git
-cd AgentOS/sdk/python
-pip install .
-```
-
-## Quick Start
-
-```python
-from agentos_sdk import AgentOS
-
-agent = AgentOS(host="http://localhost:8080", api_key="aos_yourkey")
-result = agent.send_task("check disk space")
-print(result)
-```
-
-## Configuration
-
-```python
-agent = AgentOS(
-    host="http://localhost:8080",   # AgentOS server address
-    api_key="aos_yourkey"           # API key from Settings > API Keys
-)
-```
-
-| Parameter | Type   | Default                  | Description              |
-|-----------|--------|--------------------------|--------------------------|
-| `host`    | `str`  | `http://localhost:8080`  | AgentOS server URL       |
-| `api_key` | `str`  | `""`                     | Bearer token for auth    |
-
-## Methods
-
-### `agent.health() -> dict`
-Check if AgentOS is running.
-
-```python
-status = agent.health()
-# {"status": "ok", "version": "0.47.0"}
-```
-
-### `agent.status() -> dict`
-Get current agent status including active tasks and system info.
-
-```python
-info = agent.status()
-# {"state": "idle", "tasks_completed": 42, "uptime": 3600}
-```
-
-### `agent.send_task(text: str) -> dict`
-Send a natural-language task to the agent.
-
-```python
-result = agent.send_task("list all running processes")
-# {"task_id": "t_abc123", "status": "completed", "result": "..."}
-```
-
-### `agent.get_task(task_id: str) -> dict`
-Check the result of a previously submitted task.
-
-```python
-task = agent.get_task("t_abc123")
-# {"task_id": "t_abc123", "status": "completed", "result": "..."}
-```
-
-## Error Handling
+This Python client mirrors the real local API contract exposed by AgentOS.
 
 ```python
 import requests
 
+
+class AgentOS:
+    def __init__(self, host="http://localhost:8080", api_key=""):
+        self.host = host.rstrip("/")
+        self.api_key = api_key
+
+    def _request(self, method, path, payload=None):
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
+        response = requests.request(
+            method,
+            f"{self.host}{path}",
+            headers=headers,
+            json=payload,
+            timeout=30,
+        )
+
+        try:
+            data = response.json()
+        except ValueError:
+            data = {}
+
+        if not response.ok:
+            message = data.get("message", f"HTTP {response.status_code}")
+            error = requests.HTTPError(message, response=response)
+            error.agentos_code = data.get("error", "http_error")
+            raise error
+        return data
+
+    def health(self):
+        return self._request("GET", "/health")
+
+    def status(self):
+        return self._request("GET", "/v1/status")
+
+    def send_task(self, text):
+        return self._request("POST", "/v1/message", {"text": text})
+
+    def list_tasks(self, limit=20, status=None):
+        suffix = f"/v1/tasks?limit={limit}"
+        if status:
+            suffix += f"&status={status}"
+        return self._request("GET", suffix)
+
+    def get_task(self, task_id):
+        return self._request("GET", f"/v1/task/{task_id}")
+```
+
+## Example
+
+```python
+client = AgentOS(api_key="aos_your_key_here")
+queued = client.send_task("collect recent error counts")
+print(queued)
+
+task = client.get_task(queued["task_id"])
+print(task["status"], task.get("result"))
+```
+
+## Real response shapes
+
+`client.status()`:
+
+```json
+{
+  "status": "running",
+  "api_version": "v1",
+  "version": "4.2.0",
+  "tasks_queued": 0
+}
+```
+
+`client.get_task(task_id)`:
+
+```json
+{
+  "task_id": "8d8c7a20-34cf-4f75-9d64-9b1e2d7e16dd",
+  "status": "completed",
+  "text": "collect recent error counts",
+  "created_at": "2026-03-31T12:00:00Z",
+  "result": "No recent critical errors"
+}
+```
+
+## Error handling
+
+```python
 try:
-    result = agent.send_task("check disk space")
-except requests.ConnectionError:
-    print("Cannot connect to AgentOS — is it running?")
-except requests.HTTPError as e:
-    print(f"API error: {e.response.status_code}")
-```
-
-## Examples
-
-### Poll for Task Completion
-
-```python
-import time
-
-result = agent.send_task("run full system scan")
-task_id = result["task_id"]
-
-while True:
-    task = agent.get_task(task_id)
-    if task["status"] in ("completed", "failed"):
-        break
-    time.sleep(2)
-
-print(task["result"])
-```
-
-### Batch Tasks
-
-```python
-tasks = [
-    "check disk space",
-    "check CPU usage",
-    "list running services",
-]
-
-results = [agent.send_task(t) for t in tasks]
-for r in results:
-    print(r["task_id"], r["status"])
+    client.status()
+except requests.HTTPError as exc:
+    print(exc.agentos_code, exc)
 ```

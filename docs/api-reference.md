@@ -2,232 +2,140 @@
 
 Base URL: `http://localhost:8080`
 
-Enable the API in **Settings → API → Enable Local REST API**.
-
----
+The public API is local-first and must be enabled from the desktop app. Generate an API key from the AgentOS settings UI and send it as a bearer token.
 
 ## Authentication
 
-All requests require a Bearer token. Generate one in **Settings → API → API Keys**.
-
-```
+```http
 Authorization: Bearer aos_your_key_here
 ```
 
----
+Every `/v1/*` endpoint requires a valid, enabled API key. The server updates `last_used` on successful authentication.
 
 ## Endpoints
 
-### POST /v1/message
+### `GET /health`
 
-Send a natural language task to the agent.
+No auth required. Returns the package version that the desktop app is running.
 
-**Request**
 ```json
 {
-  "text": "Check my disk space",
-  "context": {}
+  "status": "ok",
+  "version": "4.2.0",
+  "name": "AgentOS Public API",
+  "api_version": "v1"
 }
 ```
 
-**Response**
+### `GET /v1/status`
+
+Returns API liveness and queued-task count.
+
 ```json
 {
-  "id": "msg_01abc",
-  "status": "completed",
-  "output": "C: drive has 42.3 GB free of 512 GB",
-  "steps": [
-    {
-      "type": "shell",
-      "command": "Get-PSDrive C | ...",
-      "output": "..."
-    }
-  ],
-  "created_at": "2025-01-01T12:00:00Z",
-  "duration_ms": 1240
+  "status": "running",
+  "api_version": "v1",
+  "version": "4.2.0",
+  "tasks_queued": 1
 }
 ```
 
----
+### `POST /v1/message`
 
-### GET /v1/tasks
+Queues a task for asynchronous processing.
 
-List recent tasks.
+Request:
 
-**Query Parameters**
-| Parameter | Type   | Description                  |
-|-----------|--------|------------------------------|
-| limit     | int    | Max results (default: 20)    |
-| offset    | int    | Pagination offset             |
-| status    | string | Filter: pending/completed/failed |
+```json
+{
+  "text": "check disk space"
+}
+```
 
-**Response**
+Response:
+
+```json
+{
+  "task_id": "8d8c7a20-34cf-4f75-9d64-9b1e2d7e16dd",
+  "status": "queued"
+}
+```
+
+### `GET /v1/tasks`
+
+Lists queued or completed API tasks from the in-memory task store.
+
+Query params:
+
+- `limit` (optional, default `20`)
+- `status` (optional: `queued`, `running`, `completed`, `error`)
+
+Response:
+
 ```json
 {
   "tasks": [
     {
-      "id": "msg_01abc",
-      "text": "Check my disk space",
+      "task_id": "8d8c7a20-34cf-4f75-9d64-9b1e2d7e16dd",
       "status": "completed",
-      "created_at": "2025-01-01T12:00:00Z"
+      "text": "check disk space",
+      "created_at": "2026-03-31T12:00:00Z",
+      "has_result": true
     }
   ],
-  "total": 142
+  "total": 1
 }
 ```
 
----
+### `GET /v1/task/:id`
 
-### GET /v1/tasks/:id
+Returns a single task payload and final result if available.
 
-Get a specific task by ID.
-
-**Response**
 ```json
 {
-  "id": "msg_01abc",
-  "text": "Check my disk space",
+  "task_id": "8d8c7a20-34cf-4f75-9d64-9b1e2d7e16dd",
   "status": "completed",
-  "output": "C: drive has 42.3 GB free",
-  "steps": [],
-  "created_at": "2025-01-01T12:00:00Z",
-  "duration_ms": 1240
+  "text": "check disk space",
+  "created_at": "2026-03-31T12:00:00Z",
+  "result": "C: has 42.3 GB free"
 }
 ```
 
----
+### `POST /webhooks/stripe`
 
-### POST /v1/playbooks/:id/run
+Consumes Stripe webhook events and updates persisted billing state. If `stripe_webhook_secret` is configured, signature verification is enforced.
 
-Run a playbook by ID.
-
-**Request**
-```json
-{
-  "params": {
-    "city": "London"
-  }
-}
-```
-
-**Response**
-```json
-{
-  "run_id": "run_02xyz",
-  "playbook_id": "weather-check",
-  "status": "running"
-}
-```
-
----
-
-### GET /v1/playbooks
-
-List all available playbooks.
-
-**Response**
-```json
-{
-  "playbooks": [
-    {
-      "id": "disk-cleanup",
-      "name": "Disk Cleanup",
-      "category": "productivity",
-      "version": "1.0.0"
-    }
-  ]
-}
-```
-
----
-
-### GET /v1/health
-
-Check API server health and connected providers.
-
-**Response**
-```json
-{
-  "status": "ok",
-  "version": "1.0.0",
-  "providers": {
-    "anthropic": true,
-    "openai": false,
-    "ollama": false
-  },
-  "uptime_seconds": 3600
-}
-```
-
----
-
-### POST /v1/webhooks
-
-Register a webhook URL to receive task completion events.
-
-**Request**
-```json
-{
-  "url": "https://your-server.com/agentos-webhook",
-  "events": ["task.completed", "task.failed"],
-  "secret": "your_webhook_secret"
-}
-```
-
-**Response**
-```json
-{
-  "id": "wh_03def",
-  "url": "https://your-server.com/agentos-webhook",
-  "events": ["task.completed", "task.failed"],
-  "created_at": "2025-01-01T12:00:00Z"
-}
-```
-
----
-
-### Webhook Payload
-
-When a task completes, AgentOS POSTs to your registered URL:
+Response:
 
 ```json
 {
-  "event": "task.completed",
-  "task_id": "msg_01abc",
-  "text": "Check disk space",
-  "output": "C: 42.3 GB free",
-  "timestamp": "2025-01-01T12:01:00Z"
+  "received": true,
+  "plan_updated": "pro"
 }
 ```
 
-Verify authenticity using the `X-AgentOS-Signature` header (HMAC-SHA256 of the body using your secret).
+## Error contract
 
----
-
-## Error Responses
-
-| Code | Meaning                    |
-|------|----------------------------|
-| 400  | Bad request / invalid JSON |
-| 401  | Missing or invalid API key |
-| 404  | Resource not found         |
-| 429  | Rate limit exceeded        |
-| 500  | Internal server error      |
+Every API error returns JSON with the same shape:
 
 ```json
 {
-  "error": "rate_limit_exceeded",
-  "message": "You have exceeded 500 tasks/day on the Pro plan",
-  "retry_after": 3600
+  "error": "invalid_api_key",
+  "message": "Invalid or revoked API key"
 }
 ```
 
----
+Common error codes:
 
-## Rate Limits
+- `missing_authorization`
+- `invalid_api_key`
+- `invalid_request`
+- `task_not_found`
+- `invalid_webhook_signature`
+- `invalid_webhook_payload`
 
-| Plan | Tasks/day | Requests/min |
-|------|-----------|--------------|
-| Free | 20        | 10           |
-| Pro  | 500       | 60           |
-| Team | Unlimited | 300          |
+## Real operational notes
+
+- `/v1/message` is asynchronous by design. Queue the task, then poll `/v1/task/:id`.
+- `/v1/tasks` reflects the live task store inside the running desktop app, not a historical database export.
+- The API currently exposes the stable local integration surface only: health, status, message, task list/detail, and Stripe webhook intake.
