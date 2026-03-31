@@ -45,7 +45,9 @@ fn validate_query(sql: &str, read_only: bool) -> Result<(), String> {
         return Ok(());
     }
     let upper = sql.trim().to_uppercase();
-    let blocked = ["INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE", "TRUNCATE", "REPLACE"];
+    let blocked = [
+        "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE", "TRUNCATE", "REPLACE",
+    ];
     for keyword in &blocked {
         if upper.starts_with(keyword) {
             return Err(format!(

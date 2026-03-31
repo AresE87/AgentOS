@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Mutex;
 use std::path::Path;
+use std::sync::Mutex;
 
 /// Learning curve for a specific domain
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,19 +27,30 @@ impl MetaLearner {
     }
 
     /// Record a task outcome for a domain
-    pub fn record_task(&self, domain: &str, success: bool, corrected: bool) -> Result<DomainLearningCurve, String> {
+    pub fn record_task(
+        &self,
+        domain: &str,
+        success: bool,
+        corrected: bool,
+    ) -> Result<DomainLearningCurve, String> {
         let mut curves = self.curves.lock().map_err(|e| e.to_string())?;
-        let curve = curves.entry(domain.to_string()).or_insert(DomainLearningCurve {
-            domain: domain.to_string(),
-            total_tasks: 0,
-            successful_tasks: 0,
-            corrected_tasks: 0,
-            accuracy: 0.0,
-            improvement_rate: 0.0,
-        });
+        let curve = curves
+            .entry(domain.to_string())
+            .or_insert(DomainLearningCurve {
+                domain: domain.to_string(),
+                total_tasks: 0,
+                successful_tasks: 0,
+                corrected_tasks: 0,
+                accuracy: 0.0,
+                improvement_rate: 0.0,
+            });
         curve.total_tasks += 1;
-        if success { curve.successful_tasks += 1; }
-        if corrected { curve.corrected_tasks += 1; }
+        if success {
+            curve.successful_tasks += 1;
+        }
+        if corrected {
+            curve.corrected_tasks += 1;
+        }
         curve.accuracy = curve.successful_tasks as f64 / curve.total_tasks as f64;
         curve.improvement_rate = if curve.total_tasks > 1 {
             curve.corrected_tasks as f64 / curve.total_tasks as f64
@@ -52,7 +63,10 @@ impl MetaLearner {
     /// Get a domain learning curve
     pub fn get_domain_curve(&self, domain: &str) -> Result<DomainLearningCurve, String> {
         let curves = self.curves.lock().map_err(|e| e.to_string())?;
-        curves.get(domain).cloned().ok_or_else(|| format!("No data for domain: {}", domain))
+        curves
+            .get(domain)
+            .cloned()
+            .ok_or_else(|| format!("No data for domain: {}", domain))
     }
 
     /// Get all domain curves
@@ -76,10 +90,17 @@ impl MetaLearner {
     }
 
     /// Get the fastest-improving domains
-    pub fn get_fastest_learning_domains(&self, limit: usize) -> Result<Vec<DomainLearningCurve>, String> {
+    pub fn get_fastest_learning_domains(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<DomainLearningCurve>, String> {
         let curves = self.curves.lock().map_err(|e| e.to_string())?;
         let mut sorted: Vec<DomainLearningCurve> = curves.values().cloned().collect();
-        sorted.sort_by(|a, b| b.improvement_rate.partial_cmp(&a.improvement_rate).unwrap_or(std::cmp::Ordering::Equal));
+        sorted.sort_by(|a, b| {
+            b.improvement_rate
+                .partial_cmp(&a.improvement_rate)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         sorted.truncate(limit);
         Ok(sorted)
     }

@@ -8,8 +8,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use super::server::ApiState;
 use super::auth;
+use super::server::ApiState;
 
 fn extract_bearer(headers: &HeaderMap) -> Option<String> {
     let auth = headers.get("authorization")?.to_str().ok()?;
@@ -18,8 +18,12 @@ fn extract_bearer(headers: &HeaderMap) -> Option<String> {
 }
 
 fn validate_auth(state: &ApiState, headers: &HeaderMap) -> Result<(), (StatusCode, String)> {
-    let token = extract_bearer(headers)
-        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Missing Authorization header".to_string()))?;
+    let token = extract_bearer(headers).ok_or_else(|| {
+        (
+            StatusCode::UNAUTHORIZED,
+            "Missing Authorization header".to_string(),
+        )
+    })?;
 
     let conn = rusqlite::Connection::open(&state.db_path)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -30,7 +34,10 @@ fn validate_auth(state: &ApiState, headers: &HeaderMap) -> Result<(), (StatusCod
     if valid {
         Ok(())
     } else {
-        Err((StatusCode::UNAUTHORIZED, "Invalid or revoked API key".to_string()))
+        Err((
+            StatusCode::UNAUTHORIZED,
+            "Invalid or revoked API key".to_string(),
+        ))
     }
 }
 
@@ -53,6 +60,7 @@ pub async fn get_status(
     Ok(Json(serde_json::json!({
         "status": "running",
         "api_version": "v1",
+        "version": env!("CARGO_PKG_VERSION"),
         "tasks_queued": state.task_store.read().await.len(),
     })))
 }
@@ -77,7 +85,10 @@ pub async fn post_message(
     validate_auth(&state, &headers)?;
 
     if body.text.trim().is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "text must not be empty".to_string()));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "text must not be empty".to_string(),
+        ));
     }
 
     let task_id = uuid::Uuid::new_v4().to_string();
@@ -85,10 +96,13 @@ pub async fn post_message(
     // Insert task as pending
     {
         let mut store = state.task_store.write().await;
-        store.insert(task_id.clone(), TaskEntry {
-            status: "queued".to_string(),
-            result: None,
-        });
+        store.insert(
+            task_id.clone(),
+            TaskEntry {
+                status: "queued".to_string(),
+                result: None,
+            },
+        );
     }
 
     // Send to task sender channel

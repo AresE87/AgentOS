@@ -1,19 +1,19 @@
-use serde::{Deserialize, Serialize};
 use rusqlite::Connection;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentPersona {
     pub id: String,
     pub name: String,
     pub role: String,
-    pub avatar: String,          // emoji or URL
-    pub personality: String,     // "friendly and concise", "formal and detailed"
-    pub language: String,        // "en", "es", "pt"
-    pub voice: Option<String>,   // TTS voice name
+    pub avatar: String,        // emoji or URL
+    pub personality: String,   // "friendly and concise", "formal and detailed"
+    pub language: String,      // "en", "es", "pt"
+    pub voice: Option<String>, // TTS voice name
     pub system_prompt: String,
     pub knowledge_files: Vec<String>,
     pub preferred_model: Option<String>,
-    pub tier: String,            // "cheap", "standard"
+    pub tier: String, // "cheap", "standard"
     pub created_at: String,
 }
 
@@ -21,7 +21,8 @@ pub struct PersonaManager;
 
 impl PersonaManager {
     pub fn ensure_table(conn: &Connection) -> Result<(), String> {
-        conn.execute_batch("
+        conn.execute_batch(
+            "
             CREATE TABLE IF NOT EXISTS agent_personas (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -36,7 +37,9 @@ impl PersonaManager {
                 tier TEXT NOT NULL DEFAULT 'standard',
                 created_at TEXT NOT NULL
             )
-        ").map_err(|e| e.to_string())
+        ",
+        )
+        .map_err(|e| e.to_string())
     }
 
     pub fn create(conn: &Connection, persona: &AgentPersona) -> Result<(), String> {
@@ -72,16 +75,26 @@ impl PersonaManager {
         let mut stmt = conn.prepare(
             "SELECT id,name,role,avatar,personality,language,voice,system_prompt,knowledge_files,preferred_model,tier,created_at FROM agent_personas ORDER BY created_at DESC"
         ).map_err(|e| e.to_string())?;
-        let rows = stmt.query_map([], |row| {
-            let kf_str: String = row.get(8)?;
-            let kf: Vec<String> = serde_json::from_str(&kf_str).unwrap_or_default();
-            Ok(AgentPersona {
-                id: row.get(0)?, name: row.get(1)?, role: row.get(2)?, avatar: row.get(3)?,
-                personality: row.get(4)?, language: row.get(5)?, voice: row.get(6)?,
-                system_prompt: row.get(7)?, knowledge_files: kf,
-                preferred_model: row.get(9)?, tier: row.get(10)?, created_at: row.get(11)?,
+        let rows = stmt
+            .query_map([], |row| {
+                let kf_str: String = row.get(8)?;
+                let kf: Vec<String> = serde_json::from_str(&kf_str).unwrap_or_default();
+                Ok(AgentPersona {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    role: row.get(2)?,
+                    avatar: row.get(3)?,
+                    personality: row.get(4)?,
+                    language: row.get(5)?,
+                    voice: row.get(6)?,
+                    system_prompt: row.get(7)?,
+                    knowledge_files: kf,
+                    preferred_model: row.get(9)?,
+                    tier: row.get(10)?,
+                    created_at: row.get(11)?,
+                })
             })
-        }).map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?;
         Ok(rows.filter_map(|r| r.ok()).collect())
     }
 
@@ -95,7 +108,11 @@ impl PersonaManager {
     }
 
     pub fn delete(conn: &Connection, id: &str) -> Result<(), String> {
-        conn.execute("DELETE FROM agent_personas WHERE id = ?1", rusqlite::params![id]).map_err(|e| e.to_string())?;
+        conn.execute(
+            "DELETE FROM agent_personas WHERE id = ?1",
+            rusqlite::params![id],
+        )
+        .map_err(|e| e.to_string())?;
         Ok(())
     }
 

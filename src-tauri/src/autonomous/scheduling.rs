@@ -105,7 +105,10 @@ impl AutoScheduler {
             // Flag days exceeding the meeting cap
             if day_events.len() as u32 > preferences.max_meetings_per_day {
                 // Suggest declining the lowest-priority (last) events
-                for ev in day_events.iter().skip(preferences.max_meetings_per_day as usize) {
+                for ev in day_events
+                    .iter()
+                    .skip(preferences.max_meetings_per_day as usize)
+                {
                     suggestions.push(Suggestion {
                         action: "decline".into(),
                         event_id: ev.id.clone(),

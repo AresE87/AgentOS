@@ -163,8 +163,8 @@ impl Gateway {
             match result {
                 Ok((content, tokens_in, tokens_out)) => {
                     let duration = start.elapsed().as_millis() as u64;
-                    let cost = (tokens_in as f64 * 0.003 / 1000.0)
-                        + (tokens_out as f64 * 0.015 / 1000.0);
+                    let cost =
+                        (tokens_in as f64 * 0.003 / 1000.0) + (tokens_out as f64 * 0.015 / 1000.0);
 
                     info!(
                         model = model_id,
@@ -211,6 +211,11 @@ impl Gateway {
             complexity: 3,
             suggested_specialist: "General Assistant".to_string(),
             confidence: 1.0,
+            inference_source: "cloud".to_string(),
+            local_available: false,
+            local_active: false,
+            fallback_reason: None,
+            latency_ms: 0,
         };
         let chain = self.router.get_fallback_chain(&forced);
 
@@ -304,6 +309,11 @@ impl Gateway {
             complexity: 1,
             suggested_specialist: "General Assistant".to_string(),
             confidence: 1.0,
+            inference_source: "cloud".to_string(),
+            local_available: false,
+            local_active: false,
+            fallback_reason: None,
+            latency_ms: 0,
         };
         let chain = self.router.get_fallback_chain(&forced);
 
@@ -397,7 +407,10 @@ impl Gateway {
         if settings.use_local_llm {
             let provider = LocalLLMProvider::new(&settings.local_llm_url);
             let system = system_prompt.unwrap_or("");
-            match provider.complete(&settings.local_model, user_text, system).await {
+            match provider
+                .complete(&settings.local_model, user_text, system)
+                .await
+            {
                 Ok(content) => {
                     info!(
                         model = %settings.local_model,
@@ -423,6 +436,7 @@ impl Gateway {
                 }
             }
         }
-        self.complete_with_system(user_text, system_prompt, settings).await
+        self.complete_with_system(user_text, system_prompt, settings)
+            .await
     }
 }

@@ -77,7 +77,11 @@ impl EducationAssistant {
     }
 
     /// Generate a quiz for a course.
-    pub fn generate_quiz(&self, course_id: &str, num_questions: u32) -> Result<serde_json::Value, String> {
+    pub fn generate_quiz(
+        &self,
+        course_id: &str,
+        num_questions: u32,
+    ) -> Result<serde_json::Value, String> {
         let course = self
             .courses
             .iter()

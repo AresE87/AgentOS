@@ -220,7 +220,10 @@ impl Providers {
             return Err(err_msg.to_string().into());
         }
 
-        let content = data["content"][0]["text"].as_str().unwrap_or("").to_string();
+        let content = data["content"][0]["text"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
         let tokens_in = data["usage"]["input_tokens"].as_u64().unwrap_or(0) as u32;
         let tokens_out = data["usage"]["output_tokens"].as_u64().unwrap_or(0) as u32;
 
@@ -325,8 +328,12 @@ impl Providers {
             .as_str()
             .unwrap_or("")
             .to_string();
-        let tokens_in = data["usageMetadata"]["promptTokenCount"].as_u64().unwrap_or(0) as u32;
-        let tokens_out = data["usageMetadata"]["candidatesTokenCount"].as_u64().unwrap_or(0) as u32;
+        let tokens_in = data["usageMetadata"]["promptTokenCount"]
+            .as_u64()
+            .unwrap_or(0) as u32;
+        let tokens_out = data["usageMetadata"]["candidatesTokenCount"]
+            .as_u64()
+            .unwrap_or(0) as u32;
 
         Ok((content, tokens_in, tokens_out))
     }

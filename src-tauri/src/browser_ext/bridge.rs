@@ -64,7 +64,10 @@ impl BrowserBridge {
         self.config.port = port;
         self.running = true;
         self.started_at = Some(chrono::Utc::now().to_rfc3339());
-        tracing::info!("Browser extension native messaging started on port {}", port);
+        tracing::info!(
+            "Browser extension native messaging started on port {}",
+            port
+        );
 
         Ok(serde_json::json!({
             "status": "started",

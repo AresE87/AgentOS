@@ -19,8 +19,7 @@ pub struct NodeCapabilities {
 impl NodeCapabilities {
     /// Detect local machine capabilities
     pub fn local() -> Self {
-        let display_name = whoami::fallible::hostname()
-            .unwrap_or_else(|_| "localhost".to_string());
+        let display_name = whoami::fallible::hostname().unwrap_or_else(|_| "localhost".to_string());
 
         // Rough RAM estimate: use available system info or fallback
         let ram_gb = Self::detect_ram_gb();

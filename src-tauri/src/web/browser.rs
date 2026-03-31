@@ -58,7 +58,10 @@ pub fn is_url_safe(url: &str) -> bool {
 /// Fetch a URL and extract readable text content
 pub async fn fetch_page(url: &str) -> Result<PageContent, String> {
     if !is_url_safe(url) {
-        return Err(format!("Blocked: URL '{}' points to a local/internal address", url));
+        return Err(format!(
+            "Blocked: URL '{}' points to a local/internal address",
+            url
+        ));
     }
 
     info!(url, "Fetching web page");
@@ -72,7 +75,10 @@ pub async fn fetch_page(url: &str) -> Result<PageContent, String> {
 
     let response = client
         .get(url)
-        .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+        .header(
+            "Accept",
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        )
         .header("Accept-Language", "en-US,en;q=0.9,es;q=0.8")
         .send()
         .await
@@ -414,7 +420,10 @@ pub fn detect_browser() -> BrowserInfo {
 /// Falls back to reqwest-based fetch_page() if no browser is found.
 pub async fn fetch_with_browser(url: &str) -> Result<PageContent, String> {
     if !is_url_safe(url) {
-        return Err(format!("Blocked: URL '{}' points to a local/internal address", url));
+        return Err(format!(
+            "Blocked: URL '{}' points to a local/internal address",
+            url
+        ));
     }
 
     let browser = detect_browser();
@@ -440,7 +449,10 @@ pub async fn fetch_with_browser(url: &str) -> Result<PageContent, String> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Headless browser exited with error: {}", stderr.chars().take(500).collect::<String>()));
+        return Err(format!(
+            "Headless browser exited with error: {}",
+            stderr.chars().take(500).collect::<String>()
+        ));
     }
 
     let html = String::from_utf8_lossy(&output.stdout).to_string();
@@ -461,7 +473,10 @@ pub async fn fetch_with_browser(url: &str) -> Result<PageContent, String> {
 /// Returns the path to the saved screenshot PNG.
 pub async fn screenshot_url(url: &str, output_path: &Path) -> Result<PathBuf, String> {
     if !is_url_safe(url) {
-        return Err(format!("Blocked: URL '{}' points to a local/internal address", url));
+        return Err(format!(
+            "Blocked: URL '{}' points to a local/internal address",
+            url
+        ));
     }
 
     let browser = detect_browser();
@@ -489,7 +504,10 @@ pub async fn screenshot_url(url: &str, output_path: &Path) -> Result<PathBuf, St
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Screenshot failed: {}", stderr.chars().take(500).collect::<String>()));
+        return Err(format!(
+            "Screenshot failed: {}",
+            stderr.chars().take(500).collect::<String>()
+        ));
     }
 
     if output_path.exists() {

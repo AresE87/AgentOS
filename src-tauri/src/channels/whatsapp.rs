@@ -141,10 +141,7 @@ impl WhatsAppChannel {
             if !resp.status().is_success() {
                 let status = resp.status();
                 let body_text = resp.text().await.unwrap_or_default();
-                return Err(format!(
-                    "WhatsApp API error {}: {}",
-                    status, body_text
-                ));
+                return Err(format!("WhatsApp API error {}: {}", status, body_text));
             }
         }
         Ok(())
@@ -168,12 +165,7 @@ impl WhatsAppChannel {
     }
 
     /// Send an image message
-    pub async fn send_image(
-        &self,
-        to: &str,
-        image_url: &str,
-        caption: &str,
-    ) -> Result<(), String> {
+    pub async fn send_image(&self, to: &str, image_url: &str, caption: &str) -> Result<(), String> {
         let url = format!(
             "https://graph.facebook.com/v19.0/{}/messages",
             self.config.phone_number_id
@@ -319,7 +311,8 @@ mod tests {
 
     #[test]
     fn extract_messages_from_payload() {
-        let payload: WebhookPayload = serde_json::from_str(r#"{
+        let payload: WebhookPayload = serde_json::from_str(
+            r#"{
             "object": "whatsapp_business_account",
             "entry": [{
                 "id": "123",
@@ -337,7 +330,9 @@ mod tests {
                     "field": "messages"
                 }]
             }]
-        }"#).unwrap();
+        }"#,
+        )
+        .unwrap();
 
         let msgs = WhatsAppChannel::extract_messages(&payload);
         assert_eq!(msgs.len(), 1);

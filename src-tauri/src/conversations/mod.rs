@@ -1,2 +1,2 @@
 pub mod chain;
-pub use chain::{ConversationChain, AgentMessage};
+pub use chain::{AgentMessage, ConversationChain};

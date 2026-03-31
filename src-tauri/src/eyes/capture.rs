@@ -57,7 +57,9 @@ fn capture_screen_gdi(
         let hbm = CreateCompatibleBitmap(hdc_screen, width, height);
         let old = SelectObject(hdc_mem, hbm);
 
-        BitBlt(hdc_mem, 0, 0, width, height, hdc_screen, src_x, src_y, SRCCOPY)?;
+        BitBlt(
+            hdc_mem, 0, 0, width, height, hdc_screen, src_x, src_y, SRCCOPY,
+        )?;
 
         let mut bmi = BITMAPINFO {
             bmiHeader: BITMAPINFOHEADER {
@@ -113,9 +115,8 @@ pub fn save_screenshot(
     let filename = format!("{}_{}.jpg", ts, short_id);
     let path = dir.join(&filename);
 
-    let img: RgbaImage =
-        ImageBuffer::from_raw(data.width, data.height, data.rgba.clone())
-            .ok_or("Failed to create image buffer")?;
+    let img: RgbaImage = ImageBuffer::from_raw(data.width, data.height, data.rgba.clone())
+        .ok_or("Failed to create image buffer")?;
 
     // Resize if very large (for storage efficiency)
     let img = if data.width > 1920 {
@@ -129,7 +130,12 @@ pub fn save_screenshot(
     let rgb = image::DynamicImage::ImageRgba8(img).to_rgb8();
     let mut buf = std::io::BufWriter::new(std::fs::File::create(&path)?);
     let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, 85);
-    encoder.encode(rgb.as_raw(), rgb.width(), rgb.height(), image::ExtendedColorType::Rgb8)?;
+    encoder.encode(
+        rgb.as_raw(),
+        rgb.width(),
+        rgb.height(),
+        image::ExtendedColorType::Rgb8,
+    )?;
 
     Ok(path)
 }
@@ -143,9 +149,8 @@ pub fn save_screenshot_to(
         std::fs::create_dir_all(parent)?;
     }
 
-    let img: RgbaImage =
-        ImageBuffer::from_raw(data.width, data.height, data.rgba.clone())
-            .ok_or("Failed to create image buffer")?;
+    let img: RgbaImage = ImageBuffer::from_raw(data.width, data.height, data.rgba.clone())
+        .ok_or("Failed to create image buffer")?;
 
     let img = if data.width > 1920 {
         let ratio = 1920.0 / data.width as f64;
@@ -158,7 +163,12 @@ pub fn save_screenshot_to(
     let rgb = image::DynamicImage::ImageRgba8(img).to_rgb8();
     let mut buf = std::io::BufWriter::new(std::fs::File::create(path)?);
     let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, 85);
-    encoder.encode(rgb.as_raw(), rgb.width(), rgb.height(), image::ExtendedColorType::Rgb8)?;
+    encoder.encode(
+        rgb.as_raw(),
+        rgb.width(),
+        rgb.height(),
+        image::ExtendedColorType::Rgb8,
+    )?;
 
     Ok(())
 }
@@ -205,7 +215,11 @@ mod tests {
         assert!(path.extension().map(|e| e == "jpg").unwrap_or(false));
         // File should be non-empty
         let size = std::fs::metadata(&path).unwrap().len();
-        assert!(size > 1000, "JPEG file should be at least 1KB, got {} bytes", size);
+        assert!(
+            size > 1000,
+            "JPEG file should be at least 1KB, got {} bytes",
+            size
+        );
     }
 
     #[test]
@@ -222,10 +236,14 @@ mod tests {
         };
         let b64 = to_base64_jpeg(&data, 50).unwrap();
         // Decode and check dimensions aren't 2560 (should be resized to max 1280)
-        let decoded = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &b64).unwrap();
+        let decoded =
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &b64).unwrap();
         // We can't easily check dimensions from JPEG bytes without a decoder,
         // but we can verify it's smaller than a raw 2560x1440 would produce
-        assert!(decoded.len() < 500_000, "Resized JPEG should be reasonably small");
+        assert!(
+            decoded.len() < 500_000,
+            "Resized JPEG should be reasonably small"
+        );
     }
 }
 
@@ -234,9 +252,8 @@ pub fn to_base64_jpeg(
     data: &ScreenshotData,
     quality: u8,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    let img: RgbaImage =
-        ImageBuffer::from_raw(data.width, data.height, data.rgba.clone())
-            .ok_or("Failed to create image buffer")?;
+    let img: RgbaImage = ImageBuffer::from_raw(data.width, data.height, data.rgba.clone())
+        .ok_or("Failed to create image buffer")?;
 
     // Resize to max 1280px width for token efficiency
     let img = if data.width > 1280 {
@@ -251,7 +268,12 @@ pub fn to_base64_jpeg(
     let mut jpeg_buf = Vec::new();
     let mut cursor = std::io::Cursor::new(&mut jpeg_buf);
     let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut cursor, quality);
-    encoder.encode(rgb.as_raw(), rgb.width(), rgb.height(), image::ExtendedColorType::Rgb8)?;
+    encoder.encode(
+        rgb.as_raw(),
+        rgb.width(),
+        rgb.height(),
+        image::ExtendedColorType::Rgb8,
+    )?;
 
     Ok(base64::Engine::encode(
         &base64::engine::general_purpose::STANDARD,
@@ -266,9 +288,8 @@ pub fn to_base64_jpeg_with_dims(
     data: &ScreenshotData,
     quality: u8,
 ) -> Result<(String, u32, u32), Box<dyn std::error::Error + Send + Sync>> {
-    let img: RgbaImage =
-        ImageBuffer::from_raw(data.width, data.height, data.rgba.clone())
-            .ok_or("Failed to create image buffer")?;
+    let img: RgbaImage = ImageBuffer::from_raw(data.width, data.height, data.rgba.clone())
+        .ok_or("Failed to create image buffer")?;
 
     let img = if data.width > 1280 {
         let ratio = 1280.0 / data.width as f64;
@@ -285,12 +306,14 @@ pub fn to_base64_jpeg_with_dims(
     let mut jpeg_buf = Vec::new();
     let mut cursor = std::io::Cursor::new(&mut jpeg_buf);
     let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut cursor, quality);
-    encoder.encode(rgb.as_raw(), rgb.width(), rgb.height(), image::ExtendedColorType::Rgb8)?;
+    encoder.encode(
+        rgb.as_raw(),
+        rgb.width(),
+        rgb.height(),
+        image::ExtendedColorType::Rgb8,
+    )?;
 
-    let b64 = base64::Engine::encode(
-        &base64::engine::general_purpose::STANDARD,
-        &jpeg_buf,
-    );
+    let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &jpeg_buf);
 
     Ok((b64, img_w, img_h))
 }

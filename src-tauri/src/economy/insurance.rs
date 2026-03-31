@@ -55,10 +55,16 @@ pub struct InsuranceManager {
 
 impl InsuranceManager {
     pub fn new() -> Self {
-        Self { policies: Vec::new() }
+        Self {
+            policies: Vec::new(),
+        }
     }
 
-    pub fn create_policy(&mut self, agent_id: String, coverage_type: CoverageType) -> InsurancePolicy {
+    pub fn create_policy(
+        &mut self,
+        agent_id: String,
+        coverage_type: CoverageType,
+    ) -> InsurancePolicy {
         let (premium, limit) = match &coverage_type {
             CoverageType::Basic => (0.0, 100.0),
             CoverageType::Standard => (5.0, 1_000.0),
@@ -80,9 +86,10 @@ impl InsuranceManager {
     }
 
     pub fn list_policies(&self, agent_id: Option<&str>) -> Vec<&InsurancePolicy> {
-        self.policies.iter().filter(|p| {
-            agent_id.map_or(true, |aid| p.agent_id == aid)
-        }).collect()
+        self.policies
+            .iter()
+            .filter(|p| agent_id.map_or(true, |aid| p.agent_id == aid))
+            .collect()
     }
 
     pub fn file_claim(
@@ -92,13 +99,19 @@ impl InsuranceManager {
         amount: f64,
         evidence: Vec<String>,
     ) -> Result<InsuranceClaim, String> {
-        let policy = self.policies.iter_mut().find(|p| p.id == policy_id)
+        let policy = self
+            .policies
+            .iter_mut()
+            .find(|p| p.id == policy_id)
             .ok_or_else(|| "Policy not found".to_string())?;
         if policy.status != PolicyStatus::Active {
             return Err("Policy is not active".to_string());
         }
         if amount > policy.coverage_limit {
-            return Err(format!("Amount ${:.2} exceeds coverage limit ${:.2}", amount, policy.coverage_limit));
+            return Err(format!(
+                "Amount ${:.2} exceeds coverage limit ${:.2}",
+                amount, policy.coverage_limit
+            ));
         }
         let claim = InsuranceClaim {
             id: uuid::Uuid::new_v4().to_string(),
@@ -115,9 +128,15 @@ impl InsuranceManager {
     }
 
     pub fn get_claim_status(&self, policy_id: &str, claim_id: &str) -> Result<ClaimStatus, String> {
-        let policy = self.policies.iter().find(|p| p.id == policy_id)
+        let policy = self
+            .policies
+            .iter()
+            .find(|p| p.id == policy_id)
             .ok_or_else(|| "Policy not found".to_string())?;
-        let claim = policy.claims.iter().find(|c| c.id == claim_id)
+        let claim = policy
+            .claims
+            .iter()
+            .find(|c| c.id == claim_id)
             .ok_or_else(|| "Claim not found".to_string())?;
         Ok(claim.status.clone())
     }

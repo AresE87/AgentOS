@@ -138,11 +138,15 @@ fn action_summary(action: &AgentAction) -> String {
         AgentAction::RightClick { x, y } => format!("RightClick({},{})", x, y),
         AgentAction::Type { text } => format!("Type(\"{}\")", &text[..text.len().min(30)]),
         AgentAction::KeyCombo { keys } => format!("Keys({})", keys.join("+")),
-        AgentAction::RunCommand { command, .. } => format!("Cmd(\"{}\")", &command[..command.len().min(30)]),
+        AgentAction::RunCommand { command, .. } => {
+            format!("Cmd(\"{}\")", &command[..command.len().min(30)])
+        }
         AgentAction::Scroll { delta, .. } => format!("Scroll({})", delta),
         AgentAction::Wait { ms } => format!("Wait({}ms)", ms),
         AgentAction::Screenshot => "Screenshot".into(),
-        AgentAction::TaskComplete { summary } => format!("Done(\"{}\")", &summary[..summary.len().min(40)]),
+        AgentAction::TaskComplete { summary } => {
+            format!("Done(\"{}\")", &summary[..summary.len().min(40)])
+        }
     }
 }
 
@@ -167,7 +171,10 @@ mod tests {
     fn parse_double_click_action() {
         let input = r#"{"type": "DoubleClick", "x": 100, "y": 200}"#;
         let action = parse_action_response(input).unwrap();
-        assert!(matches!(action, AgentAction::DoubleClick { x: 100, y: 200 }));
+        assert!(matches!(
+            action,
+            AgentAction::DoubleClick { x: 100, y: 200 }
+        ));
     }
 
     #[test]
@@ -231,7 +238,8 @@ mod tests {
 
     #[test]
     fn parse_task_complete() {
-        let input = r#"{"type": "TaskComplete", "summary": "Calculator opened and computed 5+3=8"}"#;
+        let input =
+            r#"{"type": "TaskComplete", "summary": "Calculator opened and computed 5+3=8"}"#;
         let action = parse_action_response(input).unwrap();
         match action {
             AgentAction::TaskComplete { summary } => {
@@ -279,7 +287,9 @@ mod tests {
 
     #[test]
     fn action_summary_for_task_complete() {
-        let action = AgentAction::TaskComplete { summary: "Done!".to_string() };
+        let action = AgentAction::TaskComplete {
+            summary: "Done!".to_string(),
+        };
         assert_eq!(action_summary(&action), "Done(\"Done!\")");
     }
 

@@ -1,9 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Mutex;
+use std::time::Instant;
 use tracing::{info, warn};
-
-// ── Classification types ──────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum TaskType {
@@ -16,9 +15,9 @@ pub enum TaskType {
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum TaskTier {
-    Cheap,    // Junior — ~$0.001
-    Standard, // Specialist — ~$0.01
-    Premium,  // Senior/Manager — ~$0.10
+    Cheap,
+    Standard,
+    Premium,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,6 +29,16 @@ pub struct TaskClassification {
     pub suggested_specialist: String,
     #[serde(default = "default_confidence")]
     pub confidence: f64,
+    #[serde(default = "default_inference_source")]
+    pub inference_source: String,
+    #[serde(default)]
+    pub local_available: bool,
+    #[serde(default)]
+    pub local_active: bool,
+    #[serde(default)]
+    pub fallback_reason: Option<String>,
+    #[serde(default)]
+    pub latency_ms: u64,
 }
 
 fn default_specialist() -> String {
@@ -40,7 +49,9 @@ fn default_confidence() -> f64 {
     0.5
 }
 
-// ── LRU-ish classification cache (last 100 entries) ───────────
+fn default_inference_source() -> String {
+    "keyword".to_string()
+}
 
 struct ClassificationCache {
     entries: HashMap<String, TaskClassification>,
@@ -77,8 +88,6 @@ impl ClassificationCache {
 static CLASSIFICATION_CACHE: std::sync::LazyLock<Mutex<ClassificationCache>> =
     std::sync::LazyLock::new(|| Mutex::new(ClassificationCache::new()));
 
-// ── Keyword-based classifier (original, now used as fallback) ─
-
 pub fn classify(text: &str) -> TaskClassification {
     let lower = text.to_lowercase();
     let word_count = text.split_whitespace().count();
@@ -86,7 +95,15 @@ pub fn classify(text: &str) -> TaskClassification {
     let task_type = if has_any(
         &lower,
         &[
-            "code", "program", "function", "bug", "script", "compile", "código", "programar",
+            "code",
+            "program",
+            "function",
+            "bug",
+            "script",
+            "compile",
+            "codigo",
+            "código",
+            "programar",
         ],
     ) {
         TaskType::Code
@@ -121,7 +138,7 @@ pub fn classify(text: &str) -> TaskClassification {
         &lower,
         &[
             "create", "generate", "write", "design", "build", "crear", "generar", "escribir",
-            "diseñar", "armar",
+            "disenar", "diseñar", "armar",
         ],
     ) {
         TaskType::Generation
@@ -147,10 +164,12 @@ pub fn classify(text: &str) -> TaskClassification {
             "step ",
             "first ",
             "luego ",
+            "despues ",
             "después ",
             "primero ",
             " y luego ",
             " y después ",
+            " y despues ",
         ],
     );
 
@@ -175,25 +194,37 @@ pub fn classify(text: &str) -> TaskClassification {
         tier,
         complexity,
         suggested_specialist: suggested_specialist.to_string(),
-        confidence: 0.4, // keyword-based → lower confidence
+        confidence: 0.4,
+        inference_source: "keyword".to_string(),
+        local_available: false,
+        local_active: false,
+        fallback_reason: None,
+        latency_ms: 0,
     }
 }
 
-// ── LLM-powered classifier (uses cheap tier) ─────────────────
-
 use super::gateway::Gateway;
+use super::local_llm::LocalLLMProvider;
 use crate::config::Settings;
 
-/// Classify a task using a cheap LLM call, with keyword fallback.
-/// Results are cached (up to 100 entries) to avoid redundant calls.
 pub async fn classify_smart(
     text: &str,
     gateway: &Gateway,
     settings: &Settings,
 ) -> TaskClassification {
-    // Check cache first
-    let cache_key = text.chars().take(200).collect::<String>();
-    {
+    let cache_enabled = !settings.use_local_llm;
+    let cache_key = format!(
+        "{}:{}:{}",
+        if settings.use_local_llm {
+            "local"
+        } else {
+            "cloud"
+        },
+        settings.local_model,
+        text.chars().take(200).collect::<String>()
+    );
+
+    if cache_enabled {
         if let Ok(cache) = CLASSIFICATION_CACHE.lock() {
             if let Some(cached) = cache.get(&cache_key) {
                 info!("Classification cache hit");
@@ -202,41 +233,108 @@ pub async fn classify_smart(
         }
     }
 
-    // Try LLM classification
-    match classify_with_llm(text, gateway, settings).await {
-        Ok(result) => {
-            info!(
-                task_type = ?result.task_type,
-                tier = ?result.tier,
-                confidence = result.confidence,
-                "LLM classification succeeded"
-            );
-            // Cache the result
-            if let Ok(mut cache) = CLASSIFICATION_CACHE.lock() {
-                cache.insert(cache_key, result.clone());
+    let mut fallback_reason: Option<String> = None;
+    let mut local_available = false;
+
+    if settings.use_local_llm {
+        let provider = LocalLLMProvider::new(&settings.local_llm_url);
+        local_available = provider.is_available().await;
+        if local_available {
+            let started = Instant::now();
+            match classify_with_local_llm(text, &provider, settings).await {
+                Ok(mut classification) => {
+                    classification.inference_source = "local".to_string();
+                    classification.local_available = true;
+                    classification.local_active = true;
+                    classification.fallback_reason = None;
+                    classification.latency_ms = started.elapsed().as_millis() as u64;
+                    info!(
+                        task_type = ?classification.task_type,
+                        tier = ?classification.tier,
+                        confidence = classification.confidence,
+                        latency_ms = classification.latency_ms,
+                        "Local classification succeeded"
+                    );
+                    return classification;
+                }
+                Err(error) => {
+                    fallback_reason = Some(format!("Local classifier failed: {}", error));
+                    warn!(error = %error, "Local classification failed, falling back");
+                }
             }
-            result
+        } else {
+            fallback_reason = Some("Local model server is unavailable.".to_string());
         }
-        Err(e) => {
-            warn!(error = %e, "LLM classification failed, using keyword fallback");
-            let fallback = classify(text);
-            // Cache even the fallback
-            if let Ok(mut cache) = CLASSIFICATION_CACHE.lock() {
-                cache.insert(cache_key, fallback.clone());
+    }
+
+    let started = Instant::now();
+    match classify_with_llm(text, gateway, settings).await {
+        Ok(mut classification) => {
+            classification.inference_source = "cloud".to_string();
+            classification.local_available = local_available;
+            classification.local_active = false;
+            classification.fallback_reason = fallback_reason.clone();
+            classification.latency_ms = started.elapsed().as_millis() as u64;
+            info!(
+                task_type = ?classification.task_type,
+                tier = ?classification.tier,
+                confidence = classification.confidence,
+                latency_ms = classification.latency_ms,
+                "Cloud classification succeeded"
+            );
+            if cache_enabled {
+                if let Ok(mut cache) = CLASSIFICATION_CACHE.lock() {
+                    cache.insert(cache_key, classification.clone());
+                }
+            }
+            classification
+        }
+        Err(error) => {
+            let cloud_reason = format!("Cloud classifier failed: {}", error);
+            warn!(error = %error, "Cloud classification failed, using keyword fallback");
+            let mut fallback = classify(text);
+            fallback.local_available = local_available;
+            fallback.local_active = false;
+            fallback.fallback_reason = Some(match fallback_reason {
+                Some(local_reason) => format!("{} {}", local_reason, cloud_reason),
+                None => cloud_reason,
+            });
+            fallback.latency_ms = started.elapsed().as_millis() as u64;
+            if cache_enabled {
+                if let Ok(mut cache) = CLASSIFICATION_CACHE.lock() {
+                    cache.insert(cache_key, fallback.clone());
+                }
             }
             fallback
         }
     }
 }
 
-/// Classify task using cheap LLM tier. Returns error if LLM unavailable.
+async fn classify_with_local_llm(
+    text: &str,
+    provider: &LocalLLMProvider,
+    settings: &Settings,
+) -> Result<TaskClassification, String> {
+    let prompt = classification_prompt(text);
+    let response = provider
+        .complete(&settings.local_model, &prompt, "Return valid JSON only.")
+        .await?;
+    parse_classification_json(&response)
+}
+
 async fn classify_with_llm(
     text: &str,
     gateway: &Gateway,
     settings: &Settings,
 ) -> Result<TaskClassification, String> {
+    let prompt = classification_prompt(text);
+    let response = gateway.complete_cheap(&prompt, settings).await?;
+    parse_classification_json(&response.content)
+}
+
+fn classification_prompt(text: &str) -> String {
     let truncated: String = text.chars().take(200).collect();
-    let prompt = format!(
+    format!(
         "Classify this task. Respond ONLY with valid JSON, no other text.\n\
          Task: \"{}\"\n\n\
          JSON format:\n\
@@ -246,34 +344,30 @@ async fn classify_with_llm(
           \"suggested_specialist\": \"General Assistant|Programmer|Data Analyst|Vision Specialist|Creative Writer\",\n\
           \"confidence\": 0.0-1.0}}",
         truncated
-    );
+    )
+}
 
-    // Force cheap tier for classification to minimize cost
-    let response = gateway.complete_cheap(&prompt, settings).await?;
-
-    // Parse JSON from response
-    let json: serde_json::Value = serde_json::from_str(&response.content)
+fn parse_classification_json(content: &str) -> Result<TaskClassification, String> {
+    let json: serde_json::Value = serde_json::from_str(content)
         .or_else(|_| {
-            // Try to extract JSON from markdown code block
-            let content = response.content.trim();
-            let json_str = if content.starts_with("```") {
-                content
+            let trimmed = content.trim();
+            let json_str = if trimmed.starts_with("```") {
+                trimmed
                     .lines()
                     .skip(1)
-                    .take_while(|l| !l.starts_with("```"))
+                    .take_while(|line| !line.starts_with("```"))
                     .collect::<Vec<_>>()
                     .join("\n")
             } else {
-                content.to_string()
+                trimmed.to_string()
             };
             serde_json::from_str(&json_str)
         })
         .map_err(|e| format!("Failed to parse classification JSON: {}", e))?;
 
-    // Parse task_type
     let task_type = match json
         .get("task_type")
-        .and_then(|v| v.as_str())
+        .and_then(|value| value.as_str())
         .unwrap_or("text")
     {
         "code" => TaskType::Code,
@@ -283,10 +377,9 @@ async fn classify_with_llm(
         _ => TaskType::Text,
     };
 
-    // Parse tier
     let tier = match json
         .get("tier")
-        .and_then(|v| v.as_str())
+        .and_then(|value| value.as_str())
         .unwrap_or("standard")
     {
         "cheap" => TaskTier::Cheap,
@@ -296,19 +389,19 @@ async fn classify_with_llm(
 
     let complexity = json
         .get("complexity")
-        .and_then(|v| v.as_u64())
+        .and_then(|value| value.as_u64())
         .unwrap_or(2)
         .min(4) as u8;
 
     let suggested_specialist = json
         .get("suggested_specialist")
-        .and_then(|v| v.as_str())
+        .and_then(|value| value.as_str())
         .unwrap_or("General Assistant")
         .to_string();
 
     let confidence = json
         .get("confidence")
-        .and_then(|v| v.as_f64())
+        .and_then(|value| value.as_f64())
         .unwrap_or(0.7);
 
     Ok(TaskClassification {
@@ -317,18 +410,27 @@ async fn classify_with_llm(
         complexity,
         suggested_specialist,
         confidence,
+        inference_source: "cloud".to_string(),
+        local_available: false,
+        local_active: false,
+        fallback_reason: None,
+        latency_ms: 0,
     })
 }
 
 fn has_any(text: &str, patterns: &[&str]) -> bool {
-    patterns.iter().any(|p| text.contains(p))
+    patterns.iter().any(|pattern| text.contains(pattern))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ── Basic type classification ──────────────────────────────
+    use axum::{
+        routing::{get, post},
+        Json, Router,
+    };
+    use serde_json::json;
+    use tokio::net::TcpListener;
 
     #[test]
     fn classify_greeting_as_text_cheap() {
@@ -336,11 +438,12 @@ mod tests {
         assert_eq!(c.task_type, TaskType::Text);
         assert_eq!(c.tier, TaskTier::Cheap);
         assert_eq!(c.complexity, 1);
+        assert_eq!(c.inference_source, "keyword");
     }
 
     #[test]
     fn classify_simple_command_as_text_cheap() {
-        let c = classify("qué hora es");
+        let c = classify("que hora es");
         assert_eq!(c.task_type, TaskType::Text);
         assert_eq!(c.tier, TaskTier::Cheap);
         assert_eq!(c.complexity, 1);
@@ -354,7 +457,7 @@ mod tests {
 
     #[test]
     fn classify_code_spanish() {
-        let c = classify("programar una función que sume dos números");
+        let c = classify("programar una funcion que sume dos numeros");
         assert_eq!(c.task_type, TaskType::Code);
     }
 
@@ -366,7 +469,7 @@ mod tests {
 
     #[test]
     fn classify_data_spanish() {
-        let c = classify("abrí la planilla de datos");
+        let c = classify("abri la planilla de datos");
         assert_eq!(c.task_type, TaskType::Data);
     }
 
@@ -378,7 +481,7 @@ mod tests {
 
     #[test]
     fn classify_vision_spanish() {
-        let c = classify("mirá la pantalla y decime qué ves");
+        let c = classify("mira la pantalla y decime que ves");
         assert_eq!(c.task_type, TaskType::Vision);
     }
 
@@ -394,8 +497,6 @@ mod tests {
         assert_eq!(c.task_type, TaskType::Generation);
     }
 
-    // ── Complexity scoring ─────────────────────────────────────
-
     #[test]
     fn complexity_1_for_short_input() {
         let c = classify("hola mundo");
@@ -404,14 +505,14 @@ mod tests {
 
     #[test]
     fn complexity_2_for_medium_input() {
-        // 15 words
-        let c = classify("I need you to analyze this code and tell me what the main function does in detail");
+        let c = classify(
+            "I need you to analyze this code and tell me what the main function does in detail",
+        );
         assert_eq!(c.complexity, 2);
     }
 
     #[test]
     fn complexity_3_for_long_input() {
-        // Build a 50-word input
         let words: Vec<&str> = std::iter::repeat("word").take(50).collect();
         let input = words.join(" ");
         let c = classify(&input);
@@ -426,8 +527,6 @@ mod tests {
         assert_eq!(c.complexity, 4);
     }
 
-    // ── Tier assignment ────────────────────────────────────────
-
     #[test]
     fn tier_cheap_for_simple_short() {
         let c = classify("hello");
@@ -436,8 +535,9 @@ mod tests {
 
     #[test]
     fn tier_standard_for_medium_complexity() {
-        // 15 words, no multi-step → complexity 2 → Standard
-        let c = classify("I need you to analyze this code and tell me what the main function does in detail");
+        let c = classify(
+            "I need you to analyze this code and tell me what the main function does in detail",
+        );
         assert_eq!(c.tier, TaskTier::Standard);
     }
 
@@ -449,11 +549,9 @@ mod tests {
 
     #[test]
     fn tier_premium_for_multi_step_spanish() {
-        let c = classify("primero descargá el archivo y luego instalalo");
+        let c = classify("primero descarga el archivo y luego instalalo");
         assert_eq!(c.tier, TaskTier::Premium);
     }
-
-    // ── Edge cases ─────────────────────────────────────────────
 
     #[test]
     fn classify_empty_string() {
@@ -465,7 +563,6 @@ mod tests {
 
     #[test]
     fn classify_mixed_keywords_first_match_wins() {
-        // "code" checked before "data"
         let c = classify("code the database migration script");
         assert_eq!(c.task_type, TaskType::Code);
     }
@@ -482,8 +579,6 @@ mod tests {
         let c = classify("fix the bug in my code");
         assert_eq!(c.suggested_specialist, "Programmer");
     }
-
-    // ── Cache tests ────────────────────────────────────────────
 
     #[test]
     fn cache_insert_and_retrieve() {
@@ -502,12 +597,71 @@ mod tests {
             let c = classify("hello");
             cache.insert(format!("key_{}", i), c);
         }
-        // First 5 should be evicted
         assert!(cache.get("key_0").is_none());
         assert!(cache.get("key_4").is_none());
-        // Recent ones should exist
         assert!(cache.get("key_100").is_some());
         assert!(cache.get("key_104").is_some());
         assert_eq!(cache.entries.len(), 100);
+    }
+
+    #[tokio::test]
+    async fn classify_smart_uses_local_ollama_without_cloud() {
+        async fn tags() -> Json<serde_json::Value> {
+            Json(json!({
+                "models": [
+                    { "name": "tiny-classifier", "size": 1234, "modified_at": "2026-03-31T00:00:00Z" }
+                ]
+            }))
+        }
+
+        async fn generate() -> Json<serde_json::Value> {
+            Json(json!({
+                "response": "{\"task_type\":\"code\",\"complexity\":2,\"tier\":\"standard\",\"suggested_specialist\":\"Programmer\",\"confidence\":0.91}"
+            }))
+        }
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = Router::new()
+            .route("/api/tags", get(tags))
+            .route("/api/generate", post(generate));
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let mut settings = Settings::default();
+        settings.use_local_llm = true;
+        settings.local_model = "tiny-classifier".to_string();
+        settings.local_llm_url = format!("http://{}", addr);
+
+        let gateway = Gateway::new(&settings);
+        let result = classify_smart("fix the bug in my code", &gateway, &settings).await;
+
+        assert_eq!(result.task_type, TaskType::Code);
+        assert_eq!(result.inference_source, "local");
+        assert!(result.local_available);
+        assert!(result.local_active);
+        assert!(result.fallback_reason.is_none());
+        assert!(result.latency_ms <= 5_000);
+    }
+
+    #[tokio::test]
+    async fn classify_smart_falls_back_honestly_when_local_is_unavailable() {
+        let mut settings = Settings::default();
+        settings.use_local_llm = true;
+        settings.local_model = "tiny-classifier".to_string();
+        settings.local_llm_url = "http://127.0.0.1:9".to_string();
+
+        let gateway = Gateway::new(&settings);
+        let result = classify_smart("fix the bug in my code", &gateway, &settings).await;
+
+        assert_eq!(result.task_type, TaskType::Code);
+        assert_eq!(result.inference_source, "keyword");
+        assert!(!result.local_active);
+        assert!(!result.local_available);
+        assert!(result
+            .fallback_reason
+            .unwrap_or_default()
+            .contains("Local model server is unavailable"));
     }
 }

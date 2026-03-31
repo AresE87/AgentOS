@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -10,7 +10,7 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
-import { getClient, sendMessage } from '../api/client';
+import { getClient, sendMessage, waitForTaskResult } from '../api/client';
 
 interface Message {
   id: string;
@@ -18,7 +18,7 @@ interface Message {
   text: string;
 }
 
-export default function ChatScreen() {
+export default function ChatScreen({ navigation }: any) {
   const [messages, setMessages] = useState<Message[]>([
     { id: '0', role: 'agent', text: 'AgentOS connected. How can I help?' },
   ]);
@@ -35,13 +35,28 @@ export default function ChatScreen() {
     setLoading(true);
     try {
       const client = await getClient();
-      const taskId = await sendMessage(client, text);
-      const agentMsg: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'agent',
-        text: `Task queued: ${taskId}`,
-      };
-      setMessages(prev => [...prev, agentMsg]);
+      const queued = await sendMessage(client, text);
+      setMessages(prev => [
+        ...prev,
+        {
+          id: (Date.now() + 1).toString(),
+          role: 'agent',
+          text: `Task queued: ${queued.task_id}`,
+        },
+      ]);
+
+      const task = await waitForTaskResult(client, queued.task_id);
+      setMessages(prev => [
+        ...prev,
+        {
+          id: (Date.now() + 2).toString(),
+          role: 'agent',
+          text:
+            task.result && task.result.trim().length > 0
+              ? task.result
+              : `Task ${task.task_id} finished with status: ${task.status}`,
+        },
+      ]);
     } catch (e: any) {
       setMessages(prev => [
         ...prev,
@@ -57,6 +72,15 @@ export default function ChatScreen() {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
+      <View style={styles.toolbar}>
+        <TouchableOpacity style={styles.toolbarBtn} onPress={() => navigation.navigate('Status')}>
+          <Text style={styles.toolbarBtnText}>Status</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.toolbarBtn} onPress={() => navigation.navigate('Setup')}>
+          <Text style={styles.toolbarBtnText}>Connection</Text>
+        </TouchableOpacity>
+      </View>
+
       <FlatList
         ref={listRef}
         data={messages}
@@ -91,7 +115,7 @@ export default function ChatScreen() {
           onSubmitEditing={send}
         />
         <TouchableOpacity style={styles.sendBtn} onPress={send}>
-          <Text style={styles.sendBtnText}>→</Text>
+          <Text style={styles.sendBtnText}>{'->'}</Text>
         </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
@@ -100,6 +124,26 @@ export default function ChatScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0a0a0f' },
+  toolbar: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingTop: 12,
+  },
+  toolbarBtn: {
+    borderWidth: 1,
+    borderColor: '#00ffff44',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: '#1a1a2e',
+  },
+  toolbarBtnText: {
+    color: '#00ffff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
   bubble: { maxWidth: '80%', borderRadius: 12, padding: 12, margin: 8 },
   userBubble: {
     alignSelf: 'flex-end',

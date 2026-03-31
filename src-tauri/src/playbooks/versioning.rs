@@ -96,7 +96,10 @@ impl VersionStore {
     }
 
     /// List all versions for a playbook (optionally filtered by branch).
-    pub fn list_versions(conn: &Connection, playbook_id: &str) -> Result<Vec<PlaybookVersion>, String> {
+    pub fn list_versions(
+        conn: &Connection,
+        playbook_id: &str,
+    ) -> Result<Vec<PlaybookVersion>, String> {
         Self::ensure_tables(conn)?;
         let mut stmt = conn
             .prepare("SELECT id, playbook_id, version_number, content, message, author, created_at FROM playbook_versions WHERE playbook_id = ?1 ORDER BY version_number DESC")
@@ -116,11 +119,16 @@ impl VersionStore {
             })
             .map_err(|e| e.to_string())?;
 
-        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
     }
 
     /// Get a specific version by version number.
-    pub fn get_version(conn: &Connection, playbook_id: &str, version: u32) -> Result<PlaybookVersion, String> {
+    pub fn get_version(
+        conn: &Connection,
+        playbook_id: &str,
+        version: u32,
+    ) -> Result<PlaybookVersion, String> {
         Self::ensure_tables(conn)?;
         conn.query_row(
             "SELECT id, playbook_id, version_number, content, message, author, created_at FROM playbook_versions WHERE playbook_id = ?1 AND version_number = ?2",
@@ -141,7 +149,11 @@ impl VersionStore {
     }
 
     /// Rollback: create a new version whose content matches the specified older version.
-    pub fn rollback(conn: &Connection, playbook_id: &str, version: u32) -> Result<PlaybookVersion, String> {
+    pub fn rollback(
+        conn: &Connection,
+        playbook_id: &str,
+        version: u32,
+    ) -> Result<PlaybookVersion, String> {
         let old = Self::get_version(conn, playbook_id, version)?;
         Self::save_version(
             conn,
@@ -154,7 +166,11 @@ impl VersionStore {
     }
 
     /// Create a new branch starting at a given version (or current head of main).
-    pub fn create_branch(conn: &Connection, playbook_id: &str, name: &str) -> Result<PlaybookBranch, String> {
+    pub fn create_branch(
+        conn: &Connection,
+        playbook_id: &str,
+        name: &str,
+    ) -> Result<PlaybookBranch, String> {
         Self::ensure_tables(conn)?;
         // Get the head of main
         let head: u32 = conn
@@ -179,7 +195,10 @@ impl VersionStore {
     }
 
     /// List all branches for a playbook.
-    pub fn list_branches(conn: &Connection, playbook_id: &str) -> Result<Vec<PlaybookBranch>, String> {
+    pub fn list_branches(
+        conn: &Connection,
+        playbook_id: &str,
+    ) -> Result<Vec<PlaybookBranch>, String> {
         Self::ensure_tables(conn)?;
         let mut stmt = conn
             .prepare("SELECT name, playbook_id, head_version FROM playbook_branches WHERE playbook_id = ?1")
@@ -195,7 +214,8 @@ impl VersionStore {
             })
             .map_err(|e| e.to_string())?;
 
-        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
     }
 
     /// Compute a simple line-by-line diff between two versions.

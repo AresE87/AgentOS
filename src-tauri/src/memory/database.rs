@@ -222,19 +222,17 @@ impl Database {
     }
 
     pub fn get_analytics(&self) -> Result<Value, rusqlite::Error> {
-        let total_tasks: i64 =
-            self.conn
-                .query_row("SELECT COUNT(*) FROM tasks", [], |r| r.get(0))?;
+        let total_tasks: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM tasks", [], |r| r.get(0))?;
         let completed: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM tasks WHERE status='completed'",
             [],
             |r| r.get(0),
         )?;
-        let total_cost: f64 = self.conn.query_row(
-            "SELECT COALESCE(SUM(cost), 0) FROM tasks",
-            [],
-            |r| r.get(0),
-        )?;
+        let total_cost: f64 =
+            self.conn
+                .query_row("SELECT COALESCE(SUM(cost), 0) FROM tasks", [], |r| r.get(0))?;
         let total_tokens: i64 = self.conn.query_row(
             "SELECT COALESCE(SUM(tokens_in + tokens_out), 0) FROM tasks",
             [],
@@ -338,42 +336,91 @@ impl Database {
         };
 
         let total: i64 = self.conn.query_row(
-            &format!("SELECT COUNT(*) FROM tasks WHERE {}", date_filter), [], |r| r.get(0))?;
+            &format!("SELECT COUNT(*) FROM tasks WHERE {}", date_filter),
+            [],
+            |r| r.get(0),
+        )?;
         let completed: i64 = self.conn.query_row(
-            &format!("SELECT COUNT(*) FROM tasks WHERE status='completed' AND {}", date_filter), [], |r| r.get(0))?;
+            &format!(
+                "SELECT COUNT(*) FROM tasks WHERE status='completed' AND {}",
+                date_filter
+            ),
+            [],
+            |r| r.get(0),
+        )?;
         let failed: i64 = self.conn.query_row(
-            &format!("SELECT COUNT(*) FROM tasks WHERE status='failed' AND {}", date_filter), [], |r| r.get(0))?;
+            &format!(
+                "SELECT COUNT(*) FROM tasks WHERE status='failed' AND {}",
+                date_filter
+            ),
+            [],
+            |r| r.get(0),
+        )?;
         let total_cost: f64 = self.conn.query_row(
-            &format!("SELECT COALESCE(SUM(cost), 0) FROM tasks WHERE {}", date_filter), [], |r| r.get(0))?;
+            &format!(
+                "SELECT COALESCE(SUM(cost), 0) FROM tasks WHERE {}",
+                date_filter
+            ),
+            [],
+            |r| r.get(0),
+        )?;
         let total_tokens: i64 = self.conn.query_row(
-            &format!("SELECT COALESCE(SUM(tokens_in + tokens_out), 0) FROM tasks WHERE {}", date_filter), [], |r| r.get(0))?;
+            &format!(
+                "SELECT COALESCE(SUM(tokens_in + tokens_out), 0) FROM tasks WHERE {}",
+                date_filter
+            ),
+            [],
+            |r| r.get(0),
+        )?;
         let avg_latency: f64 = self.conn.query_row(
-            &format!("SELECT COALESCE(AVG(duration_ms), 0) FROM tasks WHERE {}", date_filter), [], |r| r.get(0))?;
+            &format!(
+                "SELECT COALESCE(AVG(duration_ms), 0) FROM tasks WHERE {}",
+                date_filter
+            ),
+            [],
+            |r| r.get(0),
+        )?;
 
-        let success_rate = if total > 0 { (completed as f64 / total as f64) * 100.0 } else { 0.0 };
+        let success_rate = if total > 0 {
+            (completed as f64 / total as f64) * 100.0
+        } else {
+            0.0
+        };
 
         // Cost by provider
-        let mut stmt = self.conn.prepare(
-            &format!("SELECT COALESCE(provider, 'unknown'), SUM(cost) FROM tasks WHERE {} GROUP BY provider", date_filter))?;
-        let cost_by_provider: Vec<Value> = stmt.query_map([], |row| {
-            Ok(json!({ "provider": row.get::<_, String>(0)?, "cost": row.get::<_, f64>(1)? }))
-        })?.filter_map(|r| r.ok()).collect();
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT COALESCE(provider, 'unknown'), SUM(cost) FROM tasks WHERE {} GROUP BY provider",
+            date_filter
+        ))?;
+        let cost_by_provider: Vec<Value> = stmt
+            .query_map([], |row| {
+                Ok(json!({ "provider": row.get::<_, String>(0)?, "cost": row.get::<_, f64>(1)? }))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
 
         // Tasks by day (last 7 days)
         let mut stmt = self.conn.prepare(
             "SELECT date(created_at) as day, COUNT(*) as count
              FROM tasks WHERE date(created_at) >= date('now', '-7 days')
-             GROUP BY date(created_at) ORDER BY day")?;
-        let daily_tasks: Vec<Value> = stmt.query_map([], |row| {
-            Ok(json!({ "day": row.get::<_, String>(0)?, "tasks": row.get::<_, i32>(1)? }))
-        })?.filter_map(|r| r.ok()).collect();
+             GROUP BY date(created_at) ORDER BY day",
+        )?;
+        let daily_tasks: Vec<Value> = stmt
+            .query_map([], |row| {
+                Ok(json!({ "day": row.get::<_, String>(0)?, "tasks": row.get::<_, i32>(1)? }))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
 
         // Tasks by type
         let mut stmt = self.conn.prepare(
             &format!("SELECT COALESCE(task_type, 'unknown'), COUNT(*) FROM tasks WHERE {} GROUP BY task_type", date_filter))?;
-        let tasks_by_type: Vec<Value> = stmt.query_map([], |row| {
-            Ok(json!({ "name": row.get::<_, String>(0)?, "value": row.get::<_, i32>(1)? }))
-        })?.filter_map(|r| r.ok()).collect();
+        let tasks_by_type: Vec<Value> = stmt
+            .query_map([], |row| {
+                Ok(json!({ "name": row.get::<_, String>(0)?, "value": row.get::<_, i32>(1)? }))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
 
         Ok(json!({
             "total_tasks": total,
@@ -398,11 +445,11 @@ impl Database {
              GROUP BY input_text
              HAVING cnt >= ?2
              ORDER BY cnt DESC
-             LIMIT 5")?;
+             LIMIT 5",
+        )?;
 
-        let repeated: Vec<Value> = stmt.query_map(
-            params![format!("-{} days", days), threshold],
-            |row| {
+        let repeated: Vec<Value> = stmt
+            .query_map(params![format!("-{} days", days), threshold], |row| {
                 Ok(json!({
                     "input": row.get::<_, String>(0)?,
                     "count": row.get::<_, i32>(1)?,
@@ -576,7 +623,16 @@ impl Database {
              duration_ms = ?6, agent_name = ?7, model = ?8,
              progress = CASE WHEN ?2 = 'done' THEN 1.0 WHEN ?2 = 'running' THEN 0.5 ELSE 0.0 END
              WHERE id = ?1",
-            params![subtask_id, status, message, output, cost, duration_ms as i64, agent_name, model],
+            params![
+                subtask_id,
+                status,
+                message,
+                output,
+                cost,
+                duration_ms as i64,
+                agent_name,
+                model
+            ],
         )?;
         Ok(())
     }
@@ -736,7 +792,8 @@ impl Database {
     }
 
     pub fn delete_trigger(&self, id: &str) -> Result<(), rusqlite::Error> {
-        self.conn.execute("DELETE FROM triggers WHERE id = ?1", params![id])?;
+        self.conn
+            .execute("DELETE FROM triggers WHERE id = ?1", params![id])?;
         Ok(())
     }
 
@@ -874,7 +931,8 @@ mod tests {
     #[test]
     fn update_task_output() {
         let (db, _) = temp_db();
-        db.create_task_pending("task_p2", "do another thing").unwrap();
+        db.create_task_pending("task_p2", "do another thing")
+            .unwrap();
         db.update_task_output("task_p2", "Result: success").unwrap();
 
         let tasks = db.get_tasks(10).unwrap();
@@ -887,10 +945,31 @@ mod tests {
     #[test]
     fn insert_and_get_task_steps() {
         let (db, _) = temp_db();
-        db.create_task_pending("task_s1", "multi-step task").unwrap();
+        db.create_task_pending("task_s1", "multi-step task")
+            .unwrap();
 
-        db.insert_task_step("task_s1", 1, "run_command", "echo hi", "", "terminal", true, 100).unwrap();
-        db.insert_task_step("task_s1", 2, "click", "click button", "", "screen", true, 50).unwrap();
+        db.insert_task_step(
+            "task_s1",
+            1,
+            "run_command",
+            "echo hi",
+            "",
+            "terminal",
+            true,
+            100,
+        )
+        .unwrap();
+        db.insert_task_step(
+            "task_s1",
+            2,
+            "click",
+            "click button",
+            "",
+            "screen",
+            true,
+            50,
+        )
+        .unwrap();
 
         let steps = db.get_task_steps("task_s1").unwrap();
         let arr = steps.as_array().unwrap();
@@ -907,9 +986,12 @@ mod tests {
         let (db, _) = temp_db();
         db.create_task_pending("task_s2", "ordered steps").unwrap();
         // Insert out of order
-        db.insert_task_step("task_s2", 3, "type", "typing", "", "screen", true, 30).unwrap();
-        db.insert_task_step("task_s2", 1, "click", "first click", "", "screen", true, 10).unwrap();
-        db.insert_task_step("task_s2", 2, "run_command", "cmd", "", "terminal", true, 20).unwrap();
+        db.insert_task_step("task_s2", 3, "type", "typing", "", "screen", true, 30)
+            .unwrap();
+        db.insert_task_step("task_s2", 1, "click", "first click", "", "screen", true, 10)
+            .unwrap();
+        db.insert_task_step("task_s2", 2, "run_command", "cmd", "", "terminal", true, 20)
+            .unwrap();
 
         let steps = db.get_task_steps("task_s2").unwrap();
         let arr = steps.as_array().unwrap();
@@ -934,14 +1016,24 @@ mod tests {
     fn analytics_with_tasks() {
         let (db, _) = temp_db();
         let r1 = LLMResponse {
-            task_id: "t1".into(), content: "ok".into(), model: "haiku".into(),
-            provider: "anthropic".into(), tokens_in: 100, tokens_out: 200,
-            cost: 0.01, duration_ms: 500,
+            task_id: "t1".into(),
+            content: "ok".into(),
+            model: "haiku".into(),
+            provider: "anthropic".into(),
+            tokens_in: 100,
+            tokens_out: 200,
+            cost: 0.01,
+            duration_ms: 500,
         };
         let r2 = LLMResponse {
-            task_id: "t2".into(), content: "ok".into(), model: "haiku".into(),
-            provider: "anthropic".into(), tokens_in: 50, tokens_out: 150,
-            cost: 0.005, duration_ms: 300,
+            task_id: "t2".into(),
+            content: "ok".into(),
+            model: "haiku".into(),
+            provider: "anthropic".into(),
+            tokens_in: 50,
+            tokens_out: 150,
+            cost: 0.005,
+            duration_ms: 300,
         };
         db.insert_task("hello", &r1).unwrap();
         db.insert_task("world", &r2).unwrap();
@@ -966,7 +1058,8 @@ mod tests {
     fn insert_llm_call() {
         let (db, _) = temp_db();
         db.create_task_pending("t_llm", "test llm").unwrap();
-        db.insert_llm_call("t_llm", "anthropic", "haiku", 100, 200, 0.01, 500).unwrap();
+        db.insert_llm_call("t_llm", "anthropic", "haiku", 100, 200, 0.01, 500)
+            .unwrap();
         // No panic = success. The llm_calls table is not directly queried in the current API,
         // but insert_task already creates one, so we verify it doesn't error.
     }
@@ -976,10 +1069,22 @@ mod tests {
     #[test]
     fn create_and_list_triggers() {
         let (db, _) = temp_db();
-        db.create_trigger("tr1", "Morning report", "cron", r#"{"cron":"0 9 * * *"}"#, "Generate daily report")
-            .unwrap();
-        db.create_trigger("tr2", "Hourly check", "cron", r#"{"cron":"0 * * * *"}"#, "Check system status")
-            .unwrap();
+        db.create_trigger(
+            "tr1",
+            "Morning report",
+            "cron",
+            r#"{"cron":"0 9 * * *"}"#,
+            "Generate daily report",
+        )
+        .unwrap();
+        db.create_trigger(
+            "tr2",
+            "Hourly check",
+            "cron",
+            r#"{"cron":"0 * * * *"}"#,
+            "Check system status",
+        )
+        .unwrap();
 
         let triggers = db.get_triggers().unwrap();
         assert_eq!(triggers.len(), 2);
@@ -1009,8 +1114,14 @@ mod tests {
     #[test]
     fn update_trigger() {
         let (db, _) = temp_db();
-        db.create_trigger("tr1", "Old Name", "cron", r#"{"cron":"*/5 * * * *"}"#, "old task")
-            .unwrap();
+        db.create_trigger(
+            "tr1",
+            "Old Name",
+            "cron",
+            r#"{"cron":"*/5 * * * *"}"#,
+            "old task",
+        )
+        .unwrap();
 
         db.update_trigger("tr1", "New Name", r#"{"cron":"*/10 * * * *"}"#, "new task")
             .unwrap();
@@ -1037,9 +1148,13 @@ mod tests {
         db.create_trigger("tr1", "Test", "cron", r#"{"cron":"*/5 * * * *"}"#, "test")
             .unwrap();
 
-        db.update_trigger_last_run("tr1", "2026-03-29T10:00:00Z").unwrap();
+        db.update_trigger_last_run("tr1", "2026-03-29T10:00:00Z")
+            .unwrap();
 
         let triggers = db.get_triggers().unwrap();
-        assert_eq!(triggers[0].last_run, Some("2026-03-29T10:00:00Z".to_string()));
+        assert_eq!(
+            triggers[0].last_run,
+            Some("2026-03-29T10:00:00Z".to_string())
+        );
     }
 }

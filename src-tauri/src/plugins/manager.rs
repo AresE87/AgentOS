@@ -1,7 +1,7 @@
+use super::manifest::{PluginManifest, PluginType};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use super::manifest::{PluginManifest, PluginType};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoadedPlugin {
@@ -131,34 +131,27 @@ impl PluginManager {
         }
 
         // Execute based on entry point extension
-        let ext = entry
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
+        let ext = entry.extension().and_then(|e| e.to_str()).unwrap_or("");
         let output = match ext {
-            "ps1" => {
-                tokio::process::Command::new("powershell")
-                    .args([
-                        "-NoProfile",
-                        "-ExecutionPolicy",
-                        "Bypass",
-                        "-File",
-                        &entry.to_string_lossy(),
-                        input,
-                    ])
-                    .current_dir(&plugin.path)
-                    .output()
-                    .await
-                    .map_err(|e| e.to_string())?
-            }
-            "py" => {
-                tokio::process::Command::new("python")
-                    .args([&entry.to_string_lossy().to_string(), &input.to_string()])
-                    .current_dir(&plugin.path)
-                    .output()
-                    .await
-                    .map_err(|e| e.to_string())?
-            }
+            "ps1" => tokio::process::Command::new("powershell")
+                .args([
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    &entry.to_string_lossy(),
+                    input,
+                ])
+                .current_dir(&plugin.path)
+                .output()
+                .await
+                .map_err(|e| e.to_string())?,
+            "py" => tokio::process::Command::new("python")
+                .args([&entry.to_string_lossy().to_string(), &input.to_string()])
+                .current_dir(&plugin.path)
+                .output()
+                .await
+                .map_err(|e| e.to_string())?,
             _ => {
                 return Err(format!("Unsupported entry point type: .{}", ext));
             }
@@ -194,10 +187,7 @@ impl PluginManager {
 
 fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
     std::fs::create_dir_all(dst).map_err(|e| e.to_string())?;
-    for entry in std::fs::read_dir(src)
-        .map_err(|e| e.to_string())?
-        .flatten()
-    {
+    for entry in std::fs::read_dir(src).map_err(|e| e.to_string())?.flatten() {
         let src_path = entry.path();
         let dst_path = dst.join(entry.file_name());
         if src_path.is_dir() {

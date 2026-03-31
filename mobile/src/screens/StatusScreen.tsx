@@ -8,12 +8,12 @@ import {
   ScrollView,
   Alert,
 } from 'react-native';
-import { getClient, getAgentStatus, sendMessage } from '../api/client';
+import { getClient, getAgentStatus, sendMessage, waitForTaskResult } from '../api/client';
 
 interface AgentStatus {
   online: boolean;
-  tasks_today: number;
-  uptime?: string;
+  tasks_queued: number;
+  api_version?: string;
   version?: string;
 }
 
@@ -35,12 +35,12 @@ export default function StatusScreen() {
       const data = await getAgentStatus(client);
       setStatus({
         online: true,
-        tasks_today: data.tasks_today ?? data.task_count ?? 0,
-        uptime: data.uptime,
+        tasks_queued: data.tasks_queued ?? 0,
+        api_version: data.api_version,
         version: data.version,
       });
     } catch {
-      setStatus({ online: false, tasks_today: 0 });
+      setStatus({ online: false, tasks_queued: 0 });
     } finally {
       setLoading(false);
     }
@@ -54,8 +54,15 @@ export default function StatusScreen() {
     setActionLoading(action.label);
     try {
       const client = await getClient();
-      const result = await sendMessage(client, action.command);
-      Alert.alert(action.label, `Task queued: ${result}`);
+      const queued = await sendMessage(client, action.command);
+      const task = await waitForTaskResult(client, queued.task_id, 15, 1000);
+      Alert.alert(
+        action.label,
+        task.result && task.result.length > 0
+          ? task.result
+          : `Task finished with status: ${task.status}`,
+      );
+      fetchStatus();
     } catch (e: any) {
       Alert.alert('Error', e.message);
     } finally {
@@ -73,9 +80,7 @@ export default function StatusScreen() {
         <View style={styles.statusCard}>
           <View style={styles.statusRow}>
             <View style={[styles.dot, status?.online ? styles.dotOnline : styles.dotOffline]} />
-            <Text style={styles.statusText}>
-              {status?.online ? 'Online' : 'Offline'}
-            </Text>
+            <Text style={styles.statusText}>{status?.online ? 'Online' : 'Offline'}</Text>
             <TouchableOpacity onPress={fetchStatus} style={styles.refreshBtn}>
               <Text style={styles.refreshBtnText}>Refresh</Text>
             </TouchableOpacity>
@@ -84,14 +89,14 @@ export default function StatusScreen() {
           <View style={styles.divider} />
 
           <View style={styles.statRow}>
-            <Text style={styles.statLabel}>Tasks Today</Text>
-            <Text style={styles.statValue}>{status?.tasks_today ?? '—'}</Text>
+            <Text style={styles.statLabel}>Queued Tasks</Text>
+            <Text style={styles.statValue}>{status?.tasks_queued ?? '-'}</Text>
           </View>
 
-          {status?.uptime && (
+          {status?.api_version && (
             <View style={styles.statRow}>
-              <Text style={styles.statLabel}>Uptime</Text>
-              <Text style={styles.statValue}>{status.uptime}</Text>
+              <Text style={styles.statLabel}>API Version</Text>
+              <Text style={styles.statValue}>{status.api_version}</Text>
             </View>
           )}
 

@@ -13,6 +13,7 @@ import {
   PanelLeft,
   Clock,
   ThumbsUp,
+  HandHelping,
 } from 'lucide-react';
 import { useAgent } from '../hooks/useAgent';
 import HomePg from './dashboard/Home';
@@ -25,8 +26,9 @@ import Analytics from './dashboard/Analytics';
 import Developer from './dashboard/Developer';
 import ScheduledTasks from './dashboard/ScheduledTasks';
 import FeedbackInsights from './dashboard/FeedbackInsights';
+import Handoffs from './dashboard/Handoffs';
 
-type Tab = 'home' | 'playbooks' | 'chat' | 'board' | 'mesh' | 'analytics' | 'developer' | 'triggers' | 'settings' | 'feedback';
+type Tab = 'home' | 'playbooks' | 'chat' | 'board' | 'mesh' | 'analytics' | 'developer' | 'triggers' | 'settings' | 'feedback' | 'handoffs';
 
 interface NavItem {
   id: Tab;
@@ -49,6 +51,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'settings', label: 'Settings', icon: Settings, section: 'main' },
   // More section — only pages with real backend support
   { id: 'feedback', label: 'Feedback', icon: ThumbsUp, section: 'more' },
+  { id: 'handoffs', label: 'Handoffs', icon: HandHelping, section: 'more' },
 ];
 
 interface DashboardProps {
@@ -60,7 +63,7 @@ export default function Dashboard({ onResetWizard }: DashboardProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [notifications] = useState(0);
   const [setupIncomplete, setSetupIncomplete] = useState(false);
-  const { getStatus } = useAgent();
+  const { getStatus, getPendingShellInvocation } = useAgent();
 
   // Check if setup is complete (has at least one provider)
   useEffect(() => {
@@ -71,6 +74,16 @@ export default function Dashboard({ onResetWizard }: DashboardProps) {
         }
       })
       .catch(() => setSetupIncomplete(true));
+  }, []);
+
+  useEffect(() => {
+    getPendingShellInvocation()
+      .then((invocation) => {
+        if (invocation) {
+          setActiveTab('developer');
+        }
+      })
+      .catch(() => undefined);
   }, []);
 
   const sidebarWidth = collapsed ? 'w-[52px]' : 'w-[210px]';
@@ -239,6 +252,7 @@ export default function Dashboard({ onResetWizard }: DashboardProps) {
         {activeTab === 'triggers' && <ScheduledTasks />}
         {activeTab === 'settings' && <SettingsPg onResetWizard={onResetWizard} />}
         {activeTab === 'feedback' && <FeedbackInsights />}
+        {activeTab === 'handoffs' && <Handoffs />}
       </main>
     </div>
   );

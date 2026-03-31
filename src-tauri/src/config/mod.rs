@@ -1,5 +1,5 @@
-mod settings;
 mod routing;
+mod settings;
 
+pub use routing::{ModelEntry, RoutingConfig};
 pub use settings::Settings;
-pub use routing::{RoutingConfig, ModelEntry};

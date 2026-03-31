@@ -74,10 +74,21 @@ impl ApprovalManager {
 
         // Critical — destructive / irreversible
         let critical_patterns = [
-            "rm -rf", "rm -r", "rmdir", "format", "mkfs",
-            "drop database", "drop table", "truncate",
-            "shutdown", "reboot", "halt", "poweroff",
-            "dd if=", "fdisk", "wipefs",
+            "rm -rf",
+            "rm -r",
+            "rmdir",
+            "format",
+            "mkfs",
+            "drop database",
+            "drop table",
+            "truncate",
+            "shutdown",
+            "reboot",
+            "halt",
+            "poweroff",
+            "dd if=",
+            "fdisk",
+            "wipefs",
         ];
         for pat in &critical_patterns {
             if cmd.contains(pat) {
@@ -87,10 +98,32 @@ impl ApprovalManager {
 
         // High — system-level changes
         let high_tokens = [
-            "install", "uninstall", "apt", "apt-get", "brew", "yum", "dnf", "pacman",
-            "pip", "npm", "cargo", "systemctl", "service", "chown", "chmod",
-            "useradd", "userdel", "groupadd", "mount", "umount", "iptables",
-            "netsh", "reg", "registry", "schtasks", "sc",
+            "install",
+            "uninstall",
+            "apt",
+            "apt-get",
+            "brew",
+            "yum",
+            "dnf",
+            "pacman",
+            "pip",
+            "npm",
+            "cargo",
+            "systemctl",
+            "service",
+            "chown",
+            "chmod",
+            "useradd",
+            "userdel",
+            "groupadd",
+            "mount",
+            "umount",
+            "iptables",
+            "netsh",
+            "reg",
+            "registry",
+            "schtasks",
+            "sc",
         ];
         if high_tokens.contains(&first_token) {
             return ActionRisk::High;
@@ -102,9 +135,8 @@ impl ApprovalManager {
 
         // Medium — file-mutation operations
         let medium_tokens = [
-            "cp", "mv", "mkdir", "touch", "write", "edit", "sed", "awk",
-            "tee", "rename", "tar", "zip", "unzip", "gzip", "gunzip",
-            "patch", "git", "rsync", "scp", "curl", "wget",
+            "cp", "mv", "mkdir", "touch", "write", "edit", "sed", "awk", "tee", "rename", "tar",
+            "zip", "unzip", "gzip", "gunzip", "patch", "git", "rsync", "scp", "curl", "wget",
         ];
         if medium_tokens.contains(&first_token) {
             return ActionRisk::Medium;
@@ -115,11 +147,7 @@ impl ApprovalManager {
     }
 
     /// Create a new approval request and store it as Pending.
-    pub fn request_approval(
-        &self,
-        description: &str,
-        risk: ActionRisk,
-    ) -> ApprovalRequest {
+    pub fn request_approval(&self, description: &str, risk: ActionRisk) -> ApprovalRequest {
         let id = uuid::Uuid::new_v4().to_string();
         let now = chrono::Utc::now().to_rfc3339();
 
@@ -146,10 +174,15 @@ impl ApprovalManager {
         responder: Option<&str>,
     ) -> Result<ApprovalRequest, String> {
         let mut store = self.requests.lock().unwrap();
-        let req = store.get_mut(id).ok_or_else(|| format!("Approval request '{}' not found", id))?;
+        let req = store
+            .get_mut(id)
+            .ok_or_else(|| format!("Approval request '{}' not found", id))?;
 
         if req.status != ApprovalStatus::Pending {
-            return Err(format!("Request '{}' already resolved as {:?}", id, req.status));
+            return Err(format!(
+                "Request '{}' already resolved as {:?}",
+                id, req.status
+            ));
         }
 
         req.status = status;

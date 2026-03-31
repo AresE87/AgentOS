@@ -43,10 +43,18 @@ pub struct CollabManager {
 
 impl CollabManager {
     pub fn new() -> Self {
-        Self { sessions: Vec::new() }
+        Self {
+            sessions: Vec::new(),
+        }
     }
 
-    pub fn create_session(&mut self, name: String, creator: String, task: String, shared_context: String) -> CollabSession {
+    pub fn create_session(
+        &mut self,
+        name: String,
+        creator: String,
+        task: String,
+        shared_context: String,
+    ) -> CollabSession {
         let session = CollabSession {
             id: uuid::Uuid::new_v4().to_string(),
             name,
@@ -67,8 +75,16 @@ impl CollabManager {
         session
     }
 
-    pub fn join_session(&mut self, session_id: &str, user_id: String, agents: Vec<String>) -> Result<CollabSession, String> {
-        let session = self.sessions.iter_mut().find(|s| s.id == session_id)
+    pub fn join_session(
+        &mut self,
+        session_id: &str,
+        user_id: String,
+        agents: Vec<String>,
+    ) -> Result<CollabSession, String> {
+        let session = self
+            .sessions
+            .iter_mut()
+            .find(|s| s.id == session_id)
             .ok_or_else(|| "Session not found".to_string())?;
         if session.participants.iter().any(|p| p.user_id == user_id) {
             return Err("Already in this session".to_string());
@@ -86,8 +102,17 @@ impl CollabManager {
         self.sessions.iter().collect()
     }
 
-    pub fn share_result(&mut self, session_id: &str, from_user: String, agent_id: String, content: String) -> Result<SharedResult, String> {
-        let session = self.sessions.iter_mut().find(|s| s.id == session_id)
+    pub fn share_result(
+        &mut self,
+        session_id: &str,
+        from_user: String,
+        agent_id: String,
+        content: String,
+    ) -> Result<SharedResult, String> {
+        let session = self
+            .sessions
+            .iter_mut()
+            .find(|s| s.id == session_id)
             .ok_or_else(|| "Session not found".to_string())?;
         let result = SharedResult {
             from_user,

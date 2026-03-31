@@ -62,11 +62,7 @@ impl HRManager {
     }
 
     /// List employees, optionally filtered by department or status.
-    pub fn list_employees(
-        &self,
-        department: Option<&str>,
-        status: Option<&str>,
-    ) -> Vec<&Employee> {
+    pub fn list_employees(&self, department: Option<&str>, status: Option<&str>) -> Vec<&Employee> {
         self.employees
             .iter()
             .filter(|e| {

@@ -1,10 +1,10 @@
 use crate::brain::Gateway;
 use crate::config::Settings;
 use crate::memory::Database;
+use chrono::{Datelike, Timelike, Utc};
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use chrono::{Datelike, Utc, Timelike};
 use tauri::Emitter;
 use tokio::time::{interval, Duration};
 use tracing::{info, warn};
@@ -14,7 +14,7 @@ pub struct Trigger {
     pub id: String,
     pub name: String,
     pub trigger_type: String, // "cron" or "file_watch"
-    pub config: String,       // JSON: {"cron": "*/5 * * * *"} or {"path": "...", "event": "created"}
+    pub config: String, // JSON: {"cron": "*/5 * * * *"} or {"path": "...", "event": "created"}
     pub task_text: String,
     pub enabled: bool,
     pub last_run: Option<String>,
@@ -110,7 +110,8 @@ fn should_run_cron(trigger: &Trigger, now: &chrono::DateTime<Utc>) -> bool {
         return false;
     }
 
-    let (min_expr, hour_expr, _dom, _month, dow_expr) = (parts[0], parts[1], parts[2], parts[3], parts[4]);
+    let (min_expr, hour_expr, _dom, _month, dow_expr) =
+        (parts[0], parts[1], parts[2], parts[3], parts[4]);
 
     // Check if last_run was recent enough to skip
     if let Some(last) = &trigger.last_run {
@@ -151,7 +152,10 @@ fn match_cron_field(expr: &str, value: u32) -> bool {
     // Support comma-separated values: "1,3,5"
     if expr.contains(',') {
         return expr.split(',').any(|part| {
-            part.trim().parse::<u32>().map(|n| n == value).unwrap_or(false)
+            part.trim()
+                .parse::<u32>()
+                .map(|n| n == value)
+                .unwrap_or(false)
         });
     }
     // Support ranges: "1-5"

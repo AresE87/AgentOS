@@ -1,46 +1,65 @@
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
-/// R92: Weight delta for federated learning
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WeightDelta {
-    pub layer_name: String,
-    pub delta: Vec<f64>,
-    pub noise_added: bool,
+pub struct FederatedSignal {
+    pub key: String,
+    pub value: f64,
+    pub sample_count: u64,
+    pub privacy_applied: bool,
 }
 
-/// R92: Federated learning configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FederatedPayload {
+    pub node_id: String,
+    pub model_name: String,
+    pub generated_at: String,
+    pub round: u64,
+    pub signals: Vec<FederatedSignal>,
+    pub excluded_fields: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FederatedConfig {
     pub server_url: String,
     pub model_name: String,
     pub privacy_budget: f64,
     pub min_samples: u32,
+    pub node_id: String,
 }
 
 impl Default for FederatedConfig {
     fn default() -> Self {
         Self {
             server_url: "http://localhost:9090".into(),
-            model_name: "default".into(),
+            model_name: "task-routing".into(),
             privacy_budget: 1.0,
-            min_samples: 100,
+            min_samples: 25,
+            node_id: format!("node-{}", uuid::Uuid::new_v4().simple()),
         }
     }
 }
 
-/// R92: Client for federated learning
 pub struct FederatedClient {
+    client: Client,
     config: FederatedConfig,
     last_round: u64,
     status: String,
+    last_payload: Option<FederatedPayload>,
 }
 
 impl FederatedClient {
     pub fn new() -> Self {
         Self {
+            client: Client::builder()
+                .timeout(Duration::from_secs(10))
+                .build()
+                .expect("reqwest client"),
             config: FederatedConfig::default(),
             last_round: 0,
             status: "idle".into(),
+            last_payload: None,
         }
     }
 
@@ -52,60 +71,65 @@ impl FederatedClient {
         &self.config
     }
 
-    /// Stub: train locally on data samples and return weight deltas
-    pub fn train_local(&mut self, _data: &[Vec<f64>]) -> Vec<WeightDelta> {
-        self.status = "training".into();
+    pub fn build_payload(&mut self, metrics: &[(&str, f64, u64)]) -> FederatedPayload {
+        self.status = "aggregating".into();
         self.last_round += 1;
+        let epsilon = self.config.privacy_budget.max(0.1);
+        let noise = 1.0 / epsilon * 0.001;
+        let signals = metrics
+            .iter()
+            .filter(|(_, _, sample_count)| *sample_count as u32 >= self.config.min_samples)
+            .map(|(key, value, sample_count)| FederatedSignal {
+                key: (*key).to_string(),
+                value: value + noise,
+                sample_count: *sample_count,
+                privacy_applied: true,
+            })
+            .collect::<Vec<_>>();
 
-        // Stub: produce dummy weight deltas
-        let deltas = vec![
-            WeightDelta {
-                layer_name: "dense_1".into(),
-                delta: vec![0.001, -0.002, 0.0015],
-                noise_added: false,
-            },
-            WeightDelta {
-                layer_name: "dense_2".into(),
-                delta: vec![-0.0005, 0.003],
-                noise_added: false,
-            },
-        ];
-
-        self.status = "trained".into();
-        deltas
+        let payload = FederatedPayload {
+            node_id: self.config.node_id.clone(),
+            model_name: self.config.model_name.clone(),
+            generated_at: chrono::Utc::now().to_rfc3339(),
+            round: self.last_round,
+            signals,
+            excluded_fields: vec![
+                "input_text".to_string(),
+                "output_text".to_string(),
+                "email_body".to_string(),
+                "raw_prompt".to_string(),
+            ],
+        };
+        self.last_payload = Some(payload.clone());
+        self.status = "ready_to_submit".into();
+        payload
     }
 
-    /// Add differential privacy noise to weight deltas
-    pub fn add_privacy_noise(&self, deltas: Vec<WeightDelta>, epsilon: f64) -> Vec<WeightDelta> {
-        let noise_scale = 1.0 / epsilon;
-        deltas.into_iter().map(|mut d| {
-            d.delta = d.delta.iter().map(|v| {
-                // Simple Laplace-like noise stub
-                v + noise_scale * 0.001
-            }).collect();
-            d.noise_added = true;
-            d
-        }).collect()
-    }
+    pub async fn submit_payload(
+        &mut self,
+        payload: &FederatedPayload,
+    ) -> Result<serde_json::Value, String> {
+        self.status = "submitting".into();
+        let url = format!("{}/api/v1/federated/submit", self.config.server_url.trim_end_matches('/'));
+        let response = self
+            .client
+            .post(url)
+            .json(payload)
+            .send()
+            .await
+            .map_err(|e| format!("Federated submit error: {}", e))?;
 
-    /// Submit deltas to the federated server (stub)
-    pub fn submit_deltas(&self, deltas: &[WeightDelta]) -> Result<serde_json::Value, String> {
-        // In production this would POST to self.config.server_url
-        Ok(serde_json::json!({
-            "ok": true,
-            "round": self.last_round,
-            "deltas_count": deltas.len(),
-            "server": self.config.server_url,
-        }))
-    }
-
-    /// Get the global model from the server (stub)
-    pub fn get_global_model(&self) -> Result<serde_json::Value, String> {
-        Ok(serde_json::json!({
-            "model_name": self.config.model_name,
-            "round": self.last_round,
-            "status": "available",
-        }))
+        let status = response.status();
+        let parsed = response
+            .json::<serde_json::Value>()
+            .await
+            .unwrap_or_else(|_| serde_json::json!({ "ok": status.is_success() }));
+        if !status.is_success() {
+            self.status = "submit_failed".into();
+            return Err(format!("Federated submit failed with status {}", status));
+        }
+        self.status = "submitted".into();
+        Ok(parsed)
     }
 
     pub fn get_status(&self) -> serde_json::Value {
@@ -113,6 +137,73 @@ impl FederatedClient {
             "status": self.status,
             "last_round": self.last_round,
             "config": self.config,
+            "last_payload": self.last_payload,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+
+    fn start_mock_server() -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = [0u8; 4096];
+                let _ = stream.read(&mut buf);
+                let body = r#"{"ok":true,"accepted":2}"#;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(response.as_bytes());
+            }
+        });
+        format!("http://{}", addr)
+    }
+
+    #[test]
+    fn build_payload_excludes_sensitive_fields_and_applies_privacy() {
+        let mut client = FederatedClient::new();
+        client.configure(FederatedConfig {
+            min_samples: 10,
+            ..FederatedConfig::default()
+        });
+
+        let payload = client.build_payload(&[
+            ("task.success_rate", 0.92, 48),
+            ("task.avg_cost", 0.04, 48),
+            ("raw_prompt", 99.0, 48),
+            ("tiny_sample", 1.0, 2),
+        ]);
+
+        assert_eq!(payload.signals.len(), 3);
+        assert!(payload.signals.iter().all(|signal| signal.privacy_applied));
+        assert!(payload
+            .excluded_fields
+            .iter()
+            .any(|field| field == "input_text"));
+    }
+
+    #[tokio::test]
+    async fn submit_payload_syncs_to_server() {
+        let mut client = FederatedClient::new();
+        client.configure(FederatedConfig {
+            server_url: start_mock_server(),
+            min_samples: 1,
+            ..FederatedConfig::default()
+        });
+        let payload = client.build_payload(&[("task.success_rate", 0.88, 12)]);
+        let result = client.submit_payload(&payload).await.unwrap();
+
+        assert_eq!(result["ok"], true);
+        assert_eq!(result["accepted"], 2);
+        assert_eq!(client.get_status()["status"], "submitted");
     }
 }

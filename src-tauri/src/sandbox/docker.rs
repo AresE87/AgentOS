@@ -38,11 +38,7 @@ pub struct SandboxManager;
 impl SandboxManager {
     /// Check if Docker CLI is available and the daemon is running.
     pub async fn is_docker_available() -> bool {
-        match Command::new("docker")
-            .arg("version")
-            .output()
-            .await
-        {
+        match Command::new("docker").arg("version").output().await {
             Ok(output) => output.status.success(),
             Err(_) => false,
         }

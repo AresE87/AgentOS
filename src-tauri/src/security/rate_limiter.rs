@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
 #[derive(Clone)]

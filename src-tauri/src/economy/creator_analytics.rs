@@ -49,11 +49,13 @@ impl CreatorAnalyticsEngine {
         let total_downloads: u64 = self.download_trends.iter().map(|d| d.downloads).sum();
 
         // Find top product by revenue
-        let mut product_rev: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+        let mut product_rev: std::collections::HashMap<String, f64> =
+            std::collections::HashMap::new();
         for entry in &self.revenue_history {
             *product_rev.entry(entry.product_name.clone()).or_default() += entry.gross;
         }
-        let top_product = product_rev.into_iter()
+        let top_product = product_rev
+            .into_iter()
             .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(name, _)| name);
 

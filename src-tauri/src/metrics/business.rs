@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use rusqlite::Connection;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BusinessMetrics {
@@ -22,7 +22,11 @@ pub struct BusinessMetrics {
 impl BusinessMetrics {
     pub fn calculate(conn: &Connection) -> Result<Self, String> {
         let total_tasks = Self::count(conn, "tasks", None)?;
-        let tasks_this_month = Self::count(conn, "tasks", Some("created_at > datetime('now', '-30 days')"))?;
+        let tasks_this_month = Self::count(
+            conn,
+            "tasks",
+            Some("created_at > datetime('now', '-30 days')"),
+        )?;
         let tasks_last_month = Self::count(conn, "tasks", Some("created_at > datetime('now', '-60 days') AND created_at <= datetime('now', '-30 days')"))?;
 
         let growth_rate = if tasks_last_month > 0 {
@@ -32,19 +36,28 @@ impl BusinessMetrics {
         };
 
         let total_users = Self::count(conn, "api_keys", None)?;
-        let active_users = Self::count(conn, "api_keys", Some("last_used > datetime('now', '-30 days')"))?;
+        let active_users = Self::count(
+            conn,
+            "api_keys",
+            Some("last_used > datetime('now', '-30 days')"),
+        )?;
 
         let total_cost: f64 = if Self::table_exists(conn, "tasks")? {
             conn.query_row(
                 "SELECT COALESCE(SUM(CAST(cost AS REAL)), 0) FROM tasks",
                 [],
                 |row| row.get(0),
-            ).unwrap_or(0.0)
+            )
+            .unwrap_or(0.0)
         } else {
             0.0
         };
 
-        let avg_cost = if total_tasks > 0 { total_cost / total_tasks as f64 } else { 0.0 };
+        let avg_cost = if total_tasks > 0 {
+            total_cost / total_tasks as f64
+        } else {
+            0.0
+        };
 
         let positive_feedback = Self::count(conn, "feedback", Some("rating > 0"))?;
         let total_feedback = Self::count(conn, "feedback", None)?;
@@ -81,7 +94,8 @@ impl BusinessMetrics {
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
             [table],
             |row| row.get::<_, i64>(0).map(|n| n > 0),
-        ).map_err(|e| e.to_string())
+        )
+        .map_err(|e| e.to_string())
     }
 
     fn count(conn: &Connection, table: &str, where_clause: Option<&str>) -> Result<u64, String> {

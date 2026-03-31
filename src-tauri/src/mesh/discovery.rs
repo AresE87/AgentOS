@@ -55,11 +55,7 @@ fn parse_announce(msg: &str, sender_ip: &str) -> Option<MeshNode> {
             status: "online".to_string(),
             last_seen: chrono::Utc::now().to_rfc3339(),
             address: format!("{}:{}", sender_ip, mesh_port),
-            capabilities: vec![
-                "chat".to_string(),
-                "screen".to_string(),
-                "cli".to_string(),
-            ],
+            capabilities: vec!["chat".to_string(), "screen".to_string(), "cli".to_string()],
             mesh_port,
         })
     } else {
@@ -115,11 +111,7 @@ pub async fn start_discovery(node_name: &str, mesh_port: u16) -> Result<(), Stri
         status: "online".to_string(),
         last_seen: chrono::Utc::now().to_rfc3339(),
         address: format!("127.0.0.1:{}", mesh_port),
-        capabilities: vec![
-            "chat".to_string(),
-            "screen".to_string(),
-            "cli".to_string(),
-        ],
+        capabilities: vec!["chat".to_string(), "screen".to_string(), "cli".to_string()],
         mesh_port,
     };
     add_node(self_node.clone());

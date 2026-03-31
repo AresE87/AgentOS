@@ -57,3 +57,17 @@ impl PlatformProvider for WindowsPlatform {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn windows_platform_reports_honest_capabilities() {
+        let platform = WindowsPlatform::new();
+        assert_eq!(platform.name(), "windows");
+        assert_eq!(platform.default_shell(), "powershell");
+        assert!(platform.can_capture_screen());
+        assert!(platform.can_control_input());
+    }
+}

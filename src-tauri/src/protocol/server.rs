@@ -86,9 +86,7 @@ async fn handle_message(
     }
 }
 
-async fn get_capabilities(
-    State(state): State<Arc<AAPServerState>>,
-) -> Json<serde_json::Value> {
+async fn get_capabilities(State(state): State<Arc<AAPServerState>>) -> Json<serde_json::Value> {
     Json(serde_json::json!({
         "node_id": state.node_id,
         "node_name": state.node_name,

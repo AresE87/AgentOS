@@ -12,12 +12,26 @@ pub async fn launch_app(
 
     let output = tokio::task::spawn_blocking(move || {
         // Sanitize: remove any characters that could break out of the argument
-        let safe_prog: String = prog.chars()
-            .filter(|c| c.is_alphanumeric() || *c == '.' || *c == '-' || *c == '_' || *c == '\\' || *c == '/' || *c == ':' || *c == ' ')
+        let safe_prog: String = prog
+            .chars()
+            .filter(|c| {
+                c.is_alphanumeric()
+                    || *c == '.'
+                    || *c == '-'
+                    || *c == '_'
+                    || *c == '\\'
+                    || *c == '/'
+                    || *c == ':'
+                    || *c == ' '
+            })
             .collect();
         std::process::Command::new("powershell.exe")
-            .args(["-NoProfile", "-NonInteractive", "-Command",
-                   &format!("Start-Process -FilePath '{}'", safe_prog)])
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                &format!("Start-Process -FilePath '{}'", safe_prog),
+            ])
             .creation_flags(0x08000000) // hide the powershell window itself
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())

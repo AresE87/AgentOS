@@ -28,10 +28,18 @@ pub struct EscrowManager {
 
 impl EscrowManager {
     pub fn new() -> Self {
-        Self { transactions: Vec::new() }
+        Self {
+            transactions: Vec::new(),
+        }
     }
 
-    pub fn create_escrow(&mut self, payer: String, payee: String, amount: f64, task_description: String) -> EscrowTransaction {
+    pub fn create_escrow(
+        &mut self,
+        payer: String,
+        payee: String,
+        amount: f64,
+        task_description: String,
+    ) -> EscrowTransaction {
         let now = chrono::Utc::now().to_rfc3339();
         let tx = EscrowTransaction {
             id: uuid::Uuid::new_v4().to_string(),
@@ -49,7 +57,10 @@ impl EscrowManager {
     }
 
     pub fn release(&mut self, tx_id: &str) -> Result<EscrowTransaction, String> {
-        let tx = self.transactions.iter_mut().find(|t| t.id == tx_id)
+        let tx = self
+            .transactions
+            .iter_mut()
+            .find(|t| t.id == tx_id)
             .ok_or_else(|| "Transaction not found".to_string())?;
         if tx.status != EscrowStatus::Held {
             return Err(format!("Cannot release: status is {:?}", tx.status));
@@ -60,7 +71,10 @@ impl EscrowManager {
     }
 
     pub fn refund(&mut self, tx_id: &str) -> Result<EscrowTransaction, String> {
-        let tx = self.transactions.iter_mut().find(|t| t.id == tx_id)
+        let tx = self
+            .transactions
+            .iter_mut()
+            .find(|t| t.id == tx_id)
             .ok_or_else(|| "Transaction not found".to_string())?;
         if tx.status != EscrowStatus::Held && tx.status != EscrowStatus::Disputed {
             return Err(format!("Cannot refund: status is {:?}", tx.status));
@@ -71,7 +85,10 @@ impl EscrowManager {
     }
 
     pub fn dispute(&mut self, tx_id: &str, reason: String) -> Result<EscrowTransaction, String> {
-        let tx = self.transactions.iter_mut().find(|t| t.id == tx_id)
+        let tx = self
+            .transactions
+            .iter_mut()
+            .find(|t| t.id == tx_id)
             .ok_or_else(|| "Transaction not found".to_string())?;
         if tx.status != EscrowStatus::Held {
             return Err(format!("Cannot dispute: status is {:?}", tx.status));
@@ -87,8 +104,9 @@ impl EscrowManager {
     }
 
     pub fn list_transactions(&self, user_id: Option<&str>) -> Vec<&EscrowTransaction> {
-        self.transactions.iter().filter(|t| {
-            user_id.map_or(true, |uid| t.payer == uid || t.payee == uid)
-        }).collect()
+        self.transactions
+            .iter()
+            .filter(|t| user_id.map_or(true, |uid| t.payer == uid || t.payee == uid))
+            .collect()
     }
 }

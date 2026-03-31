@@ -1,3 +1,3 @@
 pub mod engine;
 
-pub use engine::{TranslationEngine, TranslationRequest, TranslationResult, LanguageInfo};
+pub use engine::{LanguageInfo, TranslationEngine, TranslationRequest, TranslationResult};

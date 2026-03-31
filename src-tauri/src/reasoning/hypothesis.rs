@@ -65,7 +65,12 @@ impl HypothesisEngine {
     }
 
     /// Update hypothesis probability with new evidence
-    pub fn update_probability(&mut self, id: &str, evidence: &str, supports: bool) -> Option<Hypothesis> {
+    pub fn update_probability(
+        &mut self,
+        id: &str,
+        evidence: &str,
+        supports: bool,
+    ) -> Option<Hypothesis> {
         let h = self.hypotheses.get_mut(id)?;
         if supports {
             h.supporting_evidence.push(evidence.to_string());

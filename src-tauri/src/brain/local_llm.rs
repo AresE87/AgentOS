@@ -150,7 +150,10 @@ impl LocalLLMProvider {
     /// Kicks off a non-blocking model pull (`/api/pull`, `stream: false`).
     pub async fn pull_model(&self, model: &str) -> Result<(), String> {
         let url = format!("{}/api/pull", self.base_url);
-        let body = OllamaPullRequest { name: model, stream: false };
+        let body = OllamaPullRequest {
+            name: model,
+            stream: false,
+        };
 
         let resp = self
             .client

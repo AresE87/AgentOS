@@ -57,8 +57,8 @@ impl PackageManager {
     pub fn install(&self, aosp_path: &Path, package_id: &str) -> Result<InstalledPackage, String> {
         use std::io::Read;
 
-        let file = std::fs::File::open(aosp_path)
-            .map_err(|e| format!("Cannot open .aosp file: {}", e))?;
+        let file =
+            std::fs::File::open(aosp_path).map_err(|e| format!("Cannot open .aosp file: {}", e))?;
         let mut archive =
             zip::ZipArchive::new(file).map_err(|e| format!("Invalid ZIP archive: {}", e))?;
 
@@ -73,21 +73,14 @@ impl PackageManager {
                 .map_err(|e| format!("Cannot read metadata.json: {}", e))?;
             let meta: serde_json::Value = serde_json::from_str(&contents)
                 .map_err(|e| format!("Invalid metadata.json: {}", e))?;
-            let name = meta["name"]
-                .as_str()
-                .unwrap_or(package_id)
-                .to_string();
-            let version = meta["version"]
-                .as_str()
-                .unwrap_or("1.0.0")
-                .to_string();
+            let name = meta["name"].as_str().unwrap_or(package_id).to_string();
+            let version = meta["version"].as_str().unwrap_or("1.0.0").to_string();
             (name, version)
         };
 
         // Extract to playbooks_dir/package_id/
         let dest = self.playbooks_dir.join(package_id);
-        std::fs::create_dir_all(&dest)
-            .map_err(|e| format!("Cannot create install dir: {}", e))?;
+        std::fs::create_dir_all(&dest).map_err(|e| format!("Cannot create install dir: {}", e))?;
 
         // Re-open archive since we consumed the first borrow
         let file2 = std::fs::File::open(aosp_path)

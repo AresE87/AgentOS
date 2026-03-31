@@ -1,6 +1,6 @@
-use serde::{Deserialize, Serialize};
-use rusqlite::Connection;
 use chrono::Utc;
+use rusqlite::Connection;
+use serde::{Deserialize, Serialize};
 
 // ── Data structures ──────────────────────────────────────────────────
 
@@ -17,7 +17,7 @@ pub struct FineTuneConfig {
     pub base_model: String,
     pub epochs: u32,
     pub learning_rate: f64,
-    pub method: String,       // "lora" or "full"
+    pub method: String, // "lora" or "full"
     pub dataset_path: String,
 }
 
@@ -47,8 +47,9 @@ impl FineTuneManager {
                 status TEXT NOT NULL DEFAULT 'preparing',
                 progress REAL NOT NULL DEFAULT 0.0,
                 created_at TEXT NOT NULL
-            )"
-        ).map_err(|e| e.to_string())
+            )",
+        )
+        .map_err(|e| e.to_string())
     }
 
     /// Export training data from task history into instruction/input/output pairs.
@@ -58,28 +59,33 @@ impl FineTuneManager {
         let mut stmt = conn
             .prepare(
                 "SELECT task_type, complexity, model_used, success, duration_ms
-                 FROM training_records ORDER BY created_at DESC LIMIT 500"
+                 FROM training_records ORDER BY created_at DESC LIMIT 500",
             )
             .map_err(|e| e.to_string())?;
 
-        let rows = stmt.query_map([], |row| {
-            let task_type: String = row.get(0)?;
-            let complexity: String = row.get(1)?;
-            let model_used: String = row.get(2)?;
-            let success: bool = row.get(3)?;
-            let duration_ms: i64 = row.get(4)?;
+        let rows = stmt
+            .query_map([], |row| {
+                let task_type: String = row.get(0)?;
+                let complexity: String = row.get(1)?;
+                let model_used: String = row.get(2)?;
+                let success: bool = row.get(3)?;
+                let duration_ms: i64 = row.get(4)?;
 
-            Ok(TrainingPair {
-                instruction: format!("Execute a {} task with {} complexity", task_type, complexity),
-                input: format!("model={}, timeout={}ms", model_used, duration_ms),
-                output: if success {
-                    "Task completed successfully".to_string()
-                } else {
-                    "Task failed — retry with adjusted parameters".to_string()
-                },
-                category: task_type,
+                Ok(TrainingPair {
+                    instruction: format!(
+                        "Execute a {} task with {} complexity",
+                        task_type, complexity
+                    ),
+                    input: format!("model={}, timeout={}ms", model_used, duration_ms),
+                    output: if success {
+                        "Task completed successfully".to_string()
+                    } else {
+                        "Task failed — retry with adjusted parameters".to_string()
+                    },
+                    category: task_type,
+                })
             })
-        }).map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?;
 
         let mut pairs = Vec::new();
         for row in rows {
@@ -105,7 +111,10 @@ impl FineTuneManager {
 
         // Validate method
         if config.method != "lora" && config.method != "full" {
-            return Err(format!("Invalid method '{}': must be 'lora' or 'full'", config.method));
+            return Err(format!(
+                "Invalid method '{}': must be 'lora' or 'full'",
+                config.method
+            ));
         }
 
         let job = FineTuneJob {
@@ -127,7 +136,10 @@ impl FineTuneManager {
 
         tracing::info!(
             "Fine-tune job created: id={}, model={}, method={}, epochs={}",
-            id, config.base_model, config.method, config.epochs
+            id,
+            config.base_model,
+            config.method,
+            config.epochs
         );
 
         Ok(job)
@@ -154,7 +166,8 @@ impl FineTuneManager {
                 progress: row.get(7)?,
                 created_at: row.get(8)?,
             })
-        }).map_err(|e| format!("Fine-tune job not found: {}", e))
+        })
+        .map_err(|e| format!("Fine-tune job not found: {}", e))
     }
 
     pub fn list_jobs(conn: &Connection) -> Result<Vec<FineTuneJob>, String> {
@@ -164,21 +177,23 @@ impl FineTuneManager {
             .prepare("SELECT id, base_model, epochs, learning_rate, method, dataset_path, status, progress, created_at FROM finetune_jobs ORDER BY created_at DESC")
             .map_err(|e| e.to_string())?;
 
-        let rows = stmt.query_map([], |row| {
-            Ok(FineTuneJob {
-                id: row.get(0)?,
-                config: FineTuneConfig {
-                    base_model: row.get(1)?,
-                    epochs: row.get::<_, u32>(2)?,
-                    learning_rate: row.get(3)?,
-                    method: row.get(4)?,
-                    dataset_path: row.get(5)?,
-                },
-                status: row.get(6)?,
-                progress: row.get(7)?,
-                created_at: row.get(8)?,
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(FineTuneJob {
+                    id: row.get(0)?,
+                    config: FineTuneConfig {
+                        base_model: row.get(1)?,
+                        epochs: row.get::<_, u32>(2)?,
+                        learning_rate: row.get(3)?,
+                        method: row.get(4)?,
+                        dataset_path: row.get(5)?,
+                    },
+                    status: row.get(6)?,
+                    progress: row.get(7)?,
+                    created_at: row.get(8)?,
+                })
             })
-        }).map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?;
 
         let mut jobs = Vec::new();
         for row in rows {

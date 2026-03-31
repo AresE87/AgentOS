@@ -19,8 +19,7 @@ impl Benchmarks {
         // Benchmark: JSON serialization (should be <1ms per iteration)
         let start = Instant::now();
         for _ in 0..1000 {
-            let _ =
-                serde_json::to_string(&serde_json::json!({"test": "value", "num": 42}));
+            let _ = serde_json::to_string(&serde_json::json!({"test": "value", "num": 42}));
         }
         let dur = start.elapsed().as_secs_f64() * 1000.0 / 1000.0;
         results.push(BenchmarkResult {

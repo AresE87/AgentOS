@@ -1,5 +1,5 @@
-use super::roi::ROIReport;
 use super::heatmap::HeatmapData;
+use super::roi::ROIReport;
 
 pub struct AnalyticsExporter;
 

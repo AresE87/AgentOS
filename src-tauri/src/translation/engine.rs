@@ -52,13 +52,14 @@ impl TranslationEngine {
     }
 
     /// Translate text from source to target language using the LLM Gateway.
-    pub async fn translate(
-        &self,
-        req: &TranslationRequest,
-    ) -> Result<TranslationResult, String> {
+    pub async fn translate(&self, req: &TranslationRequest) -> Result<TranslationResult, String> {
         // Validate languages
-        let src_valid = SUPPORTED_LANGUAGES.iter().any(|(c, _)| *c == req.source_lang);
-        let tgt_valid = SUPPORTED_LANGUAGES.iter().any(|(c, _)| *c == req.target_lang);
+        let src_valid = SUPPORTED_LANGUAGES
+            .iter()
+            .any(|(c, _)| *c == req.source_lang);
+        let tgt_valid = SUPPORTED_LANGUAGES
+            .iter()
+            .any(|(c, _)| *c == req.target_lang);
 
         if !src_valid {
             return Err(format!("Unsupported source language: {}", req.source_lang));
@@ -123,11 +124,21 @@ impl TranslationEngine {
             }
         }
 
-        if has_hangul { return "ko".to_string(); }
-        if has_cjk { return "zh".to_string(); }
-        if has_cyrillic { return "ru".to_string(); }
-        if has_arabic { return "ar".to_string(); }
-        if has_devanagari { return "hi".to_string(); }
+        if has_hangul {
+            return "ko".to_string();
+        }
+        if has_cjk {
+            return "zh".to_string();
+        }
+        if has_cyrillic {
+            return "ru".to_string();
+        }
+        if has_arabic {
+            return "ar".to_string();
+        }
+        if has_devanagari {
+            return "hi".to_string();
+        }
 
         // Latin-script heuristics based on common words/patterns
         let lower = text.to_lowercase();

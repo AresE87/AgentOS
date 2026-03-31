@@ -1,3 +1,6 @@
 pub mod manager;
 
-pub use manager::{AccessibilityManager, AccessibilityConfig};
+pub use manager::{
+    AccessibilityActionKind, AccessibilityCommandPlan, AccessibilityConfig,
+    AccessibilityManager, AccessibilityScreenSummary,
+};

@@ -34,14 +34,13 @@ pub async fn execute(
         AgentAction::RunCommand { command, shell } => {
             // R36: Sandbox validation before execution
             let sandbox = security::sandbox::CommandSandbox::new();
-            sandbox.validate_command(command)
+            sandbox
+                .validate_command(command)
                 .map_err(|e| format!("Sandbox blocked: {}", e))?;
 
             // Try Terminal execution
             let result = match shell {
-                ShellType::PowerShell => {
-                    hands::cli::run_powershell(command, cli_timeout).await
-                }
+                ShellType::PowerShell => hands::cli::run_powershell(command, cli_timeout).await,
                 ShellType::Cmd => hands::cli::run_cmd(command, cli_timeout).await,
             };
 
@@ -61,9 +60,7 @@ pub async fn execute(
             }
         }
 
-        AgentAction::Click { x, y } => {
-            execute_screen_action(|| hands::input::click(*x, *y), start)
-        }
+        AgentAction::Click { x, y } => execute_screen_action(|| hands::input::click(*x, *y), start),
         AgentAction::DoubleClick { x, y } => {
             execute_screen_action(|| hands::input::double_click(*x, *y), start)
         }
@@ -109,10 +106,7 @@ pub async fn execute(
     }
 }
 
-fn execute_screen_action<F>(
-    f: F,
-    start: Instant,
-) -> Result<ExecutionResult, String>
+fn execute_screen_action<F>(f: F, start: Instant) -> Result<ExecutionResult, String>
 where
     F: FnOnce() -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
 {

@@ -1,14 +1,14 @@
-use serde::{Serialize, Deserialize};
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
-use chrono::Utc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogEntry {
     pub timestamp: String,
-    pub level: String,      // "info", "warn", "error", "debug"
-    pub module: String,     // "brain", "pipeline", "mesh", etc.
+    pub level: String,  // "info", "warn", "error", "debug"
+    pub module: String, // "brain", "pipeline", "mesh", etc.
     pub message: String,
     pub trace_id: Option<String>,
     pub metadata: Option<serde_json::Value>,
@@ -16,14 +16,18 @@ pub struct LogEntry {
 
 pub struct StructuredLogger {
     log_dir: PathBuf,
-    max_file_size: u64,    // bytes, default 10MB
-    max_files: usize,      // default 5 rotated files
+    max_file_size: u64, // bytes, default 10MB
+    max_files: usize,   // default 5 rotated files
 }
 
 impl StructuredLogger {
     pub fn new(log_dir: PathBuf) -> Self {
         std::fs::create_dir_all(&log_dir).ok();
-        Self { log_dir, max_file_size: 10 * 1024 * 1024, max_files: 5 }
+        Self {
+            log_dir,
+            max_file_size: 10 * 1024 * 1024,
+            max_files: 5,
+        }
     }
 
     pub fn log(
@@ -45,11 +49,7 @@ impl StructuredLogger {
 
         if let Ok(json) = serde_json::to_string(&entry) {
             let log_file = self.log_dir.join("agentos.log");
-            if let Ok(mut file) = OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&log_file)
-            {
+            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_file) {
                 writeln!(file, "{}", json).ok();
 
                 // Check rotation

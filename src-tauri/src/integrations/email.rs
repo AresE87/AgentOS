@@ -31,8 +31,8 @@ pub struct EmailMessage {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmailTriage {
-    pub priority: String,   // "high" | "medium" | "low"
-    pub category: String,   // "action" | "info" | "spam"
+    pub priority: String, // "high" | "medium" | "low"
+    pub category: String, // "action" | "info" | "spam"
     pub suggested_action: String,
     pub draft_reply: Option<String>,
 }
@@ -156,7 +156,10 @@ impl GmailProvider {
         folder: &str,
         limit: usize,
     ) -> Result<Vec<EmailMessage>, String> {
-        let token = self.access_token.as_ref().ok_or("Gmail not authenticated")?;
+        let token = self
+            .access_token
+            .as_ref()
+            .ok_or("Gmail not authenticated")?;
 
         // Map common folder names to Gmail label IDs
         let folder_upper = folder.to_uppercase();
@@ -215,7 +218,10 @@ impl GmailProvider {
 
     /// Get a single message by ID
     pub async fn get_message(&self, msg_id: &str) -> Result<EmailMessage, String> {
-        let token = self.access_token.as_ref().ok_or("Gmail not authenticated")?;
+        let token = self
+            .access_token
+            .as_ref()
+            .ok_or("Gmail not authenticated")?;
 
         let url = format!("{}/messages/{}?format=full", GMAIL_API, msg_id);
 
@@ -243,7 +249,10 @@ impl GmailProvider {
         subject: &str,
         email_body: &str,
     ) -> Result<EmailMessage, String> {
-        let token = self.access_token.as_ref().ok_or("Gmail not authenticated")?;
+        let token = self
+            .access_token
+            .as_ref()
+            .ok_or("Gmail not authenticated")?;
 
         // Build RFC2822 message
         let to_str = to.join(", ");
@@ -294,7 +303,10 @@ impl GmailProvider {
 
     /// Search Gmail messages
     pub async fn search(&self, query: &str) -> Result<Vec<EmailMessage>, String> {
-        let token = self.access_token.as_ref().ok_or("Gmail not authenticated")?;
+        let token = self
+            .access_token
+            .as_ref()
+            .ok_or("Gmail not authenticated")?;
 
         let url = format!(
             "{}/messages?q={}&maxResults=20",
@@ -337,7 +349,10 @@ impl GmailProvider {
 
     /// Mark a message as read (remove UNREAD label)
     pub async fn mark_read(&self, msg_id: &str) -> Result<bool, String> {
-        let token = self.access_token.as_ref().ok_or("Gmail not authenticated")?;
+        let token = self
+            .access_token
+            .as_ref()
+            .ok_or("Gmail not authenticated")?;
 
         let url = format!("{}/messages/{}/modify", GMAIL_API, msg_id);
         let modify_body = serde_json::json!({
@@ -364,7 +379,10 @@ impl GmailProvider {
 
     /// Move a message to a different label/folder
     pub async fn move_to(&self, msg_id: &str, folder: &str) -> Result<bool, String> {
-        let token = self.access_token.as_ref().ok_or("Gmail not authenticated")?;
+        let token = self
+            .access_token
+            .as_ref()
+            .ok_or("Gmail not authenticated")?;
 
         let folder_upper = folder.to_uppercase();
         let label_id = match folder_upper.as_str() {
@@ -512,10 +530,7 @@ fn extract_body_text(payload: Option<&serde_json::Value>) -> String {
     // Try parts (multipart messages) — prefer text/plain
     if let Some(parts) = payload.get("parts").and_then(|p| p.as_array()) {
         for part in parts {
-            let mime = part
-                .get("mimeType")
-                .and_then(|m| m.as_str())
-                .unwrap_or("");
+            let mime = part.get("mimeType").and_then(|m| m.as_str()).unwrap_or("");
             if mime == "text/plain" {
                 if let Some(data) = part
                     .get("body")
@@ -532,10 +547,7 @@ fn extract_body_text(payload: Option<&serde_json::Value>) -> String {
         }
         // Fallback: try text/html
         for part in parts {
-            let mime = part
-                .get("mimeType")
-                .and_then(|m| m.as_str())
-                .unwrap_or("");
+            let mime = part.get("mimeType").and_then(|m| m.as_str()).unwrap_or("");
             if mime == "text/html" {
                 if let Some(data) = part
                     .get("body")
@@ -661,7 +673,11 @@ impl EmailManager {
 
     // ── Async dual-mode Public API ─────────────────────────────────
 
-    pub async fn list_messages_async(&self, folder: &str, limit: usize) -> Result<Vec<EmailMessage>, String> {
+    pub async fn list_messages_async(
+        &self,
+        folder: &str,
+        limit: usize,
+    ) -> Result<Vec<EmailMessage>, String> {
         if self.gmail_active() {
             return self.gmail.list_messages(folder, limit).await;
         }

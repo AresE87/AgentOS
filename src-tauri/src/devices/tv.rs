@@ -49,7 +49,10 @@ impl TVDisplayMode {
     /// Enable TV display mode
     pub fn enable(&mut self, config: TVConfig) -> Result<TVStatus, String> {
         if !["dashboard", "kiosk", "slideshow"].contains(&config.display_mode.as_str()) {
-            return Err(format!("Invalid display_mode '{}'. Must be dashboard, kiosk, or slideshow", config.display_mode));
+            return Err(format!(
+                "Invalid display_mode '{}'. Must be dashboard, kiosk, or slideshow",
+                config.display_mode
+            ));
         }
         if config.auto_refresh_secs < 1 {
             return Err("auto_refresh_secs must be >= 1".into());
@@ -70,13 +73,13 @@ impl TVDisplayMode {
 
     /// Get current TV display status
     pub fn get_status(&self) -> TVStatus {
-        let uptime = self.started_at
-            .map(|s| s.elapsed().as_secs())
-            .unwrap_or(0);
+        let uptime = self.started_at.map(|s| s.elapsed().as_secs()).unwrap_or(0);
         TVStatus {
             enabled: self.enabled,
             config: self.config.clone(),
-            current_screen: self.config.as_ref()
+            current_screen: self
+                .config
+                .as_ref()
                 .map(|c| c.content_type.clone())
                 .unwrap_or_else(|| "none".into()),
             uptime_secs: uptime,
@@ -90,7 +93,10 @@ impl TVDisplayMode {
         }
         let valid = ["board", "metrics", "feed", "swarm", "ambient"];
         if !valid.contains(&content_type) {
-            return Err(format!("Invalid content_type '{}'. Must be one of: {:?}", content_type, valid));
+            return Err(format!(
+                "Invalid content_type '{}'. Must be one of: {:?}",
+                content_type, valid
+            ));
         }
         if let Some(ref mut cfg) = self.config {
             cfg.content_type = content_type.to_string();

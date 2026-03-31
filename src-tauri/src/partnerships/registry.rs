@@ -62,7 +62,11 @@ impl PartnerRegistry {
             registered_at: chrono::Utc::now().to_rfc3339(),
         };
         self.partners.push(partner.clone());
-        tracing::info!("Hardware partner registered: {} (id={})", company, partner.id);
+        tracing::info!(
+            "Hardware partner registered: {} (id={})",
+            company,
+            partner.id
+        );
         partner
     }
 

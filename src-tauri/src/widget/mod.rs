@@ -1,3 +1,3 @@
 pub mod embed;
 
-pub use embed::{WidgetConfig, EmbedGenerator};
+pub use embed::{EmbedGenerator, WidgetConfig};

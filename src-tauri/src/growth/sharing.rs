@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShareableContent {
-    pub content_type: String,  // "playbook", "result", "persona"
+    pub content_type: String, // "playbook", "result", "persona"
     pub title: String,
     pub description: String,
     pub share_url: String,

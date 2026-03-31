@@ -51,6 +51,11 @@ mod tests {
             complexity: 1,
             suggested_specialist: "General Assistant".to_string(),
             confidence: 1.0,
+            inference_source: "cloud".to_string(),
+            local_available: false,
+            local_active: false,
+            fallback_reason: None,
+            latency_ms: 0,
         }
     }
 
@@ -118,7 +123,11 @@ mod tests {
         for tier in [TaskTier::Cheap, TaskTier::Standard, TaskTier::Premium] {
             let c = make_classification(tier);
             for m in router.get_fallback_chain(&c) {
-                assert!(valid.contains(&m.provider.as_str()), "Invalid provider: {}", m.provider);
+                assert!(
+                    valid.contains(&m.provider.as_str()),
+                    "Invalid provider: {}",
+                    m.provider
+                );
             }
         }
     }

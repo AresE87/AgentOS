@@ -1,3 +1,3 @@
 pub mod triggers;
 
-pub use triggers::{WebhookTrigger, WebhookManager};
+pub use triggers::{WebhookManager, WebhookTrigger};

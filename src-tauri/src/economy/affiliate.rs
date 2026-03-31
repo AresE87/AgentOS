@@ -59,14 +59,20 @@ impl AffiliateProgram {
     }
 
     pub fn track_click(&mut self, link_code: &str) -> Result<(), String> {
-        let link = self.links.iter_mut().find(|l| l.link_code == link_code)
+        let link = self
+            .links
+            .iter_mut()
+            .find(|l| l.link_code == link_code)
             .ok_or_else(|| "Link not found".to_string())?;
         link.clicks += 1;
         Ok(())
     }
 
     pub fn track_conversion(&mut self, link_code: &str, amount: f64) -> Result<(), String> {
-        let link = self.links.iter_mut().find(|l| l.link_code == link_code)
+        let link = self
+            .links
+            .iter_mut()
+            .find(|l| l.link_code == link_code)
             .ok_or_else(|| "Link not found".to_string())?;
         link.conversions += 1;
         let rate = match link.tier {
@@ -78,12 +84,18 @@ impl AffiliateProgram {
         link.earnings += amount * rate;
         let creator_id = link.creator_id.clone();
         // Auto-upgrade tier: compute total conversions across all links for this creator
-        let total_conversions: u64 = self.links.iter()
+        let total_conversions: u64 = self
+            .links
+            .iter()
             .filter(|l| l.creator_id == creator_id)
             .map(|l| l.conversions)
             .sum();
         // Re-borrow after computing total
-        let link = self.links.iter_mut().find(|l| l.link_code == link_code).unwrap();
+        let link = self
+            .links
+            .iter_mut()
+            .find(|l| l.link_code == link_code)
+            .unwrap();
         link.tier = match total_conversions {
             0..=10 => AffiliateTier::Starter,
             11..=50 => AffiliateTier::Partner,
@@ -94,7 +106,9 @@ impl AffiliateProgram {
     }
 
     pub fn get_earnings(&self, creator_id: &str) -> AffiliateEarnings {
-        let creator_links: Vec<&AffiliateLink> = self.links.iter()
+        let creator_links: Vec<&AffiliateLink> = self
+            .links
+            .iter()
             .filter(|l| l.creator_id == creator_id)
             .collect();
         let total_earnings: f64 = creator_links.iter().map(|l| l.earnings).sum();
@@ -122,8 +136,9 @@ impl AffiliateProgram {
     }
 
     pub fn list_links(&self, creator_id: Option<&str>) -> Vec<&AffiliateLink> {
-        self.links.iter().filter(|l| {
-            creator_id.map_or(true, |cid| l.creator_id == cid)
-        }).collect()
+        self.links
+            .iter()
+            .filter(|l| creator_id.map_or(true, |cid| l.creator_id == cid))
+            .collect()
     }
 }

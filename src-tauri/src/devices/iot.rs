@@ -78,22 +78,46 @@ impl IoTController {
     }
 
     /// Control a device by sending an action with a value
-    pub fn control(&mut self, id: &str, action: &str, value: serde_json::Value) -> Result<ControlResult, String> {
-        let device = self.devices.iter_mut().find(|d| d.id == id)
+    pub fn control(
+        &mut self,
+        id: &str,
+        action: &str,
+        value: serde_json::Value,
+    ) -> Result<ControlResult, String> {
+        let device = self
+            .devices
+            .iter_mut()
+            .find(|d| d.id == id)
             .ok_or_else(|| format!("Device {} not found", id))?;
 
         // Apply action to state
         match action {
-            "turn_on" => { device.state["on"] = serde_json::json!(true); }
-            "turn_off" => { device.state["on"] = serde_json::json!(false); }
-            "set_temperature" => { device.state["target"] = value.clone(); }
-            "set_brightness" => { device.state["brightness"] = value.clone(); }
-            "set_color" => { device.state["color"] = value.clone(); }
+            "turn_on" => {
+                device.state["on"] = serde_json::json!(true);
+            }
+            "turn_off" => {
+                device.state["on"] = serde_json::json!(false);
+            }
+            "set_temperature" => {
+                device.state["target"] = value.clone();
+            }
+            "set_brightness" => {
+                device.state["brightness"] = value.clone();
+            }
+            "set_color" => {
+                device.state["color"] = value.clone();
+            }
             "toggle" => {
-                let current = device.state.get("on").and_then(|v| v.as_bool()).unwrap_or(false);
+                let current = device
+                    .state
+                    .get("on")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
                 device.state["on"] = serde_json::json!(!current);
             }
-            _ => { device.state[action] = value.clone(); }
+            _ => {
+                device.state[action] = value.clone();
+            }
         }
 
         Ok(ControlResult {
@@ -106,7 +130,9 @@ impl IoTController {
 
     /// Get the current state of a device
     pub fn get_state(&self, id: &str) -> Result<serde_json::Value, String> {
-        self.devices.iter().find(|d| d.id == id)
+        self.devices
+            .iter()
+            .find(|d| d.id == id)
             .map(|d| d.state.clone())
             .ok_or_else(|| format!("Device {} not found", id))
     }

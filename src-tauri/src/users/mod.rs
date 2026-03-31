@@ -1,2 +1,2 @@
 pub mod manager;
-pub use manager::{UserProfile, UserSession, UserManager};
+pub use manager::{UserManager, UserProfile, UserSession};

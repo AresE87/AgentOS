@@ -78,7 +78,8 @@ impl CommandSandbox {
         let timeout_secs = self.timeout.as_secs();
         let max_out = self.max_output_bytes;
 
-        let result = crate::hands::cli::run_powershell(command, timeout_secs).await
+        let result = crate::hands::cli::run_powershell(command, timeout_secs)
+            .await
             .map_err(|e| e.to_string())?;
 
         let mut stdout = result.stdout;
@@ -124,10 +125,16 @@ mod tests {
     fn blocks_dangerous_commands() {
         let sandbox = CommandSandbox::new();
         assert!(sandbox.validate_command("rm -rf /").is_err());
-        assert!(sandbox.validate_command("Invoke-Expression $payload").is_err());
+        assert!(sandbox
+            .validate_command("Invoke-Expression $payload")
+            .is_err());
         assert!(sandbox.validate_command("cmd /c del /s /q C:\\").is_err());
-        assert!(sandbox.validate_command("reg delete HKLM\\Software").is_err());
-        assert!(sandbox.validate_command("some -EncodedCommand base64stuff").is_err());
+        assert!(sandbox
+            .validate_command("reg delete HKLM\\Software")
+            .is_err());
+        assert!(sandbox
+            .validate_command("some -EncodedCommand base64stuff")
+            .is_err());
     }
 
     #[test]

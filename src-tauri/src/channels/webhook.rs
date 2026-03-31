@@ -22,11 +22,10 @@ async fn verify_webhook(
     State(state): State<Arc<WebhookState>>,
 ) -> Result<String, StatusCode> {
     info!("WhatsApp webhook verification request");
-    WhatsAppChannel::verify_webhook(&params, &state.verify_token)
-        .map_err(|e| {
-            warn!("WhatsApp webhook verification failed: {}", e);
-            StatusCode::FORBIDDEN
-        })
+    WhatsAppChannel::verify_webhook(&params, &state.verify_token).map_err(|e| {
+        warn!("WhatsApp webhook verification failed: {}", e);
+        StatusCode::FORBIDDEN
+    })
 }
 
 /// POST /webhook/whatsapp -- Incoming messages from Meta

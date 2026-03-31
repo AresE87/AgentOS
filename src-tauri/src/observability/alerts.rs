@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AlertRule {
@@ -45,7 +45,9 @@ impl AlertManager {
                 AlertRule {
                     id: "err-rate".into(),
                     name: "High Error Rate".into(),
-                    condition: AlertCondition::ErrorRate { threshold_pct: 20.0 },
+                    condition: AlertCondition::ErrorRate {
+                        threshold_pct: 20.0,
+                    },
                     severity: "warning".into(),
                     enabled: true,
                 },
@@ -94,7 +96,10 @@ impl AlertManager {
     }
 
     pub fn get_active(&self) -> Vec<&Alert> {
-        self.active_alerts.iter().filter(|a| !a.acknowledged).collect()
+        self.active_alerts
+            .iter()
+            .filter(|a| !a.acknowledged)
+            .collect()
     }
 
     pub fn get_all(&self) -> &[Alert] {

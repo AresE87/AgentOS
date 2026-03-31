@@ -120,7 +120,8 @@ impl PredictionEngine {
 
         let mut suggestions = Vec::new();
 
-        if ctx_lower.contains("morning") || ctx_lower.contains("9am") || ctx_lower.contains("start") {
+        if ctx_lower.contains("morning") || ctx_lower.contains("9am") || ctx_lower.contains("start")
+        {
             suggestions.push(PredictedAction {
                 id: format!("sug-{}", uuid::Uuid::new_v4()),
                 action: "Monday briefing".to_string(),

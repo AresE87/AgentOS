@@ -35,10 +35,7 @@ impl NLTriggerParser {
         let now = chrono::Utc::now().to_rfc3339();
 
         // Detect cron patterns
-        if lower.contains("every day")
-            || lower.contains("cada dia")
-            || lower.contains("daily")
-        {
+        if lower.contains("every day") || lower.contains("cada dia") || lower.contains("daily") {
             let task = Self::extract_task(input);
             return Ok(TriggerConfig {
                 id,
@@ -51,10 +48,7 @@ impl NLTriggerParser {
                 created_at: now,
             });
         }
-        if lower.contains("every hour")
-            || lower.contains("cada hora")
-            || lower.contains("hourly")
-        {
+        if lower.contains("every hour") || lower.contains("cada hora") || lower.contains("hourly") {
             let task = Self::extract_task(input);
             return Ok(TriggerConfig {
                 id,
@@ -175,7 +169,13 @@ impl NLTriggerParser {
 
     fn extract_task(input: &str) -> String {
         let markers = [
-            "then ", "run ", "execute ", "do ", "hacer ", "ejecutar ", ", ",
+            "then ",
+            "run ",
+            "execute ",
+            "do ",
+            "hacer ",
+            "ejecutar ",
+            ", ",
         ];
         for m in &markers {
             if let Some(pos) = input.to_lowercase().find(m) {

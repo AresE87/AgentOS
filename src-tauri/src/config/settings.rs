@@ -19,6 +19,8 @@ pub struct Settings {
     pub cli_timeout: u64,
     #[serde(default = "default_max_steps")]
     pub max_steps_per_task: u32,
+    #[serde(default = "default_swarm_max_concurrency")]
+    pub swarm_max_concurrency: usize,
     #[serde(default = "default_input_delay")]
     pub input_delay_ms: u64,
     #[serde(default = "default_screenshot_quality")]
@@ -149,6 +151,9 @@ fn default_max_steps() -> u32 {
 fn default_input_delay() -> u64 {
     50
 }
+fn default_swarm_max_concurrency() -> usize {
+    4
+}
 fn default_screenshot_quality() -> u8 {
     80
 }
@@ -238,6 +243,11 @@ impl Settings {
             "max_steps_per_task" => {
                 if let Ok(v) = value.parse() {
                     self.max_steps_per_task = v;
+                }
+            }
+            "swarm_max_concurrency" => {
+                if let Ok(v) = value.parse::<usize>() {
+                    self.swarm_max_concurrency = v.clamp(1, 5);
                 }
             }
             "input_delay_ms" => {
@@ -407,6 +417,7 @@ impl Settings {
             "max_cost_per_task": self.max_cost_per_task,
             "cli_timeout": self.cli_timeout,
             "max_steps_per_task": self.max_steps_per_task,
+            "swarm_max_concurrency": self.swarm_max_concurrency,
             "input_delay_ms": self.input_delay_ms,
             "screenshot_quality": self.screenshot_quality,
             "pc_control_enabled": self.pc_control_enabled,
@@ -469,6 +480,7 @@ mod tests {
         assert_eq!(s.max_cost_per_task, 1.0);
         assert_eq!(s.cli_timeout, 300);
         assert_eq!(s.max_steps_per_task, 20);
+        assert_eq!(s.swarm_max_concurrency, 4);
         assert!(!s.pc_control_enabled);
     }
 
@@ -573,6 +585,7 @@ impl Default for Settings {
             max_cost_per_task: default_max_cost(),
             cli_timeout: default_timeout(),
             max_steps_per_task: default_max_steps(),
+            swarm_max_concurrency: default_swarm_max_concurrency(),
             input_delay_ms: default_input_delay(),
             screenshot_quality: default_screenshot_quality(),
             pc_control_enabled: false,

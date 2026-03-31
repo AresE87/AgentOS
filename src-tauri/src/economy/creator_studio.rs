@@ -46,7 +46,9 @@ pub struct CreatorStudio {
 
 impl CreatorStudio {
     pub fn new() -> Self {
-        Self { projects: Vec::new() }
+        Self {
+            projects: Vec::new(),
+        }
     }
 
     pub fn create_project(
@@ -81,7 +83,10 @@ impl CreatorStudio {
     }
 
     pub fn publish(&mut self, project_id: &str) -> Result<CreatorProject, String> {
-        let project = self.projects.iter_mut().find(|p| p.id == project_id)
+        let project = self
+            .projects
+            .iter_mut()
+            .find(|p| p.id == project_id)
             .ok_or_else(|| "Project not found".to_string())?;
         if project.status == ProjectStatus::Published {
             return Err("Project is already published".to_string());
@@ -92,7 +97,10 @@ impl CreatorStudio {
     }
 
     pub fn unpublish(&mut self, project_id: &str) -> Result<CreatorProject, String> {
-        let project = self.projects.iter_mut().find(|p| p.id == project_id)
+        let project = self
+            .projects
+            .iter_mut()
+            .find(|p| p.id == project_id)
             .ok_or_else(|| "Project not found".to_string())?;
         project.status = ProjectStatus::Draft;
         project.updated_at = chrono::Utc::now().to_rfc3339();
@@ -100,13 +108,17 @@ impl CreatorStudio {
     }
 
     pub fn list_projects(&self, creator_id: Option<&str>) -> Vec<&CreatorProject> {
-        self.projects.iter().filter(|p| {
-            creator_id.map_or(true, |cid| p.creator_id == cid)
-        }).collect()
+        self.projects
+            .iter()
+            .filter(|p| creator_id.map_or(true, |cid| p.creator_id == cid))
+            .collect()
     }
 
     pub fn get_analytics(&self, project_id: &str) -> Result<ProjectAnalytics, String> {
-        let project = self.projects.iter().find(|p| p.id == project_id)
+        let project = self
+            .projects
+            .iter()
+            .find(|p| p.id == project_id)
             .ok_or_else(|| "Project not found".to_string())?;
         Ok(project.analytics.clone())
     }

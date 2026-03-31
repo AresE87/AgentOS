@@ -58,7 +58,10 @@ impl MicrotaskMarket {
     }
 
     pub fn claim_task(&mut self, task_id: &str, agent_id: String) -> Result<Microtask, String> {
-        let task = self.tasks.iter_mut().find(|t| t.id == task_id)
+        let task = self
+            .tasks
+            .iter_mut()
+            .find(|t| t.id == task_id)
             .ok_or_else(|| "Task not found".to_string())?;
         if task.status != MicrotaskStatus::Available {
             return Err("Task is not available".to_string());
@@ -69,7 +72,10 @@ impl MicrotaskMarket {
     }
 
     pub fn complete_task(&mut self, task_id: &str, result: String) -> Result<Microtask, String> {
-        let task = self.tasks.iter_mut().find(|t| t.id == task_id)
+        let task = self
+            .tasks
+            .iter_mut()
+            .find(|t| t.id == task_id)
             .ok_or_else(|| "Task not found".to_string())?;
         if task.status != MicrotaskStatus::Claimed {
             return Err("Task is not in claimed state".to_string());
@@ -80,10 +86,16 @@ impl MicrotaskMarket {
     }
 
     pub fn list_available(&self) -> Vec<&Microtask> {
-        self.tasks.iter().filter(|t| t.status == MicrotaskStatus::Available).collect()
+        self.tasks
+            .iter()
+            .filter(|t| t.status == MicrotaskStatus::Available)
+            .collect()
     }
 
     pub fn list_my_tasks(&self, agent_id: &str) -> Vec<&Microtask> {
-        self.tasks.iter().filter(|t| t.assigned_to.as_deref() == Some(agent_id)).collect()
+        self.tasks
+            .iter()
+            .filter(|t| t.assigned_to.as_deref() == Some(agent_id))
+            .collect()
     }
 }

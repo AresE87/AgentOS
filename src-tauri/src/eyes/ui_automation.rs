@@ -3,17 +3,17 @@ use crate::types::{UIElement, WindowInfo};
 #[cfg(windows)]
 use windows::Win32::Foundation::{BOOL, HWND, LPARAM, RECT};
 #[cfg(windows)]
-use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetClassNameW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
-    IsWindowVisible,
+use windows::Win32::System::Com::{
+    CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED,
 };
 #[cfg(windows)]
 use windows::Win32::UI::Accessibility::{
     CUIAutomation, IUIAutomation, IUIAutomationElement, TreeScope_Children,
 };
 #[cfg(windows)]
-use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED,
+use windows::Win32::UI::WindowsAndMessaging::{
+    EnumWindows, GetClassNameW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
+    IsWindowVisible,
 };
 
 /// Get UI elements of the foreground window
@@ -32,7 +32,7 @@ pub fn get_foreground_elements() -> Result<Vec<UIElement>, Box<dyn std::error::E
 #[cfg(windows)]
 fn get_elements_windows() -> Result<Vec<UIElement>, Box<dyn std::error::Error + Send + Sync>> {
     unsafe {
-        CoInitializeEx(None, COINIT_MULTITHREADED).ok();
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED).ok();
 
         let automation: IUIAutomation = CoCreateInstance(&CUIAutomation, None, CLSCTX_ALL)?;
         let root = automation.GetFocusedElement()?;
@@ -74,9 +74,7 @@ unsafe fn read_children(
                 .unwrap_or_default();
             let is_enabled = child.CurrentIsEnabled().unwrap_or(BOOL(0)).as_bool();
 
-            let rect = child
-                .CurrentBoundingRectangle()
-                .unwrap_or(RECT::default());
+            let rect = child.CurrentBoundingRectangle().unwrap_or(RECT::default());
             let bounding_rect = (
                 rect.left,
                 rect.top,
@@ -84,8 +82,8 @@ unsafe fn read_children(
                 rect.bottom - rect.top,
             );
 
-            let sub_children = read_children(automation, &child, depth + 1, max_depth)
-                .unwrap_or_default();
+            let sub_children =
+                read_children(automation, &child, depth + 1, max_depth).unwrap_or_default();
 
             results.push(UIElement {
                 name,

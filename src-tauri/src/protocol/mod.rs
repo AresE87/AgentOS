@@ -1,7 +1,7 @@
-pub mod spec;
-pub mod server;
 pub mod client;
+pub mod server;
+pub mod spec;
 
-pub use spec::{AAPMessage, AAPMessageType};
-pub use server::AAPServer;
 pub use client::AAPClient;
+pub use server::AAPServer;
+pub use spec::{AAPMessage, AAPMessageType};

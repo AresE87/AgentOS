@@ -1,9 +1,12 @@
 pub mod gdpr;
-pub mod retention;
 pub mod privacy;
 pub mod reporter;
+pub mod retention;
 
 pub use gdpr::GDPRManager;
-pub use retention::RetentionPolicy;
 pub use privacy::PrivacySettings;
-pub use reporter::{ComplianceReporter, ComplianceReport, ComplianceCheck};
+pub use reporter::{
+    ComplianceArtifact, ComplianceCheck, ComplianceEvidence, ComplianceFilters,
+    ComplianceReport, ComplianceReporter, ComplianceSummary,
+};
+pub use retention::RetentionPolicy;

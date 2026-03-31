@@ -51,7 +51,11 @@ impl AutoProcurement {
             req.created_at = chrono::Utc::now().to_rfc3339();
         }
         self.requests.push(req.clone());
-        tracing::info!("Procurement request submitted: {} (${:.2})", req.item, req.amount);
+        tracing::info!(
+            "Procurement request submitted: {} (${:.2})",
+            req.item,
+            req.amount
+        );
         req
     }
 
@@ -64,15 +68,28 @@ impl AutoProcurement {
             .ok_or_else(|| format!("Request not found: {}", id))?;
 
         if req.status != "pending" {
-            return Err(format!("Request {} is not pending (status: {})", id, req.status));
+            return Err(format!(
+                "Request {} is not pending (status: {})",
+                id, req.status
+            ));
         }
 
         if req.amount <= self.approval_threshold {
             req.status = "approved".to_string();
-            tracing::info!("Auto-approved procurement: {} (${:.2} <= threshold ${:.2})", req.item, req.amount, self.approval_threshold);
+            tracing::info!(
+                "Auto-approved procurement: {} (${:.2} <= threshold ${:.2})",
+                req.item,
+                req.amount,
+                self.approval_threshold
+            );
             Ok(true)
         } else {
-            tracing::info!("Procurement requires manual approval: {} (${:.2} > threshold ${:.2})", req.item, req.amount, self.approval_threshold);
+            tracing::info!(
+                "Procurement requires manual approval: {} (${:.2} > threshold ${:.2})",
+                req.item,
+                req.amount,
+                self.approval_threshold
+            );
             Ok(false)
         }
     }

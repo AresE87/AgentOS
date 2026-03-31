@@ -60,7 +60,7 @@ impl ExtensionAPIv2 {
                     value TEXT NOT NULL,
                     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
                     PRIMARY KEY (plugin_name, key)
-                );"
+                );",
             );
         }
 
@@ -188,7 +188,13 @@ mod tests {
     fn test_invoke_method_stub() {
         let dir = std::env::temp_dir().join("agentos_test_plugin_v2b.db");
         let mut api = ExtensionAPIv2::new(dir);
-        api.register_ui("my-plugin", PluginUI { pages: vec![], widgets: vec![] });
+        api.register_ui(
+            "my-plugin",
+            PluginUI {
+                pages: vec![],
+                widgets: vec![],
+            },
+        );
         let result = api.invoke_plugin_method("my-plugin", "hello", &serde_json::json!({}));
         assert!(result.is_ok());
     }
