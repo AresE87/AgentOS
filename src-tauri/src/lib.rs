@@ -85,6 +85,114 @@ use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder};
 use tauri::{Emitter, Manager};
 
+fn enforce_permission(
+    state: &tauri::State<'_, AppState>,
+    capability: approvals::PermissionCapability,
+    agent_name: Option<&str>,
+) -> Result<approvals::PermissionDecision, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    approvals::ApprovalManager::ensure_permission_tables(db.conn())?;
+    approvals::ApprovalManager::seed_default_permissions(db.conn())?;
+    let decision =
+        approvals::ApprovalManager::check_current_permission(db.conn(), capability, agent_name)?;
+    if decision.allowed {
+        Ok(decision)
+    } else {
+        Err(format!(
+            "Permission denied for capability '{}' (source: {})",
+            capability.as_str(),
+            decision.source
+        ))
+    }
+}
+
+fn is_secret_setting_key(key: &str) -> bool {
+    matches!(
+        key,
+        "anthropic_api_key"
+            | "openai_api_key"
+            | "google_api_key"
+            | "telegram_bot_token"
+            | "whatsapp_access_token"
+            | "relay_auth_token"
+            | "stripe_secret_key"
+            | "stripe_webhook_secret"
+            | "google_client_secret"
+            | "google_refresh_token"
+            | "discord_bot_token"
+    )
+}
+
+fn secret_setting_to_vault_key(key: &str) -> Option<&'static str> {
+    match key {
+        "anthropic_api_key" => Some("ANTHROPIC_API_KEY"),
+        "openai_api_key" => Some("OPENAI_API_KEY"),
+        "google_api_key" => Some("GOOGLE_API_KEY"),
+        "telegram_bot_token" => Some("TELEGRAM_BOT_TOKEN"),
+        "whatsapp_access_token" => Some("WHATSAPP_ACCESS_TOKEN"),
+        "relay_auth_token" => Some("RELAY_AUTH_TOKEN"),
+        "stripe_secret_key" => Some("STRIPE_SECRET_KEY"),
+        "stripe_webhook_secret" => Some("STRIPE_WEBHOOK_SECRET"),
+        "google_client_secret" => Some("GOOGLE_CLIENT_SECRET"),
+        "google_refresh_token" => Some("GOOGLE_REFRESH_TOKEN"),
+        "discord_bot_token" => Some("DISCORD_BOT_TOKEN"),
+        _ => None,
+    }
+}
+
+fn scrub_persisted_secrets(settings: &mut config::Settings) {
+    settings.anthropic_api_key.clear();
+    settings.openai_api_key.clear();
+    settings.google_api_key.clear();
+    settings.telegram_bot_token.clear();
+    settings.whatsapp_access_token.clear();
+    settings.relay_auth_token.clear();
+    settings.stripe_secret_key.clear();
+    settings.stripe_webhook_secret.clear();
+    settings.google_client_secret.clear();
+    settings.google_refresh_token.clear();
+    settings.discord_bot_token.clear();
+}
+
+fn load_secret_from_vault(vault: &vault::SecureVault, key: &str) -> String {
+    vault.retrieve(key).ok().flatten().unwrap_or_default()
+}
+
+fn hydrate_settings_from_vault(
+    settings: &mut config::Settings,
+    vault: &vault::SecureVault,
+) -> Result<(), String> {
+    if !vault.is_unlocked() {
+        return Err("Vault locked".to_string());
+    }
+    settings.anthropic_api_key = load_secret_from_vault(vault, "ANTHROPIC_API_KEY");
+    settings.openai_api_key = load_secret_from_vault(vault, "OPENAI_API_KEY");
+    settings.google_api_key = load_secret_from_vault(vault, "GOOGLE_API_KEY");
+    settings.telegram_bot_token = load_secret_from_vault(vault, "TELEGRAM_BOT_TOKEN");
+    settings.whatsapp_access_token = load_secret_from_vault(vault, "WHATSAPP_ACCESS_TOKEN");
+    settings.relay_auth_token = load_secret_from_vault(vault, "RELAY_AUTH_TOKEN");
+    settings.stripe_secret_key = load_secret_from_vault(vault, "STRIPE_SECRET_KEY");
+    settings.stripe_webhook_secret = load_secret_from_vault(vault, "STRIPE_WEBHOOK_SECRET");
+    settings.google_client_secret = load_secret_from_vault(vault, "GOOGLE_CLIENT_SECRET");
+    settings.google_refresh_token = load_secret_from_vault(vault, "GOOGLE_REFRESH_TOKEN");
+    settings.discord_bot_token = load_secret_from_vault(vault, "DISCORD_BOT_TOKEN");
+    Ok(())
+}
+
+fn audit_vault_event(
+    state: &tauri::State<'_, AppState>,
+    event_type: &str,
+    details: serde_json::Value,
+) {
+    state
+        .structured_logger
+        .log("info", "vault", event_type, None, Some(details.clone()));
+    if let Ok(conn) = rusqlite::Connection::open(&state.db_path) {
+        let _ = enterprise::AuditLog::ensure_table(&conn);
+        let _ = enterprise::AuditLog::log(&conn, event_type, details);
+    }
+}
+
 pub struct AppState {
     pub db: std::sync::Mutex<memory::Database>,
     pub gateway: tokio::sync::Mutex<brain::Gateway>,
@@ -886,6 +994,45 @@ async fn cmd_get_tasks(
 }
 
 #[tauri::command]
+async fn cmd_retry_task(
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+    task_id: String,
+) -> Result<serde_json::Value, String> {
+    let (input, status) = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        db.get_task_retry_context(&task_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("Task '{}' not found", task_id))?
+    };
+    if !is_retryable_task_status(&status) {
+        return Err(format!(
+            "Task '{}' is not retryable from status '{}'",
+            task_id, status
+        ));
+    }
+    if let Ok(conn) = rusqlite::Connection::open(&state.db_path) {
+        let _ = enterprise::AuditLog::ensure_table(&conn);
+        let _ = enterprise::AuditLog::log(
+            &conn,
+            "task_retry_requested",
+            serde_json::json!({ "task_id": task_id, "status": status }),
+        );
+    }
+    let retried = cmd_process_message(state, app_handle, input).await?;
+    Ok(serde_json::json!({
+        "ok": true,
+        "original_task_id": task_id,
+        "previous_status": status,
+        "retry": retried,
+    }))
+}
+
+fn is_retryable_task_status(status: &str) -> bool {
+    matches!(status, "failed" | "killed" | "timeout")
+}
+
+#[tauri::command]
 async fn cmd_get_settings(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let settings = state.settings.lock().map_err(|e| e.to_string())?;
     Ok(settings.to_json())
@@ -897,11 +1044,23 @@ async fn cmd_update_settings(
     key: String,
     value: String,
 ) -> Result<serde_json::Value, String> {
+    let secret_key = is_secret_setting_key(&key);
     let needs_gateway_rebuild = {
         let mut settings = state.settings.lock().map_err(|e| e.to_string())?;
-        settings.set(&key, &value);
-        settings.save().map_err(|e| e.to_string())?;
-        key.ends_with("_api_key")
+        if secret_key {
+            let vault_key = secret_setting_to_vault_key(&key)
+                .ok_or_else(|| format!("Unsupported secret setting '{}'", key))?;
+            let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
+            vault.store(vault_key, &value)?;
+            settings.set(&key, &value);
+            let mut persisted = settings.clone();
+            scrub_persisted_secrets(&mut persisted);
+            persisted.save().map_err(|e| e.to_string())?;
+        } else {
+            settings.set(&key, &value);
+            settings.save().map_err(|e| e.to_string())?;
+        }
+        key.ends_with("_api_key") || secret_key
     }; // MutexGuard dropped here
 
     if needs_gateway_rebuild {
@@ -918,6 +1077,13 @@ async fn cmd_update_settings(
         let _ = enterprise::AuditLog::ensure_table(&conn);
         let _ =
             enterprise::AuditLog::log(&conn, "settings_changed", serde_json::json!({ "key": key }));
+    }
+    if secret_key {
+        audit_vault_event(
+            &state,
+            "vault_secret_updated",
+            serde_json::json!({ "key": key }),
+        );
     }
 
     Ok(serde_json::json!({ "ok": true }))
@@ -2156,9 +2322,11 @@ async fn cmd_vault_store(
     key: String,
     value: String,
 ) -> Result<serde_json::Value, String> {
+    let _decision = enforce_permission(&state, approvals::PermissionCapability::VaultWrite, None)?;
     let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
     vault.store(&key, &value)?;
     tracing::info!(key = %key, "Stored key in vault");
+    audit_vault_event(&state, "vault_store", serde_json::json!({ "key": key }));
     Ok(serde_json::json!({ "ok": true }))
 }
 
@@ -2167,8 +2335,10 @@ async fn cmd_vault_retrieve(
     state: tauri::State<'_, AppState>,
     key: String,
 ) -> Result<serde_json::Value, String> {
+    let _decision = enforce_permission(&state, approvals::PermissionCapability::VaultRead, None)?;
     let vault = state.vault.lock().map_err(|e| e.to_string())?;
     let value = vault.retrieve(&key)?;
+    audit_vault_event(&state, "vault_retrieve", serde_json::json!({ "key": key }));
     Ok(serde_json::json!({ "key": key, "value": value }))
 }
 
@@ -2177,14 +2347,17 @@ async fn cmd_vault_delete(
     state: tauri::State<'_, AppState>,
     key: String,
 ) -> Result<serde_json::Value, String> {
+    let _decision = enforce_permission(&state, approvals::PermissionCapability::VaultWrite, None)?;
     let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
     vault.delete(&key)?;
     tracing::info!(key = %key, "Deleted key from vault");
+    audit_vault_event(&state, "vault_delete", serde_json::json!({ "key": key }));
     Ok(serde_json::json!({ "ok": true }))
 }
 
 #[tauri::command]
 async fn cmd_vault_migrate(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let _decision = enforce_permission(&state, approvals::PermissionCapability::VaultMigrate, None)?;
     let settings = {
         let s = state.settings.lock().map_err(|e| e.to_string())?;
         s.clone()
@@ -2192,7 +2365,45 @@ async fn cmd_vault_migrate(state: tauri::State<'_, AppState>) -> Result<serde_js
     let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
     let count = vault.migrate_from_settings(&settings)?;
     tracing::info!(count = count, "Migrated keys from settings to vault");
+    if count > 0 {
+        let mut persisted = settings.clone();
+        scrub_persisted_secrets(&mut persisted);
+        persisted.save().map_err(|e| e.to_string())?;
+    }
+    audit_vault_event(
+        &state,
+        "vault_migrate",
+        serde_json::json!({ "migrated": count }),
+    );
     Ok(serde_json::json!({ "ok": true, "migrated": count }))
+}
+
+#[tauri::command]
+async fn cmd_vault_rotate(
+    state: tauri::State<'_, AppState>,
+    key: String,
+    value: String,
+) -> Result<serde_json::Value, String> {
+    let _decision = enforce_permission(&state, approvals::PermissionCapability::VaultWrite, None)?;
+    let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
+    vault.store(&key, &value)?;
+    audit_vault_event(&state, "vault_rotate", serde_json::json!({ "key": key }));
+    Ok(serde_json::json!({ "ok": true, "rotated": key }))
+}
+
+#[tauri::command]
+async fn cmd_vault_audit(
+    state: tauri::State<'_, AppState>,
+    limit: Option<usize>,
+) -> Result<serde_json::Value, String> {
+    let conn = rusqlite::Connection::open(&state.db_path).map_err(|e| e.to_string())?;
+    enterprise::AuditLog::ensure_table(&conn)?;
+    let entries = enterprise::AuditLog::get_recent(&conn, limit.unwrap_or(100))?;
+    let vault_entries: Vec<_> = entries
+        .into_iter()
+        .filter(|entry| entry.event_type.starts_with("vault_"))
+        .collect();
+    Ok(serde_json::json!({ "entries": vault_entries, "count": vault_entries.len() }))
 }
 
 // ── R23: Billing commands ────────────────────────────────────
@@ -2881,6 +3092,7 @@ async fn cmd_plugin_install(
     path: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    let _decision = enforce_permission(&state, approvals::PermissionCapability::PluginManage, None)?;
     let mut mgr = state.plugin_manager.lock().await;
     let source = std::path::PathBuf::from(&path);
     let manifest = mgr.install(&source)?;
@@ -2896,6 +3108,8 @@ async fn cmd_plugin_uninstall(
     name: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    let _decision =
+        enforce_permission(&state, approvals::PermissionCapability::PluginManage, Some(&name))?;
     let mut mgr = state.plugin_manager.lock().await;
     mgr.uninstall(&name)?;
     Ok(serde_json::json!({ "ok": true, "name": name }))
@@ -2907,6 +3121,8 @@ async fn cmd_plugin_toggle(
     enabled: bool,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    let _decision =
+        enforce_permission(&state, approvals::PermissionCapability::PluginManage, Some(&name))?;
     let mut mgr = state.plugin_manager.lock().await;
     mgr.set_enabled(&name, enabled)?;
     Ok(serde_json::json!({ "ok": true, "name": name, "enabled": enabled }))
@@ -2918,6 +3134,8 @@ async fn cmd_plugin_execute(
     input: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    let _decision =
+        enforce_permission(&state, approvals::PermissionCapability::PluginExecute, Some(&name))?;
     let mgr = state.plugin_manager.lock().await;
     let output = mgr.execute(&name, &input).await?;
     Ok(serde_json::json!({ "ok": true, "output": output }))
@@ -2948,9 +3166,13 @@ async fn cmd_plugin_discover(
 #[tauri::command]
 async fn cmd_run_benchmarks() -> Result<serde_json::Value, String> {
     let results = cache::benchmarks::Benchmarks::run_all();
+    let mut hot_paths = results.clone();
+    hot_paths.sort_by(|a, b| b.duration_ms.partial_cmp(&a.duration_ms).unwrap_or(std::cmp::Ordering::Equal));
+    let hot_paths: Vec<_> = hot_paths.into_iter().take(3).collect();
     Ok(serde_json::json!({
         "benchmarks": results,
         "all_passed": results.iter().all(|r| r.passed),
+        "hot_paths": hot_paths,
     }))
 }
 
@@ -3713,9 +3935,45 @@ async fn cmd_acknowledge_alert(
 }
 
 #[tauri::command]
-async fn cmd_get_health() -> Result<serde_json::Value, String> {
-    let status = observability::HealthDashboard::check_all().await;
+async fn cmd_get_health(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let providers_configured = {
+        let settings = state.settings.lock().map_err(|e| e.to_string())?;
+        settings.configured_providers().len()
+    };
+    let api_enabled = *state.api_enabled.lock().map_err(|e| e.to_string())?;
+    let vault_unlocked = state.vault.lock().map_err(|e| e.to_string())?.is_unlocked();
+    let recent_error_logs = state
+        .structured_logger
+        .get_recent(100, Some("error"), None)
+        .len();
+    let status = observability::HealthDashboard::check_all(
+        &state.db_path,
+        api_enabled,
+        vault_unlocked,
+        providers_configured,
+        recent_error_logs,
+    )
+    .await;
     Ok(serde_json::json!(status))
+}
+
+#[tauri::command]
+async fn cmd_get_observability_summary(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let health = cmd_get_health(state.clone()).await?;
+    let analytics = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        db.get_analytics().map_err(|e| e.to_string())?
+    };
+    let recent_errors = state.structured_logger.get_recent(20, Some("error"), None);
+    let recent_warnings = state.structured_logger.get_recent(20, Some("warn"), None);
+    Ok(serde_json::json!({
+        "health": health,
+        "analytics": analytics,
+        "recent_errors": recent_errors,
+        "recent_warnings": recent_warnings,
+    }))
 }
 
 // ── R48: AI Training Pipeline commands ─────────────────────────────
@@ -4732,6 +4990,70 @@ async fn cmd_get_pending_approvals(
 }
 
 #[tauri::command]
+async fn cmd_permission_grant(
+    user_id: String,
+    capability: String,
+    allow: bool,
+    org_id: Option<String>,
+    agent_name: Option<String>,
+    reason: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let capability = approvals::PermissionCapability::from_str(&capability)?;
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    approvals::ApprovalManager::ensure_permission_tables(db.conn())?;
+    let grant = approvals::ApprovalManager::grant_permission(
+        db.conn(),
+        &user_id,
+        org_id.as_deref(),
+        agent_name.as_deref(),
+        capability,
+        allow,
+        reason.as_deref(),
+    )?;
+    serde_json::to_value(&grant).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_permission_list(
+    user_id: Option<String>,
+    capability: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let capability = capability
+        .as_deref()
+        .map(approvals::PermissionCapability::from_str)
+        .transpose()?;
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    approvals::ApprovalManager::ensure_permission_tables(db.conn())?;
+    approvals::ApprovalManager::seed_default_permissions(db.conn())?;
+    let grants = approvals::ApprovalManager::list_permissions(
+        db.conn(),
+        user_id.as_deref(),
+        capability,
+    )?;
+    Ok(serde_json::json!({ "grants": grants }))
+}
+
+#[tauri::command]
+async fn cmd_permission_check(
+    capability: String,
+    agent_name: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let capability = approvals::PermissionCapability::from_str(&capability)?;
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    approvals::ApprovalManager::ensure_permission_tables(db.conn())?;
+    approvals::ApprovalManager::seed_default_permissions(db.conn())?;
+    let decision = approvals::ApprovalManager::check_current_permission(
+        db.conn(),
+        capability,
+        agent_name.as_deref(),
+    )?;
+    serde_json::to_value(&decision).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn cmd_respond_approval(
     id: String,
     status: String,
@@ -5199,20 +5521,27 @@ async fn cmd_sandbox_available() -> Result<serde_json::Value, String> {
 async fn cmd_sandbox_run(
     config: serde_json::Value,
     command: String,
+    state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    let _decision = enforce_permission(&state, approvals::PermissionCapability::SandboxManage, None)?;
     let cfg: sandbox::SandboxConfig = serde_json::from_value(config).map_err(|e| e.to_string())?;
     let result = sandbox::SandboxManager::create_sandbox(&cfg, &command).await?;
     serde_json::to_value(&result).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-async fn cmd_sandbox_list() -> Result<serde_json::Value, String> {
+async fn cmd_sandbox_list(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let _decision = enforce_permission(&state, approvals::PermissionCapability::SandboxManage, None)?;
     let containers = sandbox::SandboxManager::list_running().await?;
     serde_json::to_value(&containers).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-async fn cmd_sandbox_kill(id: String) -> Result<serde_json::Value, String> {
+async fn cmd_sandbox_kill(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let _decision = enforce_permission(&state, approvals::PermissionCapability::SandboxManage, None)?;
     sandbox::SandboxManager::kill_sandbox(&id).await?;
     Ok(serde_json::json!({ "ok": true }))
 }
@@ -5795,6 +6124,8 @@ async fn cmd_terminal_execute(
     command: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    let _decision =
+        enforce_permission(&state, approvals::PermissionCapability::TerminalExecute, None)?;
     let mut terminal = state.smart_terminal.lock().await;
     let output = terminal.execute(&command).await?;
     serde_json::to_value(&output).map_err(|e| e.to_string())
@@ -5851,6 +6182,8 @@ async fn cmd_plugin_invoke_method(
     args: serde_json::Value,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    let _decision =
+        enforce_permission(&state, approvals::PermissionCapability::PluginExecute, Some(&name))?;
     let api = state.extension_api_v2.lock().await;
     api.invoke_plugin_method(&name, &method, &args)
 }
@@ -5873,6 +6206,8 @@ async fn cmd_plugin_storage_set(
     value: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    let _decision =
+        enforce_permission(&state, approvals::PermissionCapability::PluginExecute, Some(&name))?;
     let api = state.extension_api_v2.lock().await;
     api.plugin_storage_set(&name, &key, &value)?;
     Ok(serde_json::json!({ "ok": true, "plugin": name, "key": key }))
@@ -6912,6 +7247,7 @@ async fn cmd_process_file_action(
     state: tauri::State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<serde_json::Value, String> {
+    let _decision = enforce_permission(&state, approvals::PermissionCapability::ShellExecute, None)?;
     let action = {
         let si = state.shell_integration.lock().map_err(|e| e.to_string())?;
         si.process_file_action(&file_path, &action_id)?
@@ -6930,6 +7266,7 @@ async fn cmd_process_text_action(
     state: tauri::State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<serde_json::Value, String> {
+    let _decision = enforce_permission(&state, approvals::PermissionCapability::ShellExecute, None)?;
     let action = {
         let si = state.shell_integration.lock().map_err(|e| e.to_string())?;
         si.process_text_action(&text, &action_id)?
@@ -9493,8 +9830,7 @@ pub fn run() {
             let playbooks_dir = app_dir.join("playbooks");
             std::fs::create_dir_all(&playbooks_dir).ok();
 
-            let settings = config::Settings::load(&app_dir);
-            let gateway = brain::Gateway::new(&settings);
+            let mut settings = config::Settings::load(&app_dir);
 
             // ── R21: Initialize secure vault ─────────────────────────
             let mut secure_vault = vault::SecureVault::new(&app_dir);
@@ -9510,7 +9846,11 @@ pub fn run() {
                         tracing::info!("Created new vault");
                         // Migrate existing plaintext keys
                         match secure_vault.migrate_from_settings(&settings) {
-                            Ok(n) if n > 0 => tracing::info!("Migrated {} keys to vault", n),
+                            Ok(n) if n > 0 => {
+                                tracing::info!("Migrated {} keys to vault", n);
+                                scrub_persisted_secrets(&mut settings);
+                                let _ = settings.save();
+                            }
                             Ok(_) => {}
                             Err(e) => tracing::warn!("Key migration failed: {}", e),
                         }
@@ -9520,6 +9860,13 @@ pub fn run() {
             }
 
             // ── R45: Load branding config ────────────────────────────
+            if secure_vault.is_unlocked() {
+                if let Err(e) = hydrate_settings_from_vault(&mut settings, &secure_vault) {
+                    tracing::warn!("Failed to hydrate settings from vault: {}", e);
+                }
+            }
+            let gateway = brain::Gateway::new(&settings);
+
             let branding_path = app_dir.join("branding.json");
             let branding_config =
                 branding::BrandingConfig::load(&branding_path).unwrap_or_else(|e| {
@@ -10169,6 +10516,7 @@ pub fn run() {
             cmd_get_status,
             cmd_process_message,
             cmd_get_tasks,
+            cmd_retry_task,
             cmd_classify_task,
             cmd_get_settings,
             cmd_update_settings,
@@ -10231,6 +10579,8 @@ pub fn run() {
             cmd_vault_retrieve,
             cmd_vault_delete,
             cmd_vault_migrate,
+            cmd_vault_rotate,
+            cmd_vault_audit,
             // R22: Marketplace commands
             cmd_marketplace_list,
             cmd_marketplace_search,
@@ -10348,6 +10698,7 @@ pub fn run() {
             cmd_get_alerts,
             cmd_acknowledge_alert,
             cmd_get_health,
+            cmd_get_observability_summary,
             // R48: AI Training Pipeline commands
             cmd_get_training_summary,
             cmd_get_training_records,
@@ -10428,6 +10779,9 @@ pub fn run() {
             cmd_respond_approval,
             cmd_classify_risk,
             cmd_list_approval_history,
+            cmd_permission_grant,
+            cmd_permission_list,
+            cmd_permission_check,
             // R63: Calendar Integration commands
             cmd_calendar_list_events,
             cmd_calendar_create_event,
@@ -10874,4 +11228,47 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn secret_settings_are_scrubbed_from_persisted_config() {
+        let mut settings = config::Settings::default();
+        settings.set("anthropic_api_key", "sk-ant");
+        settings.set("openai_api_key", "sk-openai");
+        settings.set("discord_bot_token", "discord-secret");
+
+        scrub_persisted_secrets(&mut settings);
+
+        assert!(settings.anthropic_api_key.is_empty());
+        assert!(settings.openai_api_key.is_empty());
+        assert!(settings.discord_bot_token.is_empty());
+    }
+
+    #[test]
+    fn settings_can_be_hydrated_from_vault() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut vault = vault::SecureVault::new(dir.path());
+        vault.create("pw").unwrap();
+        vault.store("ANTHROPIC_API_KEY", "sk-ant").unwrap();
+        vault.store("GOOGLE_REFRESH_TOKEN", "refresh-token").unwrap();
+
+        let mut settings = config::Settings::default();
+        hydrate_settings_from_vault(&mut settings, &vault).unwrap();
+
+        assert_eq!(settings.anthropic_api_key, "sk-ant");
+        assert_eq!(settings.google_refresh_token, "refresh-token");
+    }
+
+    #[test]
+    fn retryable_statuses_are_honest() {
+        assert!(is_retryable_task_status("failed"));
+        assert!(is_retryable_task_status("killed"));
+        assert!(is_retryable_task_status("timeout"));
+        assert!(!is_retryable_task_status("running"));
+        assert!(!is_retryable_task_status("completed"));
+    }
 }

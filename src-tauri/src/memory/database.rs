@@ -1,6 +1,6 @@
 use crate::automation::scheduler::Trigger;
 use crate::brain::LLMResponse;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 
 pub struct Database {
@@ -277,6 +277,19 @@ impl Database {
             params![task_id, output],
         )?;
         Ok(())
+    }
+
+    pub fn get_task_retry_context(
+        &self,
+        task_id: &str,
+    ) -> Result<Option<(String, String)>, rusqlite::Error> {
+        self.conn
+            .query_row(
+                "SELECT input_text, status FROM tasks WHERE id = ?1",
+                params![task_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
     }
 
     pub fn insert_task_step(
@@ -938,6 +951,20 @@ mod tests {
         let tasks = db.get_tasks(10).unwrap();
         let arr = tasks.as_array().unwrap();
         assert_eq!(arr[0]["output"], "Result: success");
+    }
+
+    #[test]
+    fn get_task_retry_context_returns_input_and_status() {
+        let (db, _) = temp_db();
+        db.create_task_pending("task_retry", "open calculator")
+            .unwrap();
+        db.update_task_status("task_retry", "failed").unwrap();
+
+        let ctx = db.get_task_retry_context("task_retry").unwrap();
+        assert_eq!(
+            ctx,
+            Some(("open calculator".to_string(), "failed".to_string()))
+        );
     }
 
     // ── Task steps ─────────────────────────────────────────────

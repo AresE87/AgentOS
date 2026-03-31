@@ -59,7 +59,6 @@ fn scale_action_coords(
 }
 
 const MAX_TURNS: u32 = 10;
-const MAX_RETRIES: u32 = 2;
 const MAX_BROWSER_OPENS: u32 = 3;
 const BROWSER_OPEN_DELAY_MS: u64 = 2000;
 
@@ -1132,8 +1131,10 @@ async fn execute_with_retry(
     task_id: &str,
 ) -> (bool, String) {
     let mut current = script.to_string();
+    let max_retries = settings.cli_retry_attempts.min(5);
+    let backoff_ms = settings.cli_retry_backoff_ms.min(30_000);
 
-    for attempt in 0..=MAX_RETRIES {
+    for attempt in 0..=max_retries {
         match hands::cli::run_powershell(&current, timeout).await {
             Ok(out) => {
                 if out.exit_code == 0 {
@@ -1150,8 +1151,9 @@ async fn execute_with_retry(
                 } else {
                     format!("Exit code: {}", out.exit_code)
                 };
+                let recoverable = is_recoverable_failure(&err);
 
-                if attempt < MAX_RETRIES {
+                if recoverable && attempt < max_retries {
                     info!(task_id, attempt, "Auto-correcting failed command");
                     let prompt = format!(
                         "Original task: \"{}\"\n\n{}",
@@ -1171,22 +1173,62 @@ async fn execute_with_retry(
                                     cmds.iter().filter_map(|v| v.as_str()).collect();
                                 if !new.is_empty() {
                                     current = new.join("; ");
+                                    tokio::time::sleep(std::time::Duration::from_millis(backoff_ms))
+                                        .await;
                                     continue;
                                 }
                             }
                         }
                     }
                 }
-                return (false, format!("Error: {}", err));
+                let kind = if recoverable { "recoverable" } else { "fatal" };
+                return (false, format!("{} error: {}", kind, err));
             }
             Err(e) => {
-                if attempt >= MAX_RETRIES {
-                    return (false, format!("Execution error: {}", e));
+                let err = e.to_string();
+                let recoverable = is_recoverable_failure(&err);
+                if !recoverable || attempt >= max_retries {
+                    let kind = if recoverable { "recoverable" } else { "fatal" };
+                    return (false, format!("{} execution error: {}", kind, err));
                 }
+                tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
             }
         }
     }
     (false, "Failed after retries".into())
+}
+
+fn is_recoverable_failure(error: &str) -> bool {
+    let lower = error.to_lowercase();
+    let recoverable_patterns = [
+        "timed out",
+        "timeout",
+        "temporarily",
+        "network",
+        "connection reset",
+        "connection aborted",
+        "connection refused",
+        "failed to fetch",
+        "service unavailable",
+        "rate limit",
+        "429",
+        "try again",
+        "access is denied",
+    ];
+    let fatal_patterns = [
+        "syntax error",
+        "not recognized as the name of a cmdlet",
+        "parameter cannot be found",
+        "missing argument",
+        "wrong password",
+        "corrupted vault",
+    ];
+    if fatal_patterns.iter().any(|pattern| lower.contains(pattern)) {
+        return false;
+    }
+    recoverable_patterns
+        .iter()
+        .any(|pattern| lower.contains(pattern))
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1321,5 +1363,20 @@ fn save_step(p: &Path, id: &str, n: u32, a: &AgentAction, sp: &Path, r: &Executi
             r.success,
             r.duration_ms,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_recoverable_failure;
+
+    #[test]
+    fn classifies_recoverable_failures_honestly() {
+        assert!(is_recoverable_failure("network timeout while fetching"));
+        assert!(is_recoverable_failure("429 rate limit"));
+        assert!(is_recoverable_failure("service unavailable"));
+        assert!(!is_recoverable_failure("syntax error near unexpected token"));
+        assert!(!is_recoverable_failure("The term 'foo' is not recognized as the name of a cmdlet"));
+        assert!(!is_recoverable_failure("wrong password or corrupted vault"));
     }
 }

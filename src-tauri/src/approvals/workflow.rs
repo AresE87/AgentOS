@@ -1,3 +1,6 @@
+use crate::enterprise::OrgManager;
+use crate::users::UserManager;
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -47,6 +50,84 @@ pub struct ApprovalRequest {
     pub requested_at: String,
     pub responded_at: Option<String>,
     pub response_by: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PermissionCapability {
+    VaultRead,
+    VaultWrite,
+    VaultMigrate,
+    TerminalExecute,
+    SandboxManage,
+    PluginManage,
+    PluginExecute,
+    ShellExecute,
+}
+
+impl PermissionCapability {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::VaultRead => "vault_read",
+            Self::VaultWrite => "vault_write",
+            Self::VaultMigrate => "vault_migrate",
+            Self::TerminalExecute => "terminal_execute",
+            Self::SandboxManage => "sandbox_manage",
+            Self::PluginManage => "plugin_manage",
+            Self::PluginExecute => "plugin_execute",
+            Self::ShellExecute => "shell_execute",
+        }
+    }
+
+    pub fn from_str(value: &str) -> Result<Self, String> {
+        match value.trim().to_lowercase().as_str() {
+            "vault_read" => Ok(Self::VaultRead),
+            "vault_write" => Ok(Self::VaultWrite),
+            "vault_migrate" => Ok(Self::VaultMigrate),
+            "terminal_execute" => Ok(Self::TerminalExecute),
+            "sandbox_manage" => Ok(Self::SandboxManage),
+            "plugin_manage" => Ok(Self::PluginManage),
+            "plugin_execute" => Ok(Self::PluginExecute),
+            "shell_execute" => Ok(Self::ShellExecute),
+            other => Err(format!("Unknown capability '{}'", other)),
+        }
+    }
+
+    pub fn all() -> &'static [PermissionCapability] {
+        &[
+            Self::VaultRead,
+            Self::VaultWrite,
+            Self::VaultMigrate,
+            Self::TerminalExecute,
+            Self::SandboxManage,
+            Self::PluginManage,
+            Self::PluginExecute,
+            Self::ShellExecute,
+        ]
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PermissionGrant {
+    pub id: String,
+    pub user_id: String,
+    pub org_id: Option<String>,
+    pub agent_name: Option<String>,
+    pub capability: PermissionCapability,
+    pub allow: bool,
+    pub reason: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PermissionDecision {
+    pub allowed: bool,
+    pub capability: PermissionCapability,
+    pub user_id: String,
+    pub org_id: Option<String>,
+    pub agent_name: Option<String>,
+    pub source: String,
+    pub reason: Option<String>,
 }
 
 // ── Approval manager (in-memory store) ─────────────────────────────
@@ -207,5 +288,301 @@ impl ApprovalManager {
         let mut list: Vec<ApprovalRequest> = store.values().cloned().collect();
         list.sort_by(|a, b| b.requested_at.cmp(&a.requested_at));
         list
+    }
+
+    pub fn ensure_permission_tables(conn: &Connection) -> Result<(), String> {
+        UserManager::ensure_table(conn)?;
+        let _ = OrgManager::ensure_tables(conn);
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS permission_grants (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                org_id TEXT,
+                agent_name TEXT,
+                capability TEXT NOT NULL,
+                allow INTEGER NOT NULL DEFAULT 1,
+                reason TEXT,
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_permission_scope
+                ON permission_grants(user_id, capability, org_id, agent_name, created_at DESC);",
+        )
+        .map_err(|e| e.to_string())
+    }
+
+    pub fn seed_default_permissions(conn: &Connection) -> Result<(), String> {
+        Self::ensure_permission_tables(conn)?;
+        let existing: i64 = conn
+            .query_row("SELECT COUNT(*) FROM permission_grants", [], |row| row.get(0))
+            .map_err(|e| e.to_string())?;
+        if existing > 0 {
+            return Ok(());
+        }
+
+        for capability in PermissionCapability::all() {
+            Self::grant_permission(
+                conn,
+                "local",
+                None,
+                None,
+                *capability,
+                true,
+                Some("Default local bootstrap grant"),
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn current_scope(conn: &Connection) -> Result<(String, Option<String>), String> {
+        Self::ensure_permission_tables(conn)?;
+        let user_id = UserManager::get_current_user(conn)?
+            .map(|session| session.user_id)
+            .unwrap_or_else(|| "local".to_string());
+        let org_id = OrgManager::get_current_org(conn)?.map(|org| org.id);
+        Ok((user_id, org_id))
+    }
+
+    pub fn grant_permission(
+        conn: &Connection,
+        user_id: &str,
+        org_id: Option<&str>,
+        agent_name: Option<&str>,
+        capability: PermissionCapability,
+        allow: bool,
+        reason: Option<&str>,
+    ) -> Result<PermissionGrant, String> {
+        Self::ensure_permission_tables(conn)?;
+        let grant = PermissionGrant {
+            id: uuid::Uuid::new_v4().to_string(),
+            user_id: user_id.to_string(),
+            org_id: org_id.map(|v| v.to_string()),
+            agent_name: agent_name.map(|v| v.to_string()),
+            capability,
+            allow,
+            reason: reason.map(|v| v.to_string()),
+            created_at: chrono::Utc::now().to_rfc3339(),
+        };
+
+        conn.execute(
+            "INSERT INTO permission_grants
+             (id, user_id, org_id, agent_name, capability, allow, reason, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                grant.id,
+                grant.user_id,
+                grant.org_id,
+                grant.agent_name,
+                grant.capability.as_str(),
+                grant.allow as i64,
+                grant.reason,
+                grant.created_at,
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+
+        Ok(grant)
+    }
+
+    pub fn list_permissions(
+        conn: &Connection,
+        user_id: Option<&str>,
+        capability: Option<PermissionCapability>,
+    ) -> Result<Vec<PermissionGrant>, String> {
+        Self::ensure_permission_tables(conn)?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, user_id, org_id, agent_name, capability, allow, reason, created_at
+                 FROM permission_grants
+                 WHERE (?1 IS NULL OR user_id = ?1)
+                   AND (?2 IS NULL OR capability = ?2)
+                 ORDER BY created_at DESC",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(
+                params![user_id, capability.map(|cap| cap.as_str())],
+                |row| {
+                    let capability_raw: String = row.get(4)?;
+                    Ok(PermissionGrant {
+                        id: row.get(0)?,
+                        user_id: row.get(1)?,
+                        org_id: row.get(2)?,
+                        agent_name: row.get(3)?,
+                        capability: PermissionCapability::from_str(&capability_raw).map_err(
+                            |e| rusqlite::Error::FromSqlConversionFailure(
+                                4,
+                                rusqlite::types::Type::Text,
+                                Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
+                            ),
+                        )?,
+                        allow: row.get::<_, i64>(5)? != 0,
+                        reason: row.get(6)?,
+                        created_at: row.get(7)?,
+                    })
+                },
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(rows.filter_map(|row| row.ok()).collect())
+    }
+
+    pub fn check_current_permission(
+        conn: &Connection,
+        capability: PermissionCapability,
+        agent_name: Option<&str>,
+    ) -> Result<PermissionDecision, String> {
+        let (user_id, org_id) = Self::current_scope(conn)?;
+        Self::check_permission(conn, &user_id, org_id.as_deref(), agent_name, capability)
+    }
+
+    pub fn check_permission(
+        conn: &Connection,
+        user_id: &str,
+        org_id: Option<&str>,
+        agent_name: Option<&str>,
+        capability: PermissionCapability,
+    ) -> Result<PermissionDecision, String> {
+        Self::seed_default_permissions(conn)?;
+        let grant = conn
+            .query_row(
+                "SELECT id, user_id, org_id, agent_name, capability, allow, reason, created_at
+                 FROM permission_grants
+                 WHERE user_id = ?1
+                   AND capability = ?2
+                   AND (org_id = ?3 OR org_id IS NULL)
+                   AND (agent_name = ?4 OR agent_name IS NULL)
+                 ORDER BY
+                   CASE WHEN org_id IS NULL THEN 0 ELSE 1 END DESC,
+                   CASE WHEN agent_name IS NULL THEN 0 ELSE 1 END DESC,
+                   created_at DESC
+                 LIMIT 1",
+                params![user_id, capability.as_str(), org_id, agent_name],
+                |row| {
+                    Ok(PermissionGrant {
+                        id: row.get(0)?,
+                        user_id: row.get(1)?,
+                        org_id: row.get(2)?,
+                        agent_name: row.get(3)?,
+                        capability,
+                        allow: row.get::<_, i64>(5)? != 0,
+                        reason: row.get(6)?,
+                        created_at: row.get(7)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+
+        match grant {
+            Some(grant) => Ok(PermissionDecision {
+                allowed: grant.allow,
+                capability,
+                user_id: user_id.to_string(),
+                org_id: org_id.map(|v| v.to_string()),
+                agent_name: agent_name.map(|v| v.to_string()),
+                source: format!("grant:{}", grant.id),
+                reason: grant.reason,
+            }),
+            None => Ok(PermissionDecision {
+                allowed: false,
+                capability,
+                user_id: user_id.to_string(),
+                org_id: org_id.map(|v| v.to_string()),
+                agent_name: agent_name.map(|v| v.to_string()),
+                source: "default_deny".to_string(),
+                reason: Some("No matching permission grant for this scope".to_string()),
+            }),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn setup_conn() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        UserManager::ensure_table(&conn).unwrap();
+        OrgManager::ensure_tables(&conn).unwrap();
+        ApprovalManager::ensure_permission_tables(&conn).unwrap();
+        conn
+    }
+
+    #[test]
+    fn permission_grants_are_scoped_and_observable() {
+        let conn = setup_conn();
+        ApprovalManager::grant_permission(
+            &conn,
+            "alice",
+            Some("org-a"),
+            Some("terminal"),
+            PermissionCapability::TerminalExecute,
+            true,
+            Some("operator grant"),
+        )
+        .unwrap();
+        ApprovalManager::grant_permission(
+            &conn,
+            "bob",
+            Some("org-a"),
+            Some("terminal"),
+            PermissionCapability::TerminalExecute,
+            false,
+            Some("read only"),
+        )
+        .unwrap();
+
+        let allow = ApprovalManager::check_permission(
+            &conn,
+            "alice",
+            Some("org-a"),
+            Some("terminal"),
+            PermissionCapability::TerminalExecute,
+        )
+        .unwrap();
+        let deny = ApprovalManager::check_permission(
+            &conn,
+            "bob",
+            Some("org-a"),
+            Some("terminal"),
+            PermissionCapability::TerminalExecute,
+        )
+        .unwrap();
+
+        assert!(allow.allowed);
+        assert!(!deny.allowed);
+        assert_eq!(deny.reason.as_deref(), Some("read only"));
+        assert_eq!(
+            ApprovalManager::list_permissions(&conn, Some("alice"), None)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn permission_defaults_to_local_bootstrap_and_denies_unknown_scope() {
+        let conn = setup_conn();
+        ApprovalManager::seed_default_permissions(&conn).unwrap();
+
+        let local = ApprovalManager::check_permission(
+            &conn,
+            "local",
+            None,
+            Some("vault"),
+            PermissionCapability::VaultRead,
+        )
+        .unwrap();
+        let stranger = ApprovalManager::check_permission(
+            &conn,
+            "stranger",
+            None,
+            Some("vault"),
+            PermissionCapability::VaultRead,
+        )
+        .unwrap();
+
+        assert!(local.allowed);
+        assert!(!stranger.allowed);
+        assert_eq!(stranger.source, "default_deny");
     }
 }

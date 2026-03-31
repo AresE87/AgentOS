@@ -17,6 +17,10 @@ pub struct Settings {
     pub max_cost_per_task: f64,
     #[serde(default = "default_timeout")]
     pub cli_timeout: u64,
+    #[serde(default = "default_cli_retry_attempts")]
+    pub cli_retry_attempts: u32,
+    #[serde(default = "default_cli_retry_backoff_ms")]
+    pub cli_retry_backoff_ms: u64,
     #[serde(default = "default_max_steps")]
     pub max_steps_per_task: u32,
     #[serde(default = "default_swarm_max_concurrency")]
@@ -145,6 +149,12 @@ fn default_max_cost() -> f64 {
 fn default_timeout() -> u64 {
     300
 }
+fn default_cli_retry_attempts() -> u32 {
+    2
+}
+fn default_cli_retry_backoff_ms() -> u64 {
+    750
+}
 fn default_max_steps() -> u32 {
     20
 }
@@ -238,6 +248,16 @@ impl Settings {
             "cli_timeout" => {
                 if let Ok(v) = value.parse() {
                     self.cli_timeout = v;
+                }
+            }
+            "cli_retry_attempts" => {
+                if let Ok(v) = value.parse::<u32>() {
+                    self.cli_retry_attempts = v.min(5);
+                }
+            }
+            "cli_retry_backoff_ms" => {
+                if let Ok(v) = value.parse::<u64>() {
+                    self.cli_retry_backoff_ms = v.min(30_000);
                 }
             }
             "max_steps_per_task" => {
@@ -416,6 +436,8 @@ impl Settings {
             "log_level": self.log_level,
             "max_cost_per_task": self.max_cost_per_task,
             "cli_timeout": self.cli_timeout,
+            "cli_retry_attempts": self.cli_retry_attempts,
+            "cli_retry_backoff_ms": self.cli_retry_backoff_ms,
             "max_steps_per_task": self.max_steps_per_task,
             "swarm_max_concurrency": self.swarm_max_concurrency,
             "input_delay_ms": self.input_delay_ms,
@@ -584,6 +606,8 @@ impl Default for Settings {
             log_level: default_log_level(),
             max_cost_per_task: default_max_cost(),
             cli_timeout: default_timeout(),
+            cli_retry_attempts: default_cli_retry_attempts(),
+            cli_retry_backoff_ms: default_cli_retry_backoff_ms(),
             max_steps_per_task: default_max_steps(),
             swarm_max_concurrency: default_swarm_max_concurrency(),
             input_delay_ms: default_input_delay(),
