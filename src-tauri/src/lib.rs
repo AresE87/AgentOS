@@ -95,6 +95,18 @@ fn enforce_permission(
     approvals::ApprovalManager::seed_default_permissions(db.conn())?;
     let decision =
         approvals::ApprovalManager::check_current_permission(db.conn(), capability, agent_name)?;
+    let _ = enterprise::AuditLog::ensure_table(db.conn());
+    let _ = enterprise::AuditLog::log(
+        db.conn(),
+        "permission_enforced",
+        serde_json::json!({
+            "capability": capability.as_str(),
+            "agent_name": agent_name,
+            "allowed": decision.allowed,
+            "source": decision.source,
+            "reason": decision.reason,
+        }),
+    );
     if decision.allowed {
         Ok(decision)
     } else {
@@ -1022,6 +1034,8 @@ async fn cmd_retry_task(
             "task_retry_requested",
             serde_json::json!({ "task_id": task_id, "status": status }),
         );
+        let mgr = state.offline_manager.blocking_lock();
+        let _ = mgr.record_task_retry(&conn, &task_id, &status);
     }
     let retried = cmd_process_message(state, app_handle, input).await?;
     Ok(serde_json::json!({
@@ -2408,6 +2422,27 @@ async fn cmd_vault_audit(
         .filter(|entry| entry.event_type.starts_with("vault_"))
         .collect();
     Ok(serde_json::json!({ "entries": vault_entries, "count": vault_entries.len() }))
+}
+
+#[tauri::command]
+async fn cmd_trust_boundaries(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let api_enabled = *state.api_enabled.lock().map_err(|e| e.to_string())?;
+    let vault_unlocked = state.vault.lock().map_err(|e| e.to_string())?.is_unlocked();
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let boundaries =
+        approvals::ApprovalManager::trust_boundaries(db.conn(), api_enabled, vault_unlocked)?;
+    serde_json::to_value(&boundaries).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_permission_enforcement_audit(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let report = approvals::ApprovalManager::audit_permission_enforcement(db.conn())?;
+    serde_json::to_value(&report).map_err(|e| e.to_string())
 }
 
 // ── R23: Billing commands ────────────────────────────────────
@@ -3997,13 +4032,15 @@ async fn cmd_export_logs(state: tauri::State<'_, AppState>) -> Result<serde_json
 #[tauri::command]
 async fn cmd_get_alerts(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let mgr = state.alert_manager.lock().await;
-    let active: Vec<_> = mgr.get_active().into_iter().cloned().collect();
-    let all = mgr.get_all().to_vec();
-    let rules = mgr.get_rules().to_vec();
+    let active = mgr.get_active()?;
+    let all = mgr.get_all()?;
+    let rules = mgr.get_rules()?;
+    let runbooks = mgr.get_runbooks()?;
     Ok(serde_json::json!({
         "active": active,
         "all": all,
         "rules": rules,
+        "runbooks": runbooks,
         "active_count": active.len()
     }))
 }
@@ -4013,9 +4050,40 @@ async fn cmd_acknowledge_alert(
     alert_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let mut mgr = state.alert_manager.lock().await;
-    mgr.acknowledge(&alert_id);
+    let mgr = state.alert_manager.lock().await;
+    mgr.acknowledge(&alert_id)?;
     Ok(serde_json::json!({ "ok": true, "alert_id": alert_id }))
+}
+
+#[tauri::command]
+async fn cmd_open_incident(
+    rule_id: String,
+    message: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.alert_manager.lock().await;
+    let incident = mgr.open_incident(&rule_id, &message)?;
+    serde_json::to_value(&incident).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_resolve_incident(
+    alert_id: String,
+    notes: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.alert_manager.lock().await;
+    mgr.resolve(&alert_id, notes.as_deref())?;
+    Ok(serde_json::json!({ "ok": true, "alert_id": alert_id }))
+}
+
+#[tauri::command]
+async fn cmd_incident_runbooks(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.alert_manager.lock().await;
+    let runbooks = mgr.get_runbooks()?;
+    serde_json::to_value(&runbooks).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -4052,11 +4120,21 @@ async fn cmd_get_observability_summary(
     };
     let recent_errors = state.structured_logger.get_recent(20, Some("error"), None);
     let recent_warnings = state.structured_logger.get_recent(20, Some("warn"), None);
+    let alerts = {
+        let mgr = state.alert_manager.lock().await;
+        mgr.get_active()?
+    };
+    let reliability = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        observability::HealthDashboard::reliability_report(db.conn(), 30)
+    };
     Ok(serde_json::json!({
         "health": health,
         "analytics": analytics,
         "recent_errors": recent_errors,
         "recent_warnings": recent_warnings,
+        "active_incidents": alerts,
+        "reliability": reliability,
     }))
 }
 
@@ -6612,7 +6690,8 @@ async fn cmd_sync_offline(state: tauri::State<'_, AppState>) -> Result<serde_jso
             }
             Err(error) => {
                 let mut mgr = state.offline_manager.lock().await;
-                mgr.mark_sync_failure(format!("{}: {}", item.id, error));
+                let db = state.db.lock().map_err(|e| e.to_string())?;
+                mgr.mark_sync_failure(db.conn(), &item.id, format!("{}: {}", item.id, error))?;
                 failed += 1;
                 last_error = Some(error);
             }
@@ -6629,6 +6708,16 @@ async fn cmd_sync_offline(state: tauri::State<'_, AppState>) -> Result<serde_jso
         "last_error": last_error,
         "status": status,
     }))
+}
+
+#[tauri::command]
+async fn cmd_recovery_report(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.offline_manager.lock().await;
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let report = mgr.recovery_report(db.conn())?;
+    serde_json::to_value(&report).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -10218,7 +10307,8 @@ pub fn run() {
                     app_dir.join("logs"),
                 )),
                 alert_manager: Arc::new(tokio::sync::Mutex::new(
-                    observability::alerts::AlertManager::new(),
+                    observability::alerts::AlertManager::new(db_path.clone())
+                        .expect("failed to initialize alert manager"),
                 )),
                 widget_manager: Arc::new(tokio::sync::Mutex::new(widgets::WidgetManager::new())),
                 conversations: Arc::new(tokio::sync::Mutex::new(Vec::new())),
@@ -10872,6 +10962,8 @@ pub fn run() {
             cmd_vault_migrate,
             cmd_vault_rotate,
             cmd_vault_audit,
+            cmd_trust_boundaries,
+            cmd_permission_enforcement_audit,
             // R22: Marketplace commands
             cmd_marketplace_list,
             cmd_marketplace_search,
@@ -10992,6 +11084,9 @@ pub fn run() {
             cmd_export_logs,
             cmd_get_alerts,
             cmd_acknowledge_alert,
+            cmd_open_incident,
+            cmd_resolve_incident,
+            cmd_incident_runbooks,
             cmd_get_health,
             cmd_get_observability_summary,
             // R48: AI Training Pipeline commands
@@ -11215,6 +11310,7 @@ pub fn run() {
             cmd_sync_offline,
             cmd_get_cached_response,
             cmd_set_connectivity_override,
+            cmd_recovery_report,
             // R81: On-Device AI commands
             cmd_ondevice_list,
             cmd_ondevice_load,

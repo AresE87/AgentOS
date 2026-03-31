@@ -29,6 +29,27 @@ pub struct PendingSyncItem {
     pub queued_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecoveryEvent {
+    pub id: String,
+    pub event_type: String,
+    pub target_id: String,
+    pub status: String,
+    pub details: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecoveryReport {
+    pub generated_at: String,
+    pub pending_items: u32,
+    pub sync_failures: u32,
+    pub successful_recoveries: u32,
+    pub retry_events: u32,
+    pub rollback_events: u32,
+    pub recent_events: Vec<RecoveryEvent>,
+}
+
 /// Manages offline-first functionality: connectivity detection, cached task
 /// responses, and a persistent local queue for actions that must be replayed.
 pub struct OfflineManager {
@@ -68,6 +89,14 @@ impl OfflineManager {
                 action TEXT NOT NULL,
                 payload TEXT NOT NULL,
                 queued_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS offline_recovery_events (
+                id TEXT PRIMARY KEY,
+                event_type TEXT NOT NULL,
+                target_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                details TEXT NOT NULL,
+                created_at TEXT NOT NULL
             );",
         )
         .map_err(|e| format!("Failed to init offline tables: {}", e))
@@ -250,15 +279,140 @@ impl OfflineManager {
         self.pending.retain(|item| item.id != id);
         db.execute("DELETE FROM offline_pending WHERE id = ?1", params![id])
             .map_err(|e| e.to_string())?;
+        self.record_recovery_event(
+            db,
+            "offline_sync",
+            id,
+            "completed",
+            "Pending offline item synchronized successfully",
+        )?;
         self.last_online = Some(chrono::Utc::now().to_rfc3339());
         self.last_sync_at = Some(chrono::Utc::now().to_rfc3339());
         self.last_sync_error = None;
         Ok(())
     }
 
-    pub fn mark_sync_failure(&mut self, error: String) {
+    pub fn mark_sync_failure(
+        &mut self,
+        db: &Connection,
+        target_id: &str,
+        error: String,
+    ) -> Result<(), String> {
         self.last_sync_at = Some(chrono::Utc::now().to_rfc3339());
-        self.last_sync_error = Some(error);
+        self.last_sync_error = Some(error.clone());
+        self.record_recovery_event(db, "offline_sync", target_id, "failed", &error)
+    }
+
+    pub fn record_task_retry(
+        &self,
+        db: &Connection,
+        task_id: &str,
+        previous_status: &str,
+    ) -> Result<(), String> {
+        self.record_recovery_event(
+            db,
+            "task_retry",
+            task_id,
+            "requested",
+            &format!("Retry requested from status '{}'", previous_status),
+        )
+    }
+
+    pub fn record_rollback(
+        &self,
+        db: &Connection,
+        target_id: &str,
+        details: &str,
+    ) -> Result<(), String> {
+        self.record_recovery_event(db, "rollback", target_id, "recorded", details)
+    }
+
+    pub fn list_recovery_events(
+        &self,
+        db: &Connection,
+        limit: usize,
+    ) -> Result<Vec<RecoveryEvent>, String> {
+        Self::init_db(db)?;
+        let mut stmt = db
+            .prepare(
+                "SELECT id, event_type, target_id, status, details, created_at
+                 FROM offline_recovery_events
+                 ORDER BY created_at DESC
+                 LIMIT ?1",
+            )
+            .map_err(|e| e.to_string())?;
+        let events = stmt.query_map(params![limit as i64], |row| {
+            Ok(RecoveryEvent {
+                id: row.get(0)?,
+                event_type: row.get(1)?,
+                target_id: row.get(2)?,
+                status: row.get(3)?,
+                details: row.get(4)?,
+                created_at: row.get(5)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+        Ok(events)
+    }
+
+    pub fn recovery_report(&self, db: &Connection) -> Result<RecoveryReport, String> {
+        let events = self.list_recovery_events(db, 50)?;
+        let sync_failures = events
+            .iter()
+            .filter(|event| event.event_type == "offline_sync" && event.status == "failed")
+            .count() as u32;
+        let successful_recoveries = events
+            .iter()
+            .filter(|event| {
+                (event.event_type == "offline_sync" && event.status == "completed")
+                    || (event.event_type == "task_retry" && event.status == "requested")
+            })
+            .count() as u32;
+        let retry_events = events
+            .iter()
+            .filter(|event| event.event_type == "task_retry")
+            .count() as u32;
+        let rollback_events = events
+            .iter()
+            .filter(|event| event.event_type == "rollback")
+            .count() as u32;
+
+        Ok(RecoveryReport {
+            generated_at: chrono::Utc::now().to_rfc3339(),
+            pending_items: self.pending.len() as u32,
+            sync_failures,
+            successful_recoveries,
+            retry_events,
+            rollback_events,
+            recent_events: events,
+        })
+    }
+
+    fn record_recovery_event(
+        &self,
+        db: &Connection,
+        event_type: &str,
+        target_id: &str,
+        status: &str,
+        details: &str,
+    ) -> Result<(), String> {
+        Self::init_db(db)?;
+        db.execute(
+            "INSERT INTO offline_recovery_events (id, event_type, target_id, status, details, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                uuid::Uuid::new_v4().to_string(),
+                event_type,
+                target_id,
+                status,
+                details,
+                chrono::Utc::now().to_rfc3339(),
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
     }
 
     fn sync_state(&self) -> String {
@@ -379,10 +533,30 @@ mod tests {
             )
             .unwrap();
 
-        manager.mark_sync_failure("CSV parse failed".to_string());
+        manager
+            .mark_sync_failure(&conn, "pending-1", "CSV parse failed".to_string())
+            .unwrap();
         let status = manager.get_status();
         assert_eq!(status.sync_state, "sync_failed");
         assert_eq!(status.last_sync_error.as_deref(), Some("CSV parse failed"));
         assert_eq!(status.pending_sync, 1);
+    }
+
+    #[test]
+    fn recovery_report_tracks_retry_rollback_and_sync_events() {
+        let conn = memory_db();
+        let manager = OfflineManager::new();
+
+        manager
+            .record_task_retry(&conn, "task-1", "failed")
+            .unwrap();
+        manager
+            .record_rollback(&conn, "plugin-1", "Rolled back after bad deploy")
+            .unwrap();
+
+        let report = manager.recovery_report(&conn).unwrap();
+        assert_eq!(report.retry_events, 1);
+        assert_eq!(report.rollback_events, 1);
+        assert_eq!(report.recent_events.len(), 2);
     }
 }

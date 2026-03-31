@@ -1,5 +1,6 @@
 use crate::enterprise::OrgManager;
 use crate::users::UserManager;
+use crate::enterprise::AuditLog;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -128,6 +129,38 @@ pub struct PermissionDecision {
     pub agent_name: Option<String>,
     pub source: String,
     pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrustBoundary {
+    pub id: String,
+    pub name: String,
+    pub capability: Option<PermissionCapability>,
+    pub boundary_type: String,
+    pub current_user: String,
+    pub org_id: Option<String>,
+    pub enforced: bool,
+    pub notes: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PermissionAuditFinding {
+    pub capability: PermissionCapability,
+    pub current_allowed: bool,
+    pub grant_count: usize,
+    pub recent_enforcement_events: usize,
+    pub status: String,
+    pub notes: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PermissionAuditReport {
+    pub generated_at: String,
+    pub user_id: String,
+    pub org_id: Option<String>,
+    pub findings: Vec<PermissionAuditFinding>,
+    pub enforced_capabilities: usize,
+    pub denied_capabilities: usize,
 }
 
 // ── Approval manager (in-memory store) ─────────────────────────────
@@ -493,6 +526,161 @@ impl ApprovalManager {
             }),
         }
     }
+
+    pub fn trust_boundaries(
+        conn: &Connection,
+        api_enabled: bool,
+        vault_unlocked: bool,
+    ) -> Result<Vec<TrustBoundary>, String> {
+        Self::seed_default_permissions(conn)?;
+        let (user_id, org_id) = Self::current_scope(conn)?;
+        let capabilities = [
+            PermissionCapability::VaultRead,
+            PermissionCapability::VaultWrite,
+            PermissionCapability::TerminalExecute,
+            PermissionCapability::SandboxManage,
+            PermissionCapability::PluginManage,
+            PermissionCapability::ShellExecute,
+        ];
+
+        let mut boundaries = capabilities
+            .iter()
+            .map(|capability| {
+                let decision =
+                    Self::check_permission(conn, &user_id, org_id.as_deref(), None, *capability)?;
+                Ok(TrustBoundary {
+                    id: format!("boundary-{}", capability.as_str()),
+                    name: capability_label(*capability).to_string(),
+                    capability: Some(*capability),
+                    boundary_type: capability_zone(*capability).to_string(),
+                    current_user: user_id.clone(),
+                    org_id: org_id.clone(),
+                    enforced: true,
+                    notes: format!(
+                        "Decision source={} allowed={} reason={}",
+                        decision.source,
+                        decision.allowed,
+                        decision.reason.unwrap_or_else(|| "n/a".to_string())
+                    ),
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+
+        boundaries.push(TrustBoundary {
+            id: "boundary-api-surface".to_string(),
+            name: "API Surface".to_string(),
+            capability: None,
+            boundary_type: "network".to_string(),
+            current_user: user_id.clone(),
+            org_id: org_id.clone(),
+            enforced: true,
+            notes: if api_enabled {
+                "Public API is enabled and bounded by current tenant/org resolution".to_string()
+            } else {
+                "Public API is disabled in this runtime".to_string()
+            },
+        });
+        boundaries.push(TrustBoundary {
+            id: "boundary-vault-state".to_string(),
+            name: "Secrets Vault".to_string(),
+            capability: Some(PermissionCapability::VaultRead),
+            boundary_type: "secret".to_string(),
+            current_user: user_id,
+            org_id,
+            enforced: true,
+            notes: if vault_unlocked {
+                "Vault is unlocked and sensitive operations still require explicit capabilities".to_string()
+            } else {
+                "Vault is locked; secret reads and writes remain blocked at runtime".to_string()
+            },
+        });
+
+        Ok(boundaries)
+    }
+
+    pub fn audit_permission_enforcement(conn: &Connection) -> Result<PermissionAuditReport, String> {
+        Self::seed_default_permissions(conn)?;
+        AuditLog::ensure_table(conn)?;
+        let (user_id, org_id) = Self::current_scope(conn)?;
+        let mut findings = Vec::new();
+
+        for capability in PermissionCapability::all() {
+            let decision =
+                Self::check_permission(conn, &user_id, org_id.as_deref(), None, *capability)?;
+            let grants = Self::list_permissions(conn, Some(&user_id), Some(*capability))?;
+            let events = AuditLog::get_by_event_type(conn, "permission_enforced", 500)?
+                .into_iter()
+                .filter(|entry| {
+                    serde_json::from_str::<serde_json::Value>(&entry.details)
+                        .ok()
+                        .and_then(|value| value.get("capability").and_then(|v| v.as_str()).map(str::to_string))
+                        .map(|value| value == capability.as_str())
+                        .unwrap_or(false)
+                })
+                .count();
+            let status = if !decision.allowed {
+                "denied"
+            } else if events > 0 {
+                "enforced"
+            } else {
+                "granted_not_exercised"
+            };
+            findings.push(PermissionAuditFinding {
+                capability: *capability,
+                current_allowed: decision.allowed,
+                grant_count: grants.len(),
+                recent_enforcement_events: events,
+                status: status.to_string(),
+                notes: format!(
+                    "{} boundary for current scope (source: {})",
+                    capability_label(*capability),
+                    decision.source
+                ),
+            });
+        }
+
+        let enforced_capabilities = findings
+            .iter()
+            .filter(|finding| finding.status == "enforced" || finding.status == "granted_not_exercised")
+            .count();
+        let denied_capabilities = findings
+            .iter()
+            .filter(|finding| !finding.current_allowed)
+            .count();
+
+        Ok(PermissionAuditReport {
+            generated_at: chrono::Utc::now().to_rfc3339(),
+            user_id,
+            org_id,
+            findings,
+            enforced_capabilities,
+            denied_capabilities,
+        })
+    }
+}
+
+fn capability_zone(capability: PermissionCapability) -> &'static str {
+    match capability {
+        PermissionCapability::VaultRead
+        | PermissionCapability::VaultWrite
+        | PermissionCapability::VaultMigrate => "secret",
+        PermissionCapability::TerminalExecute | PermissionCapability::ShellExecute => "system",
+        PermissionCapability::SandboxManage => "containment",
+        PermissionCapability::PluginManage | PermissionCapability::PluginExecute => "extension",
+    }
+}
+
+fn capability_label(capability: PermissionCapability) -> &'static str {
+    match capability {
+        PermissionCapability::VaultRead => "Vault Read",
+        PermissionCapability::VaultWrite => "Vault Write",
+        PermissionCapability::VaultMigrate => "Vault Migrate",
+        PermissionCapability::TerminalExecute => "Terminal Execute",
+        PermissionCapability::SandboxManage => "Sandbox Manage",
+        PermissionCapability::PluginManage => "Plugin Manage",
+        PermissionCapability::PluginExecute => "Plugin Execute",
+        PermissionCapability::ShellExecute => "Shell Execute",
+    }
 }
 
 #[cfg(test)]
@@ -584,5 +772,38 @@ mod tests {
         assert!(local.allowed);
         assert!(!stranger.allowed);
         assert_eq!(stranger.source, "default_deny");
+    }
+
+    #[test]
+    fn trust_boundaries_and_audit_use_real_permissions_and_audit_log() {
+        let conn = setup_conn();
+        AuditLog::ensure_table(&conn).unwrap();
+        ApprovalManager::grant_permission(
+            &conn,
+            "local",
+            None,
+            None,
+            PermissionCapability::VaultRead,
+            true,
+            Some("needed for secrets"),
+        )
+        .unwrap();
+        AuditLog::log(
+            &conn,
+            "permission_enforced",
+            serde_json::json!({ "capability": "vault_read", "allowed": true }),
+        )
+        .unwrap();
+
+        let boundaries = ApprovalManager::trust_boundaries(&conn, true, true).unwrap();
+        let audit = ApprovalManager::audit_permission_enforcement(&conn).unwrap();
+
+        assert!(boundaries.iter().any(|item| item.name == "Vault Read"));
+        assert!(boundaries.iter().any(|item| item.id == "boundary-api-surface"));
+        assert!(audit
+            .findings
+            .iter()
+            .any(|finding| finding.capability == PermissionCapability::VaultRead));
+        assert!(audit.enforced_capabilities > 0);
     }
 }
