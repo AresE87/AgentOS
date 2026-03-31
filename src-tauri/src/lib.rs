@@ -9541,7 +9541,7 @@ async fn cmd_reputation_get(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let engine = state.reputation_engine.lock().await;
-    let score = engine.get_score(&agent_id);
+    let score = engine.get_score(&agent_id)?;
     serde_json::to_value(&score).map_err(|e| e.to_string())
 }
 
@@ -9554,7 +9554,12 @@ async fn cmd_reputation_review(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let mut engine = state.reputation_engine.lock().await;
-    let review = engine.add_review(&agent_id, rating, comment, reviewer_id);
+    let review = engine.add_review(&agent_id, rating, comment, reviewer_id)?;
+    drop(engine);
+    let studio = state.creator_studio.lock().await;
+    if studio.get_project(&agent_id)?.is_some() {
+        let _ = studio.record_event(&agent_id, "rating", review.rating, serde_json::json!({}));
+    }
     serde_json::to_value(&review).map_err(|e| e.to_string())
 }
 
@@ -9564,8 +9569,19 @@ async fn cmd_reputation_leaderboard(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let engine = state.reputation_engine.lock().await;
-    let board = engine.get_leaderboard(limit.unwrap_or(10));
+    let board = engine.get_leaderboard(limit.unwrap_or(10))?;
     serde_json::to_value(&board).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_reputation_history(
+    agent_id: String,
+    limit: Option<usize>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let engine = state.reputation_engine.lock().await;
+    let history = engine.list_history(&agent_id, limit.unwrap_or(20))?;
+    serde_json::to_value(&history).map_err(|e| e.to_string())
 }
 
 // ── R143: Cross-User Collaboration IPC commands ──────────────────
@@ -9595,9 +9611,12 @@ async fn cmd_collab_join(
 }
 
 #[tauri::command]
-async fn cmd_collab_list(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+async fn cmd_collab_list(
+    user_id: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
     let mgr = state.collab_manager.lock().await;
-    let sessions: Vec<_> = mgr.list_sessions();
+    let sessions = mgr.list_sessions(user_id.as_deref())?;
     serde_json::to_value(&sessions).map_err(|e| e.to_string())
 }
 
@@ -9625,7 +9644,7 @@ async fn cmd_microtask_post(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let mut market = state.microtask_market.lock().await;
-    let task = market.post_task(title, description, reward_amount, deadline, poster_id);
+    let task = market.post_task(title, description, reward_amount, deadline, poster_id)?;
     serde_json::to_value(&task).map_err(|e| e.to_string())
 }
 
@@ -9653,10 +9672,15 @@ async fn cmd_microtask_complete(
 
 #[tauri::command]
 async fn cmd_microtask_list(
+    agent_id: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let market = state.microtask_market.lock().await;
-    let tasks: Vec<_> = market.list_available();
+    let tasks = if let Some(agent_id) = agent_id {
+        market.list_my_tasks(&agent_id)?
+    } else {
+        market.list_available()?
+    };
     serde_json::to_value(&tasks).map_err(|e| e.to_string())
 }
 
@@ -9667,10 +9691,15 @@ async fn cmd_escrow_create(
     payee: String,
     amount: f64,
     task_description: String,
+    microtask_id: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let mut mgr = state.escrow_manager.lock().await;
-    let tx = mgr.create_escrow(payer, payee, amount, task_description);
+    let tx = mgr.create_escrow(payer, payee, amount, task_description, microtask_id.clone())?;
+    if let Some(task_id) = microtask_id {
+        let market = state.microtask_market.lock().await;
+        let _ = market.attach_escrow(&task_id, &tx.id);
+    }
     serde_json::to_value(&tx).map_err(|e| e.to_string())
 }
 
@@ -9695,13 +9724,34 @@ async fn cmd_escrow_refund(
 }
 
 #[tauri::command]
+async fn cmd_escrow_dispute(
+    tx_id: String,
+    reason: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.escrow_manager.lock().await;
+    let tx = mgr.dispute(&tx_id, reason)?;
+    serde_json::to_value(&tx).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn cmd_escrow_list(
     user_id: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let mgr = state.escrow_manager.lock().await;
-    let txs: Vec<_> = mgr.list_transactions(user_id.as_deref());
+    let txs = mgr.list_transactions(user_id.as_deref())?;
     serde_json::to_value(&txs).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_escrow_history(
+    tx_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.escrow_manager.lock().await;
+    let history = mgr.history(&tx_id)?;
+    serde_json::to_value(&history).map_err(|e| e.to_string())
 }
 
 // ── R146: Agent Insurance IPC commands ───────────────────────────
@@ -9774,8 +9824,28 @@ async fn cmd_creator_create(
         _ => return Err("Invalid project type".to_string()),
     };
     let mut studio = state.creator_studio.lock().await;
-    let project = studio.create_project(name, description, pt, creator_id);
+    let project = studio.create_project(name, description, pt, creator_id)?;
     serde_json::to_value(&project).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_creator_test(
+    project_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let studio = state.creator_studio.lock().await;
+    let summary = studio.run_project_test(&project_id).await?;
+    serde_json::to_value(&summary).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_creator_prepare_package(
+    project_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let studio = state.creator_studio.lock().await;
+    let package = studio.prepare_package(&project_id)?;
+    serde_json::to_value(&package).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -9783,7 +9853,7 @@ async fn cmd_creator_publish(
     project_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let mut studio = state.creator_studio.lock().await;
+    let studio = state.creator_studio.lock().await;
     let project = studio.publish(&project_id)?;
     serde_json::to_value(&project).map_err(|e| e.to_string())
 }
@@ -9794,7 +9864,29 @@ async fn cmd_creator_list(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let studio = state.creator_studio.lock().await;
-    let projects: Vec<_> = studio.list_projects(creator_id.as_deref());
+    let mut projects = studio.list_projects(creator_id.as_deref())?;
+    drop(studio);
+    if creator_id.is_none() {
+        let engine = state.reputation_engine.lock().await;
+        projects.sort_by(|a, b| {
+            let a_score = engine
+                .get_score(&a.id)
+                .ok()
+                .flatten()
+                .map(|score| score.score)
+                .unwrap_or(0.0);
+            let b_score = engine
+                .get_score(&b.id)
+                .ok()
+                .flatten()
+                .map(|score| score.score)
+                .unwrap_or(0.0);
+            b_score
+                .partial_cmp(&a_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| b.updated_at.cmp(&a.updated_at))
+        });
+    }
     serde_json::to_value(&projects).map_err(|e| e.to_string())
 }
 
@@ -9814,7 +9906,7 @@ async fn cmd_creator_metrics(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let engine = state.creator_analytics.lock().await;
-    let metrics = engine.get_metrics();
+    let metrics = engine.get_metrics()?;
     serde_json::to_value(&metrics).map_err(|e| e.to_string())
 }
 
@@ -9824,7 +9916,7 @@ async fn cmd_creator_revenue(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let engine = state.creator_analytics.lock().await;
-    let history = engine.get_revenue_history(limit.unwrap_or(30));
+    let history = engine.get_revenue_history(limit.unwrap_or(30))?;
     serde_json::to_value(&history).map_err(|e| e.to_string())
 }
 
@@ -9834,7 +9926,7 @@ async fn cmd_creator_trends(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let engine = state.creator_analytics.lock().await;
-    let trends = engine.get_download_trend(limit.unwrap_or(30));
+    let trends = engine.get_download_trend(limit.unwrap_or(30))?;
     serde_json::to_value(&trends).map_err(|e| e.to_string())
 }
 
@@ -10214,25 +10306,31 @@ pub fn run() {
                     economy::hiring::HiringManager::new(),
                 )),
                 reputation_engine: Arc::new(tokio::sync::Mutex::new(
-                    economy::reputation::ReputationEngine::new(),
+                    economy::reputation::ReputationEngine::new(db_path.clone())
+                        .map_err(|e| format!("Failed to initialize reputation engine: {}", e))?,
                 )),
                 collab_manager: Arc::new(tokio::sync::Mutex::new(
-                    economy::collaboration::CollabManager::new(),
+                    economy::collaboration::CollabManager::new(db_path.clone())
+                        .map_err(|e| format!("Failed to initialize collaboration manager: {}", e))?,
                 )),
                 microtask_market: Arc::new(tokio::sync::Mutex::new(
-                    economy::microtasks::MicrotaskMarket::new(),
+                    economy::microtasks::MicrotaskMarket::new(db_path.clone())
+                        .map_err(|e| format!("Failed to initialize microtask market: {}", e))?,
                 )),
                 escrow_manager: Arc::new(tokio::sync::Mutex::new(
-                    economy::escrow::EscrowManager::new(),
+                    economy::escrow::EscrowManager::new(db_path.clone())
+                        .map_err(|e| format!("Failed to initialize escrow manager: {}", e))?,
                 )),
                 insurance_manager: Arc::new(tokio::sync::Mutex::new(
                     economy::insurance::InsuranceManager::new(),
                 )),
                 creator_studio: Arc::new(tokio::sync::Mutex::new(
-                    economy::creator_studio::CreatorStudio::new(),
+                    economy::creator_studio::CreatorStudio::new(db_path.clone())
+                        .map_err(|e| format!("Failed to initialize creator studio: {}", e))?,
                 )),
                 creator_analytics: Arc::new(tokio::sync::Mutex::new(
-                    economy::creator_analytics::CreatorAnalyticsEngine::new(),
+                    economy::creator_analytics::CreatorAnalyticsEngine::new(db_path.clone())
+                        .map_err(|e| format!("Failed to initialize creator analytics: {}", e))?,
                 )),
                 affiliate_program: Arc::new(tokio::sync::Mutex::new(
                     economy::affiliate::AffiliateProgram::new(),
@@ -11294,6 +11392,7 @@ pub fn run() {
             cmd_reputation_get,
             cmd_reputation_review,
             cmd_reputation_leaderboard,
+            cmd_reputation_history,
             // R143: Cross-User Collaboration commands
             cmd_collab_create,
             cmd_collab_join,
@@ -11308,7 +11407,9 @@ pub fn run() {
             cmd_escrow_create,
             cmd_escrow_release,
             cmd_escrow_refund,
+            cmd_escrow_dispute,
             cmd_escrow_list,
+            cmd_escrow_history,
             // R146: Agent Insurance commands
             cmd_insurance_create,
             cmd_insurance_list,
@@ -11316,6 +11417,8 @@ pub fn run() {
             cmd_insurance_status,
             // R147: Creator Studio commands
             cmd_creator_create,
+            cmd_creator_test,
+            cmd_creator_prepare_package,
             cmd_creator_publish,
             cmd_creator_list,
             cmd_creator_analytics,
