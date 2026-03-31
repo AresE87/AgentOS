@@ -108,6 +108,10 @@ pub struct Settings {
     #[serde(default)]
     pub google_refresh_token: String,
 
+    // C2: Auto-Update
+    #[serde(default = "default_github_repo")]
+    pub github_repo: String,
+
     // R25: Local LLMs (Ollama)
     #[serde(default)]
     pub use_local_llm: bool,
@@ -172,6 +176,10 @@ fn default_aap_port() -> u16 {
 
 fn default_relay_server_url() -> String {
     "https://relay.agentos.app".to_string()
+}
+
+fn default_github_repo() -> String {
+    "AresE87/AgentOS".to_string()
 }
 
 fn default_local_llm_url() -> String {
@@ -278,6 +286,9 @@ impl Settings {
             }
             "stripe_price_id_team" => {
                 self.stripe_price_id_team = value.to_string();
+            }
+            "github_repo" => {
+                self.github_repo = value.to_string();
             }
             "use_local_llm" => {
                 self.use_local_llm = value == "true" || value == "1";
@@ -390,6 +401,7 @@ impl Settings {
             "has_stripe": !self.stripe_secret_key.is_empty(),
             "has_stripe_customer": !self.stripe_customer_id.is_empty(),
             "language": self.language,
+            "github_repo": self.github_repo,
             "use_local_llm": self.use_local_llm,
             "local_llm_url": self.local_llm_url,
             "local_model": self.local_model,
@@ -569,6 +581,7 @@ impl Default for Settings {
             google_client_id: String::new(),
             google_client_secret: String::new(),
             google_refresh_token: String::new(),
+            github_repo: default_github_repo(),
             use_local_llm: false,
             local_llm_url: default_local_llm_url(),
             local_model: default_local_model(),

@@ -532,6 +532,12 @@ async fn cmd_process_message(
         let subtasks = pipeline::engine::decompose_task(&text, &settings).await
             .map_err(|e| e.to_string())?;
 
+        // C1: Count this task dispatch in daily_usage
+        {
+            let db = state.db.lock().map_err(|e| e.to_string())?;
+            let _ = db.increment_daily_usage(0);
+        }
+
         let kill_switch = state.kill_switch.clone();
         let db_path = state.db_path.clone();
         let cid = chain_id.clone();
@@ -571,10 +577,12 @@ async fn cmd_process_message(
         tracing::info!("Routing to PC task pipeline: {}", &text[..text.len().min(80)]);
         let task_id = uuid::Uuid::new_v4().to_string();
 
-        // Create pending task in DB
+        // Create pending task in DB and count in daily usage
         {
             let db = state.db.lock().map_err(|e| e.to_string())?;
             db.create_task_pending(&task_id, &text).map_err(|e| e.to_string())?;
+            // C1: Count this task dispatch in daily_usage
+            let _ = db.increment_daily_usage(0);
         }
 
         let kill_switch = state.kill_switch.clone();

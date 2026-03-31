@@ -340,6 +340,15 @@ export function useAgent() {
         callInvoke<{ slots: any[] }>('calendar_free_slots', { date, duration_minutes: durationMinutes });
     const calendarGetEvent = (id: string) =>
         callInvoke<any>('calendar_get_event', { id });
+    // C3: Google Calendar OAuth
+    const calendarGetAuthUrl = () =>
+        callInvoke<{ url: string; redirect_uri: string }>('calendar_get_auth_url', {});
+    const calendarExchangeCode = (code: string) =>
+        callInvoke<{ ok: boolean; authenticated: boolean }>('calendar_exchange_code', { code });
+    const calendarRefreshToken = () =>
+        callInvoke<{ ok: boolean; authenticated: boolean }>('calendar_refresh_token', {});
+    const calendarAuthStatus = () =>
+        callInvoke<{ authenticated: boolean; has_refresh_token: boolean }>('calendar_auth_status', {});
 
     // R64: Email Integration
     const emailList = (folder: string, limit?: number) =>
@@ -1083,6 +1092,10 @@ export function useAgent() {
     const affiliateTrack = (linkCode: string, conversion: boolean, amount?: number) =>
         callInvoke<any>('affiliate_track', { link_code: linkCode, conversion, amount });
 
+    // C2: Auto-Update
+    const checkForUpdate = () => callInvoke<any>('check_for_update');
+    const getCurrentVersion = () => callInvoke<{ version: string }>('get_current_version');
+
     return {
         getStatus, processMessage, getTasks, getPlaybooks, setActivePlaybook,
         getSettings, updateSettings, healthCheck, getActiveChain, getChainHistory,
@@ -1159,6 +1172,8 @@ export function useAgent() {
         getPendingApprovals, respondApproval, classifyRisk, listApprovalHistory,
         // R63: Calendar Integration
         calendarListEvents, calendarCreateEvent, calendarUpdateEvent, calendarDeleteEvent, calendarFreeSlots, calendarGetEvent,
+        // C3: Google Calendar OAuth
+        calendarGetAuthUrl, calendarExchangeCode, calendarRefreshToken, calendarAuthStatus,
         // R64: Email Integration
         emailList, emailGet, emailSend, emailDraft, emailSearch, emailMove, emailMarkRead,
         // R65: Database Connector
@@ -1317,6 +1332,8 @@ export function useAgent() {
         creatorMetrics, creatorRevenue, creatorTrends,
         // R149: Affiliate Program
         affiliateCreate, affiliateEarnings, affiliateList, affiliateTrack,
+        // C2: Auto-Update
+        checkForUpdate, getCurrentVersion,
     };
 }
 

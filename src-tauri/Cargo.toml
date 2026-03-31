@@ -33,6 +33,8 @@ zip = "0.6"
 axum = "0.7"
 tower = "0.4"
 tower-http = { version = "0.5", features = ["cors"] }
+tauri-plugin-updater = "2"
+urlencoding = "2"
 
 [dev-dependencies]
 tempfile = "3"
