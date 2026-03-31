@@ -1,5 +1,7 @@
 use reqwest::Client;
 use serde::Serialize;
+use std::path::{Path, PathBuf};
+use tokio::process::Command;
 use tracing::info;
 
 const MAX_CONTENT_LENGTH: usize = 8000;
@@ -364,6 +366,138 @@ fn simple_url_decode(s: &str) -> String {
         }
     }
     result
+}
+
+// ── C10: Headless Browser (Chrome/Edge) ─────────────────────────
+
+/// Known browser executable paths on Windows
+const BROWSER_CANDIDATES: &[&str] = &[
+    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+];
+
+#[derive(Debug, Serialize)]
+pub struct BrowserInfo {
+    pub available: bool,
+    pub browser_path: Option<String>,
+    pub browser_name: Option<String>,
+}
+
+/// Detect if Chrome or Edge is installed and return its path.
+pub fn detect_browser() -> BrowserInfo {
+    for candidate in BROWSER_CANDIDATES {
+        let path = Path::new(candidate);
+        if path.exists() {
+            let name = if candidate.contains("chrome") {
+                "Google Chrome"
+            } else {
+                "Microsoft Edge"
+            };
+            return BrowserInfo {
+                available: true,
+                browser_path: Some(candidate.to_string()),
+                browser_name: Some(name.to_string()),
+            };
+        }
+    }
+    BrowserInfo {
+        available: false,
+        browser_path: None,
+        browser_name: None,
+    }
+}
+
+/// Fetch a page using headless Chrome/Edge (--headless --dump-dom).
+/// This renders JavaScript before capturing the DOM, unlike plain reqwest.
+/// Falls back to reqwest-based fetch_page() if no browser is found.
+pub async fn fetch_with_browser(url: &str) -> Result<PageContent, String> {
+    if !is_url_safe(url) {
+        return Err(format!("Blocked: URL '{}' points to a local/internal address", url));
+    }
+
+    let browser = detect_browser();
+    if !browser.available {
+        info!(url, "No headless browser found, falling back to reqwest");
+        return fetch_page(url).await;
+    }
+
+    let browser_path = browser.browser_path.unwrap();
+    info!(url, browser = %browser_path, "Fetching with headless browser");
+
+    let output = Command::new(&browser_path)
+        .args([
+            "--headless",
+            "--disable-gpu",
+            "--no-sandbox",
+            "--dump-dom",
+            url,
+        ])
+        .output()
+        .await
+        .map_err(|e| format!("Failed to launch headless browser: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Headless browser exited with error: {}", stderr.chars().take(500).collect::<String>()));
+    }
+
+    let html = String::from_utf8_lossy(&output.stdout).to_string();
+    let title = extract_title(&html);
+    let text = extract_text_from_html(&html);
+
+    info!(url, title = %title, text_len = text.len(), "Headless browser fetch complete");
+
+    Ok(PageContent {
+        url: url.to_string(),
+        title,
+        text,
+        status: 200,
+    })
+}
+
+/// Take a screenshot of a URL using headless Chrome/Edge.
+/// Returns the path to the saved screenshot PNG.
+pub async fn screenshot_url(url: &str, output_path: &Path) -> Result<PathBuf, String> {
+    if !is_url_safe(url) {
+        return Err(format!("Blocked: URL '{}' points to a local/internal address", url));
+    }
+
+    let browser = detect_browser();
+    if !browser.available {
+        return Err("No Chrome or Edge browser found for screenshots".to_string());
+    }
+
+    let browser_path = browser.browser_path.unwrap();
+    let screenshot_arg = format!("--screenshot={}", output_path.display());
+
+    info!(url, output = %output_path.display(), browser = %browser_path, "Taking screenshot with headless browser");
+
+    let output = Command::new(&browser_path)
+        .args([
+            "--headless",
+            "--disable-gpu",
+            "--no-sandbox",
+            "--window-size=1280,800",
+            &screenshot_arg,
+            url,
+        ])
+        .output()
+        .await
+        .map_err(|e| format!("Failed to launch headless browser for screenshot: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Screenshot failed: {}", stderr.chars().take(500).collect::<String>()));
+    }
+
+    if output_path.exists() {
+        info!(url, path = %output_path.display(), "Screenshot saved");
+        Ok(output_path.to_path_buf())
+    } else {
+        Err("Screenshot file was not created by browser".to_string())
+    }
 }
 
 #[cfg(test)]
