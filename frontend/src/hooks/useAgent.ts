@@ -1,3 +1,152 @@
+// ============================================================================
+// useAgent.ts — IPC Hook Status Registry
+// ============================================================================
+//
+// === REAL (backed by working Rust backend) ===
+// Core:        getStatus, processMessage, getTasks, getSettings, updateSettings, healthCheck
+// Usage:       getAnalytics, getUsageSummary
+// Playbooks:   getPlaybooks, getPlaybookDetail, startRecording, recordStep, stopRecording,
+//              playPlaybook, deletePlaybook, setActivePlaybook
+// Chains:      getActiveChain, getChainHistory, sendChainMessage
+// PC Control:  captureScreenshot, getUIElements, listWindows, runPCTask, getTaskSteps,
+//              killSwitch, resetKillSwitch
+// Agents:      findAgent, getAgents
+// Mesh:        getMeshNodes, sendMeshTask
+// Triggers:    getTriggers, createTrigger, deleteTrigger, toggleTrigger
+// Channels:    getChannelStatus
+// Telegram:    (configured via wizard, backend manages bot)
+// Discord:     discordStart, discordStop, discordTest, discordSend, getDiscordStatus
+// WhatsApp:    whatsappSetup, whatsappTest, whatsappSend, getWhatsappStatus
+// Feedback:    submitFeedback, getFeedbackStats, getWeeklyInsights, getRecentFeedback
+// Calendar:    calendarListEvents, calendarCreateEvent, calendarUpdateEvent,
+//              calendarDeleteEvent, calendarFreeSlots, calendarGetEvent,
+//              calendarGetAuthUrl, calendarExchangeCode, calendarRefreshToken, calendarAuthStatus
+// Gmail:       gmailGetAuthUrl, gmailExchangeCode, gmailRefreshToken, gmailAuthStatus,
+//              emailList, emailGet, emailSend, emailDraft, emailSearch, emailMove, emailMarkRead
+// Voice:       transcribeAudio, speakText, listVoices, saveSpeech
+// Vision:      detectMonitors, ocrScreenshot, screenDiff
+// Billing:     (Stripe via C1 — checkout, webhooks, usage tracking)
+// Auto-Update: checkForUpdate, getCurrentVersion
+// Smart PB:    runSmartPlaybook, validateSmartPlaybook, getPlaybookVariables
+// i18n:        setLanguage
+// Memory:      memoryStore, memorySearch, memoryList, memoryDelete, memoryForgetAll,
+//              memoryStats, memoryReindex
+// Notifications: getNotifications, markNotificationRead, markAllNotificationsRead, runMonitorCheck
+// File:        readFileContent, saveTempFile, processFile
+// Templates:   getTemplates, getTemplate, saveTemplate, renderTemplate, deleteTemplate
+// Personas:    listPersonas, getPersona, createPersona, updatePersona, deletePersona
+// DB:          dbAdd, dbRemove, dbList, dbTest, dbTables, dbQuery, dbRawQuery
+// Sandbox:     sandboxAvailable, sandboxRun, sandboxList, sandboxKill
+// API:         apiRegistryAdd, apiRegistryRemove, apiRegistryList, apiRegistryCall, apiRegistryTemplates
+// Terminal:    terminalExecute, terminalExplainError, terminalNlToCommand, terminalHistory
+//
+// === STUB (backend returns mock/placeholder data — no real implementation) ===
+// Enterprise:      getAuditLog, exportAuditLog, getOrg, createOrg, listOrgMembers, addOrgMember
+// Compliance:      exportUserData, deleteAllData, getDataInventory, getPrivacyInfo,
+//                  setRetentionPolicy, applyRetention, setPrivacySettings
+// Acquisition:     getBusinessMetrics, getSystemInfo
+// AAP:             aapSendTask, aapQueryCapabilities, aapHealth, getAAPStatus
+// Cloud Relay:     relayConnect, relayDisconnect, relayListNodes, relaySendTask, getRelayStatus
+// Branding:        getBranding, updateBranding, getCssVariables, resetBranding
+// Observability:   getLogs, exportLogs, getAlerts, acknowledgeAlert, getHealth
+// Training:        getTrainingSummary, getTrainingRecords, previewAnonymized, setTrainingOptIn
+// Widgets:         getWidgets, toggleWidget, updateWidgetPosition, updateWidgetOpacity
+// Multi-Agent:     startConversation, getConversation, listConversations, addConversationMessage
+// Screen Rec:      startScreenRecording, stopScreenRecording, getScreenRecording,
+//                  listScreenRecordings, deleteScreenRecording
+// NL Triggers:     parseNLTrigger, createTriggerFromNL, listAllTriggers
+// Collab Chains:   injectChainContext, chainSubtaskAction, getChainInterventions
+// Growth:          getAdoptionMetrics, createShareLink, getReferralLink
+// Multi-User:      listUsers, createUser, getCurrentUser, switchUser, loginUser, logoutUser
+// Approvals:       getPendingApprovals, respondApproval, classifyRisk, listApprovalHistory
+// Marketplace:     marketplaceListAgents, marketplaceSearchAgents, marketplaceInstallAgent,
+//                  marketplaceUninstallAgent, marketplaceCreateAgentPackage
+// Teams:           teamCreate, teamList, teamMembers, teamAddMember, teamRemoveMember,
+//                  teamUpdateRole, teamShareResource
+// Dept Quotas:     setDepartmentQuota, getDepartmentQuota, listDepartmentQuotas, checkQuota,
+//                  scimListUsers, scimSync
+// Workflows:       workflowList, workflowGet, workflowSave, workflowExecute, workflowDelete,
+//                  workflowTemplates
+// Webhooks:        webhookCreate, webhookList, webhookDelete, webhookGet
+// Fine-Tuning:     ftExportData, ftPreviewData, ftStart, ftStatus, ftListJobs
+// Agent Testing:   testListSuites, testRunSuite, testRunSingle, testCreateTemplate
+// PB Versioning:   playbookVersions, playbookSaveVersion, playbookRollback, playbookDiff,
+//                  playbookBranches, playbookCreateBranch
+// Analytics Pro:   analyticsFunnel, analyticsRetention, analyticsCostForecast, analyticsModelComparison
+// Widget Embed:    generateWidgetSnippet, generateWidgetIframe
+// CLI Power:       (terminalExecute etc. listed above as REAL)
+// Extension API:   pluginGetUI, pluginInvokeMethod, pluginStorageGet, pluginStorageSet
+// Translation:     translate, detectLanguage, supportedLanguages
+// Accessibility:   getAccessibility, setAccessibility, getAccessibilityCss
+// Verticals:       listVerticals, getVertical, activateVertical, getActiveVertical
+// Offline:         checkConnectivity, getOfflineStatus, syncOffline, getCachedResponse
+// On-Device AI:    ondeviceList, ondeviceLoad, ondeviceUnload, ondeviceInfer, ondeviceStatus
+// Multimodal:      processMultimodal, captureClipboardInput, detectInputType
+// Predictions:     getPredictions, getPredictionSuggestions, dismissPrediction
+// Cross-App:       crossappRegister, crossappList, crossappSend, crossappStatus
+// Swarm:           swarmCreate, swarmExecute, swarmResults, swarmList
+// Debugger:        debuggerStartTrace, debuggerGetTrace, debuggerListTraces
+// Revenue:         getRevenueMetrics, getChurnPredictions, getUpsellCandidates
+// Infra:           getInfraStatus, infraCheckRegions
+// IPO:             getInvestorMetrics, getDataRoom, getFinancialProjections
+// OS Integration:  getFileActions, getTextActions, processFileAction, processTextAction
+// Federated:       federatedTrain, federatedSubmit, federatedStatus, federatedConfig
+// Human Handoff:   listEscalations, resolveEscalation, createEscalation, getEscalation
+// Compliance Auto: runComplianceCheck, getComplianceReports, getComplianceScore
+// Org Marketplace: orgMarketplacePublish, orgMarketplaceList, orgMarketplaceApprove,
+//                  orgMarketplaceRemove, orgMarketplaceSearch
+// AR/VR:           arvrConnect, arvrDisconnect, arvrStatus, arvrOverlay, arvrCommand
+// Wearable:        wearableScan, wearableConnect, wearableDisconnect, wearableList,
+//                  wearableNotify, wearableHealth
+// IoT:             iotDiscover, iotAdd, iotControl, iotState, iotList
+// Tablet:          tabletEnable, tabletDisable, tabletStatus, tabletLayout
+// TV:              tvEnable, tvDisable, tvStatus, tvContent
+// Car:             carConnect, carDisconnect, carData, carDiagnostics, carCommand
+// Browser Ext:     browserExtStart, browserExtStatus, browserExtSend
+// Email Client:    emailClientAdd, emailClientList, emailClientConnect, emailClientFetch,
+//                  emailClientSend
+// Partners:        listPartners, getPartner, registerPartner, certifyPartner
+// Auto Inbox:      autoInboxAddRule, autoInboxListRules, autoInboxProcess, autoInboxRemoveRule
+// Auto Schedule:   autoScheduleOptimize, autoScheduleFindSlot, autoSchedulePreferences
+// Auto Report:     autoReportCreate, autoReportList, autoReportGenerate, autoReportSchedule
+// Data Entry:      dataEntryCreate, dataEntryProcess, dataEntryList, dataEntryValidate
+// Auto QA:         qaRunChecks, qaGeneratePlan, qaCoverage
+// Auto Support:    supportProcess, supportList, supportResolve, supportStats
+// Procurement:     procurementSubmit, procurementList, procurementApprove, procurementSpend
+// Auto Compliance: autoComplianceRegister, autoComplianceRun, autoComplianceIssues,
+//                  autoComplianceRemediate
+// Reconciliation:  reconcileCreate, reconcileRun, reconcileResolve, reconcileList
+// Reasoning:       reasoningStart, reasoningAddStep, reasoningFinish, reasoningGetChain,
+//                  reasoningListChains
+// Self-Correct:    selfCorrectVerify, selfCorrectApply, selfCorrectHistory
+// Multimodal Rsn:  multimodalAnalyze, multimodalGetAnalysis
+// Causal:          causalAnalyze, causalCounterfactual, causalGetGraph
+// Knowledge Graph: kgAddEntity, kgAddRelationship, kgSearch, kgGetEntity, kgRelationships, kgStats
+// Hypothesis:      hypothesisGenerate, hypothesisUpdate, hypothesisGet, hypothesisList
+// Confidence:      confidenceRecord, confidenceCalibration, confidenceStats
+// Transfer:        transferRegister, transferFind, transferApply, transferList
+// Meta-Learning:   metaRecord, metaCurve, metaAllCurves, metaPredict
+// Legal:           legalCreateCase, legalListCases, legalSearch, legalAnalyze
+// Medical:         medicalAdd, medicalSearch, medicalInteractions, medicalSummary
+// Accounting:      accountingAdd, accountingBalance, accountingReport, accountingCategorize
+// Real Estate:     realestateAdd, realestateSearch, realestateRoi, realestateListing
+// Education:       eduCreateCourse, eduQuiz, eduGrade, eduProgress
+// HR:              hrAdd, hrList, hrOfferLetter, hrBenefits
+// Supply Chain:    supplyTrack, supplyOptimize, supplyForecast, supplyList
+// Construction:    constructionCreate, constructionMilestone, constructionBudget, constructionSafety
+// Agriculture:     agriCreatePlan, agriWeather, agriIrrigation, agriYield
+// Agent Hiring:    hiringPost, hiringList, hiringApply, hiringHire
+// Reputation:      reputationGet, reputationReview, reputationLeaderboard
+// Collab:          collabCreate, collabJoin, collabList, collabShare
+// Microtasks:      microtaskPost, microtaskClaim, microtaskComplete, microtaskList
+// Escrow:          escrowCreate, escrowRelease, escrowRefund, escrowList
+// Insurance:       insuranceCreate, insuranceList, insuranceClaim, insuranceStatus
+// Creator Studio:  creatorCreate, creatorPublish, creatorList, creatorAnalytics
+// Creator Metrics: creatorMetrics, creatorRevenue, creatorTrends
+// Affiliate:       affiliateCreate, affiliateEarnings, affiliateList, affiliateTrack
+//
+// ============================================================================
+
 import type {
     AgentStatus,
     TaskResult,
@@ -239,6 +388,13 @@ export function useAgent() {
     const toggleWidget = (id: string, enabled: boolean) => callInvoke<any>('toggle_widget', { id, enabled });
     const updateWidgetPosition = (id: string, x: number, y: number) => callInvoke<any>('update_widget_position', { id, x, y });
     const updateWidgetOpacity = (id: string, opacity: number) => callInvoke<any>('update_widget_opacity', { id, opacity });
+
+    // C9: Desktop Widget Windows
+    const showQuickTask = () => callInvoke<any>('show_quick_task');
+    const hideQuickTask = () => callInvoke<any>('hide_quick_task');
+    const showWidget = (id: string) => callInvoke<any>('show_widget', { id });
+    const hideWidget = (id: string) => callInvoke<any>('hide_widget', { id });
+    const destroyWidget = (id: string) => callInvoke<any>('destroy_widget', { id });
 
     // R52: Screen Recording & Replay
     const startScreenRecording = (taskId: string, description: string) =>
@@ -1168,6 +1324,8 @@ export function useAgent() {
         getTrainingSummary, getTrainingRecords, previewAnonymized, setTrainingOptIn,
         // R49: Desktop Widgets
         getWidgets, toggleWidget, updateWidgetPosition, updateWidgetOpacity,
+        // C9: Desktop Widget Windows
+        showQuickTask, hideQuickTask, showWidget, hideWidget, destroyWidget,
         // R51: Multi-Agent Conversations
         startConversation, getConversation, listConversations, addConversationMessage,
         // R52: Screen Recording & Replay

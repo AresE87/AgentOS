@@ -12,7 +12,6 @@ import {
   PanelLeftClose,
   PanelLeft,
   Clock,
-  Video,
   ThumbsUp,
 } from 'lucide-react';
 import { useAgent } from '../hooks/useAgent';
@@ -25,10 +24,9 @@ import Mesh from './dashboard/Mesh';
 import Analytics from './dashboard/Analytics';
 import Developer from './dashboard/Developer';
 import ScheduledTasks from './dashboard/ScheduledTasks';
-import StepRecorder from './dashboard/StepRecorder';
 import FeedbackInsights from './dashboard/FeedbackInsights';
 
-type Tab = 'home' | 'playbooks' | 'chat' | 'board' | 'mesh' | 'analytics' | 'developer' | 'triggers' | 'settings' | 'recorder' | 'feedback';
+type Tab = 'home' | 'playbooks' | 'chat' | 'board' | 'mesh' | 'analytics' | 'developer' | 'triggers' | 'settings' | 'feedback';
 
 interface NavItem {
   id: Tab;
@@ -37,6 +35,8 @@ interface NavItem {
   section?: 'main' | 'more';
 }
 
+// Only pages backed by real working backends are listed here.
+// Recorder was merged into Playbooks (R4) and removed from nav.
 const NAV_ITEMS: NavItem[] = [
   { id: 'home', label: 'Home', icon: Home, section: 'main' },
   { id: 'playbooks', label: 'Playbooks', icon: BookOpen, section: 'main' },
@@ -47,8 +47,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'developer', label: 'Developer', icon: Code2, section: 'main' },
   { id: 'triggers', label: 'Triggers', icon: Clock, section: 'main' },
   { id: 'settings', label: 'Settings', icon: Settings, section: 'main' },
-  // More section
-  { id: 'recorder', label: 'Recorder', icon: Video, section: 'more' },
+  // More section — only pages with real backend support
   { id: 'feedback', label: 'Feedback', icon: ThumbsUp, section: 'more' },
 ];
 
@@ -239,7 +238,6 @@ export default function Dashboard({ onResetWizard }: DashboardProps) {
         {activeTab === 'developer' && <Developer />}
         {activeTab === 'triggers' && <ScheduledTasks />}
         {activeTab === 'settings' && <SettingsPg onResetWizard={onResetWizard} />}
-        {activeTab === 'recorder' && <StepRecorder />}
         {activeTab === 'feedback' && <FeedbackInsights />}
       </main>
     </div>

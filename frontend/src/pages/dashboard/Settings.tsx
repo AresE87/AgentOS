@@ -190,12 +190,13 @@ export default function Settings({ onResetWizard }: SettingsPageProps) {
         </div>
       </Card>
 
-      {/* Messaging */}
+      {/* Messaging Channels */}
       <Card header="Messaging Channels">
         <div className="space-y-3">
           {[
             { key: 'telegram', name: 'Telegram', fallback: settings?.has_telegram ?? false },
             { key: 'discord', name: 'Discord', fallback: false },
+            { key: 'whatsapp', name: 'WhatsApp', fallback: false },
           ].map((ch) => {
             const status = channelStatus[ch.key];
             const connected = status ? status.connected : ch.fallback;
@@ -226,21 +227,10 @@ export default function Settings({ onResetWizard }: SettingsPageProps) {
               </div>
             );
           })}
-          {/* WhatsApp — always coming soon */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <MessageCircle size={16} className="text-[#E6EDF3]" />
-              <span className="text-sm text-[#E6EDF3]">WhatsApp</span>
-            </div>
-            <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full
-              bg-[#5865F2]/10 text-[#5865F2] border border-[#5865F2]/20">
-              Coming Soon
-            </span>
-          </div>
         </div>
         <div className="flex items-center justify-between mt-3">
           <p className="text-xs text-[#3D4F5F]">
-            Configure Telegram in the setup wizard. Discord token via DISCORD_BOT_TOKEN env var.
+            Configure Telegram in the setup wizard. Discord via DISCORD_BOT_TOKEN env var. WhatsApp via Meta Business API.
           </p>
           <button
             onClick={refreshChannels}
@@ -250,6 +240,31 @@ export default function Settings({ onResetWizard }: SettingsPageProps) {
           >
             <RefreshCw size={14} className={channelLoading ? 'animate-spin' : ''} />
           </button>
+        </div>
+      </Card>
+
+      {/* Integrations — working features */}
+      <Card header="Integrations">
+        <div className="space-y-3">
+          {[
+            { name: 'Google Calendar', desc: 'OAuth via Settings or agent chat', key: 'calendar' },
+            { name: 'Gmail', desc: 'OAuth via Settings or agent chat', key: 'gmail' },
+            { name: 'Voice (TTS/STT)', desc: 'Built-in speech synthesis and transcription', key: 'voice' },
+            { name: 'Ollama', desc: 'Local LLM — auto-detected when running', key: 'ollama' },
+            { name: 'API Server', desc: 'REST API for external integrations', key: 'api_server' },
+            { name: 'Stripe Billing', desc: 'Usage-based billing via Stripe checkout', key: 'stripe' },
+          ].map((item) => (
+            <div key={item.key} className="flex items-center justify-between">
+              <div>
+                <span className="text-sm text-[#E6EDF3]">{item.name}</span>
+                <p className="text-[10px] text-[#3D4F5F]">{item.desc}</p>
+              </div>
+              <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full
+                bg-[#2ECC71]/10 text-[#2ECC71] border border-[#2ECC71]/20">
+                Available
+              </span>
+            </div>
+          ))}
         </div>
       </Card>
 
