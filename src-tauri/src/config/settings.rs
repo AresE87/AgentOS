@@ -108,6 +108,16 @@ pub struct Settings {
     #[serde(default)]
     pub google_refresh_token: String,
 
+    // C4: Gmail Integration
+    #[serde(default)]
+    pub google_gmail_enabled: bool,
+
+    // C5: Discord Bot
+    #[serde(default)]
+    pub discord_bot_token: String,
+    #[serde(default)]
+    pub discord_enabled: bool,
+
     // C2: Auto-Update
     #[serde(default = "default_github_repo")]
     pub github_repo: String,
@@ -361,6 +371,15 @@ impl Settings {
             "google_refresh_token" => {
                 self.google_refresh_token = value.to_string();
             }
+            "google_gmail_enabled" => {
+                self.google_gmail_enabled = value == "true" || value == "1";
+            }
+            "discord_bot_token" => {
+                self.discord_bot_token = value.to_string();
+            }
+            "discord_enabled" => {
+                self.discord_enabled = value == "true" || value == "1";
+            }
             "training_telemetry_url" => {
                 self.training_telemetry_url = value.to_string();
             }
@@ -424,6 +443,9 @@ impl Settings {
             "training_telemetry_url": self.training_telemetry_url,
             "has_google_calendar": !self.google_client_id.is_empty() && !self.google_client_secret.is_empty(),
             "has_google_refresh_token": !self.google_refresh_token.is_empty(),
+            "google_gmail_enabled": self.google_gmail_enabled,
+            "has_discord": !self.discord_bot_token.is_empty(),
+            "discord_enabled": self.discord_enabled,
         })
     }
 }
@@ -581,6 +603,9 @@ impl Default for Settings {
             google_client_id: String::new(),
             google_client_secret: String::new(),
             google_refresh_token: String::new(),
+            google_gmail_enabled: false,
+            discord_bot_token: String::new(),
+            discord_enabled: false,
             github_repo: default_github_repo(),
             use_local_llm: false,
             local_llm_url: default_local_llm_url(),

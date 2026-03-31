@@ -1,7 +1,17 @@
-use chrono::NaiveDateTime;
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
+
+// ── Constants ──────────────────────────────────────────────────────────
+
+const GMAIL_API: &str = "https://www.googleapis.com/gmail/v1/users/me";
+const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
+const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
+
+/// Combined scopes for Calendar + Gmail (used when gmail is enabled)
+pub const GOOGLE_COMBINED_SCOPES: &str = "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.modify";
 
 // ── Data types ──────────────────────────────────────────────────────────
 
@@ -27,11 +37,553 @@ pub struct EmailTriage {
     pub draft_reply: Option<String>,
 }
 
-// ── EmailManager ────────────────────────────────────────────────────────
+// ── GmailProvider ──────────────────────────────────────────────────────
+
+pub struct GmailProvider {
+    client: Client,
+    access_token: Option<String>,
+    refresh_token: Option<String>,
+    client_id: String,
+    client_secret: String,
+}
+
+impl GmailProvider {
+    pub fn new(client_id: &str, client_secret: &str) -> Self {
+        Self {
+            client: Client::new(),
+            access_token: None,
+            refresh_token: None,
+            client_id: client_id.to_string(),
+            client_secret: client_secret.to_string(),
+        }
+    }
+
+    /// Generate OAuth authorization URL with combined Calendar + Gmail scopes
+    pub fn get_auth_url(&self, redirect_uri: &str) -> String {
+        format!(
+            "{}?client_id={}&redirect_uri={}&response_type=code&scope={}&access_type=offline&prompt=consent",
+            GOOGLE_AUTH_URL,
+            self.client_id,
+            urlencoding::encode(redirect_uri),
+            urlencoding::encode(GOOGLE_COMBINED_SCOPES),
+        )
+    }
+
+    /// Exchange auth code for tokens
+    pub async fn exchange_code(&mut self, code: &str, redirect_uri: &str) -> Result<(), String> {
+        let params = [
+            ("code", code),
+            ("client_id", &self.client_id),
+            ("client_secret", &self.client_secret),
+            ("redirect_uri", redirect_uri),
+            ("grant_type", "authorization_code"),
+        ];
+
+        let response = self
+            .client
+            .post(GOOGLE_TOKEN_URL)
+            .form(&params)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let body: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+
+        self.access_token = body
+            .get("access_token")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        self.refresh_token = body
+            .get("refresh_token")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        if self.access_token.is_none() {
+            return Err(format!("Gmail OAuth failed: {}", body));
+        }
+        Ok(())
+    }
+
+    /// Refresh access token using refresh token
+    pub async fn refresh_access_token(&mut self) -> Result<(), String> {
+        let refresh = self.refresh_token.as_ref().ok_or("No refresh token")?;
+        let params = [
+            ("refresh_token", refresh.as_str()),
+            ("client_id", &self.client_id),
+            ("client_secret", &self.client_secret),
+            ("grant_type", "refresh_token"),
+        ];
+
+        let response = self
+            .client
+            .post(GOOGLE_TOKEN_URL)
+            .form(&params)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let body: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+        self.access_token = body
+            .get("access_token")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        if self.access_token.is_none() {
+            return Err(format!("Gmail token refresh failed: {}", body));
+        }
+        Ok(())
+    }
+
+    pub fn set_refresh_token(&mut self, token: &str) {
+        if !token.is_empty() {
+            self.refresh_token = Some(token.to_string());
+        }
+    }
+
+    pub fn get_refresh_token(&self) -> Option<&str> {
+        self.refresh_token.as_deref()
+    }
+
+    pub fn is_authenticated(&self) -> bool {
+        self.access_token.is_some()
+    }
+
+    // ── Gmail API methods ──────────────────────────────────────────
+
+    /// List messages from Gmail
+    pub async fn list_messages(
+        &self,
+        folder: &str,
+        limit: usize,
+    ) -> Result<Vec<EmailMessage>, String> {
+        let token = self.access_token.as_ref().ok_or("Gmail not authenticated")?;
+
+        // Map common folder names to Gmail label IDs
+        let folder_upper = folder.to_uppercase();
+        let label_id = match folder_upper.as_str() {
+            "INBOX" => "INBOX",
+            "SENT" => "SENT",
+            "DRAFTS" | "DRAFT" => "DRAFT",
+            "TRASH" => "TRASH",
+            "SPAM" => "SPAM",
+            "STARRED" => "STARRED",
+            "IMPORTANT" => "IMPORTANT",
+            "UNREAD" => "UNREAD",
+            other => other,
+        };
+
+        let url = format!(
+            "{}/messages?labelIds={}&maxResults={}",
+            GMAIL_API, label_id, limit
+        );
+
+        let response = self
+            .client
+            .get(&url)
+            .bearer_auth(token)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let body: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+
+        if let Some(err) = body.get("error") {
+            return Err(format!("Gmail API error: {}", err));
+        }
+
+        let message_refs = body
+            .get("messages")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+
+        // Fetch full message details for each
+        let mut messages = Vec::new();
+        for msg_ref in message_refs.iter().take(limit) {
+            if let Some(msg_id) = msg_ref.get("id").and_then(|v| v.as_str()) {
+                match self.get_message(msg_id).await {
+                    Ok(msg) => messages.push(msg),
+                    Err(e) => {
+                        tracing::warn!(msg_id = msg_id, error = %e, "Failed to fetch Gmail message");
+                    }
+                }
+            }
+        }
+
+        Ok(messages)
+    }
+
+    /// Get a single message by ID
+    pub async fn get_message(&self, msg_id: &str) -> Result<EmailMessage, String> {
+        let token = self.access_token.as_ref().ok_or("Gmail not authenticated")?;
+
+        let url = format!("{}/messages/{}?format=full", GMAIL_API, msg_id);
+
+        let response = self
+            .client
+            .get(&url)
+            .bearer_auth(token)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let body: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+
+        if let Some(err) = body.get("error") {
+            return Err(format!("Gmail API error: {}", err));
+        }
+
+        parse_gmail_message(&body)
+    }
+
+    /// Send an email via Gmail
+    pub async fn send_email(
+        &self,
+        to: &[String],
+        subject: &str,
+        email_body: &str,
+    ) -> Result<EmailMessage, String> {
+        let token = self.access_token.as_ref().ok_or("Gmail not authenticated")?;
+
+        // Build RFC2822 message
+        let to_str = to.join(", ");
+        let raw_message = format!(
+            "To: {}\r\nSubject: {}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n{}",
+            to_str, subject, email_body
+        );
+
+        // Base64url-encode for Gmail API
+        let encoded = URL_SAFE_NO_PAD.encode(raw_message.as_bytes());
+
+        let send_body = serde_json::json!({ "raw": encoded });
+
+        let response = self
+            .client
+            .post(&format!("{}/messages/send", GMAIL_API))
+            .bearer_auth(token)
+            .json(&send_body)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let result: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+
+        if let Some(err) = result.get("error") {
+            return Err(format!("Gmail send error: {}", err));
+        }
+
+        let msg_id = result
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        Ok(EmailMessage {
+            id: msg_id,
+            from: "me".into(),
+            to: to.to_vec(),
+            subject: subject.to_string(),
+            body: email_body.to_string(),
+            date: chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string(),
+            read: true,
+            labels: vec!["SENT".into()],
+            attachments: vec![],
+            folder: "sent".into(),
+        })
+    }
+
+    /// Search Gmail messages
+    pub async fn search(&self, query: &str) -> Result<Vec<EmailMessage>, String> {
+        let token = self.access_token.as_ref().ok_or("Gmail not authenticated")?;
+
+        let url = format!(
+            "{}/messages?q={}&maxResults=20",
+            GMAIL_API,
+            urlencoding::encode(query)
+        );
+
+        let response = self
+            .client
+            .get(&url)
+            .bearer_auth(token)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let body: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+
+        if let Some(err) = body.get("error") {
+            return Err(format!("Gmail API error: {}", err));
+        }
+
+        let message_refs = body
+            .get("messages")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+
+        let mut messages = Vec::new();
+        for msg_ref in message_refs.iter().take(20) {
+            if let Some(msg_id) = msg_ref.get("id").and_then(|v| v.as_str()) {
+                match self.get_message(msg_id).await {
+                    Ok(msg) => messages.push(msg),
+                    Err(_) => {} // skip failed fetches in search results
+                }
+            }
+        }
+
+        Ok(messages)
+    }
+
+    /// Mark a message as read (remove UNREAD label)
+    pub async fn mark_read(&self, msg_id: &str) -> Result<bool, String> {
+        let token = self.access_token.as_ref().ok_or("Gmail not authenticated")?;
+
+        let url = format!("{}/messages/{}/modify", GMAIL_API, msg_id);
+        let modify_body = serde_json::json!({
+            "removeLabelIds": ["UNREAD"]
+        });
+
+        let response = self
+            .client
+            .post(&url)
+            .bearer_auth(token)
+            .json(&modify_body)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let result: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+
+        if let Some(err) = result.get("error") {
+            return Err(format!("Gmail API error: {}", err));
+        }
+
+        Ok(true)
+    }
+
+    /// Move a message to a different label/folder
+    pub async fn move_to(&self, msg_id: &str, folder: &str) -> Result<bool, String> {
+        let token = self.access_token.as_ref().ok_or("Gmail not authenticated")?;
+
+        let folder_upper = folder.to_uppercase();
+        let label_id = match folder_upper.as_str() {
+            "INBOX" => "INBOX",
+            "TRASH" => "TRASH",
+            "SPAM" => "SPAM",
+            "STARRED" => "STARRED",
+            other => other,
+        };
+
+        let url = format!("{}/messages/{}/modify", GMAIL_API, msg_id);
+        let modify_body = serde_json::json!({
+            "addLabelIds": [label_id]
+        });
+
+        let response = self
+            .client
+            .post(&url)
+            .bearer_auth(token)
+            .json(&modify_body)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let result: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+
+        if let Some(err) = result.get("error") {
+            return Err(format!("Gmail API error: {}", err));
+        }
+
+        Ok(true)
+    }
+}
+
+// ── Gmail message parser ───────────────────────────────────────────────
+
+fn parse_gmail_message(body: &serde_json::Value) -> Result<EmailMessage, String> {
+    let id = body
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let label_ids: Vec<String> = body
+        .get("labelIds")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|l| l.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let read = !label_ids.iter().any(|l| l == "UNREAD");
+
+    // Determine folder from labels
+    let folder = if label_ids.contains(&"INBOX".to_string()) {
+        "inbox"
+    } else if label_ids.contains(&"SENT".to_string()) {
+        "sent"
+    } else if label_ids.contains(&"DRAFT".to_string()) {
+        "drafts"
+    } else if label_ids.contains(&"TRASH".to_string()) {
+        "trash"
+    } else if label_ids.contains(&"SPAM".to_string()) {
+        "spam"
+    } else {
+        "inbox"
+    };
+
+    // Extract headers
+    let headers = body
+        .get("payload")
+        .and_then(|p| p.get("headers"))
+        .and_then(|h| h.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let get_header = |name: &str| -> String {
+        headers
+            .iter()
+            .find(|h| {
+                h.get("name")
+                    .and_then(|n| n.as_str())
+                    .map(|n| n.eq_ignore_ascii_case(name))
+                    .unwrap_or(false)
+            })
+            .and_then(|h| h.get("value"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
+
+    let from = get_header("From");
+    let to_str = get_header("To");
+    let subject = get_header("Subject");
+    let date = get_header("Date");
+
+    let to: Vec<String> = to_str
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    // Extract body text
+    let email_body = extract_body_text(body.get("payload"));
+
+    // Extract attachment filenames
+    let attachments = extract_attachment_names(body.get("payload"));
+
+    Ok(EmailMessage {
+        id,
+        from,
+        to,
+        subject,
+        body: email_body,
+        date,
+        read,
+        labels: label_ids,
+        attachments,
+        folder: folder.to_string(),
+    })
+}
+
+/// Extract plain text body from Gmail payload
+fn extract_body_text(payload: Option<&serde_json::Value>) -> String {
+    let payload = match payload {
+        Some(p) => p,
+        None => return String::new(),
+    };
+
+    // Try direct body.data first (simple messages)
+    if let Some(data) = payload
+        .get("body")
+        .and_then(|b| b.get("data"))
+        .and_then(|d| d.as_str())
+    {
+        if let Ok(decoded) = URL_SAFE_NO_PAD.decode(data) {
+            if let Ok(text) = String::from_utf8(decoded) {
+                return text;
+            }
+        }
+    }
+
+    // Try parts (multipart messages) — prefer text/plain
+    if let Some(parts) = payload.get("parts").and_then(|p| p.as_array()) {
+        for part in parts {
+            let mime = part
+                .get("mimeType")
+                .and_then(|m| m.as_str())
+                .unwrap_or("");
+            if mime == "text/plain" {
+                if let Some(data) = part
+                    .get("body")
+                    .and_then(|b| b.get("data"))
+                    .and_then(|d| d.as_str())
+                {
+                    if let Ok(decoded) = URL_SAFE_NO_PAD.decode(data) {
+                        if let Ok(text) = String::from_utf8(decoded) {
+                            return text;
+                        }
+                    }
+                }
+            }
+        }
+        // Fallback: try text/html
+        for part in parts {
+            let mime = part
+                .get("mimeType")
+                .and_then(|m| m.as_str())
+                .unwrap_or("");
+            if mime == "text/html" {
+                if let Some(data) = part
+                    .get("body")
+                    .and_then(|b| b.get("data"))
+                    .and_then(|d| d.as_str())
+                {
+                    if let Ok(decoded) = URL_SAFE_NO_PAD.decode(data) {
+                        if let Ok(text) = String::from_utf8(decoded) {
+                            return text;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    String::new()
+}
+
+/// Extract attachment filenames from Gmail payload parts
+fn extract_attachment_names(payload: Option<&serde_json::Value>) -> Vec<String> {
+    let payload = match payload {
+        Some(p) => p,
+        None => return vec![],
+    };
+
+    let mut names = Vec::new();
+    if let Some(parts) = payload.get("parts").and_then(|p| p.as_array()) {
+        for part in parts {
+            if let Some(filename) = part.get("filename").and_then(|f| f.as_str()) {
+                if !filename.is_empty() {
+                    names.push(filename.to_string());
+                }
+            }
+        }
+    }
+    names
+}
+
+// ── EmailManager — dual-mode: Gmail API or in-memory fallback ──────────
 
 pub struct EmailManager {
     messages: HashMap<String, EmailMessage>,
     drafts: HashMap<String, EmailMessage>,
+    /// Gmail API provider (always present, may not be authenticated)
+    pub gmail: GmailProvider,
+    /// Whether Gmail mode is enabled in settings
+    gmail_enabled: bool,
 }
 
 impl EmailManager {
@@ -39,7 +591,39 @@ impl EmailManager {
         Self {
             messages: HashMap::new(),
             drafts: HashMap::new(),
+            gmail: GmailProvider::new("", ""),
+            gmail_enabled: false,
         }
+    }
+
+    /// Construct with Google credentials for Gmail
+    pub fn with_google(client_id: &str, client_secret: &str, gmail_enabled: bool) -> Self {
+        Self {
+            messages: HashMap::new(),
+            drafts: HashMap::new(),
+            gmail: GmailProvider::new(client_id, client_secret),
+            gmail_enabled,
+        }
+    }
+
+    /// Configure Google credentials after construction
+    pub fn configure_google(&mut self, client_id: &str, client_secret: &str, gmail_enabled: bool) {
+        self.gmail = GmailProvider::new(client_id, client_secret);
+        self.gmail_enabled = gmail_enabled;
+    }
+
+    /// Load persisted refresh token (shared with Calendar)
+    pub fn set_refresh_token(&mut self, token: &str) {
+        self.gmail.set_refresh_token(token);
+    }
+
+    pub fn set_gmail_enabled(&mut self, enabled: bool) {
+        self.gmail_enabled = enabled;
+    }
+
+    /// Whether Gmail API is active and usable
+    pub fn gmail_active(&self) -> bool {
+        self.gmail_enabled && self.gmail.is_authenticated()
     }
 
     /// Seed some sample messages so the store is not empty on first load.
@@ -75,27 +659,75 @@ impl EmailManager {
         }
     }
 
-    // ── Public API ──────────────────────────────────────────────────
+    // ── Async dual-mode Public API ─────────────────────────────────
 
-    pub fn list_messages(&self, folder: &str, limit: usize) -> Vec<EmailMessage> {
+    pub async fn list_messages_async(&self, folder: &str, limit: usize) -> Result<Vec<EmailMessage>, String> {
+        if self.gmail_active() {
+            return self.gmail.list_messages(folder, limit).await;
+        }
+        Ok(self.list_messages_local(folder, limit))
+    }
+
+    pub async fn get_message_async(&self, id: &str) -> Result<EmailMessage, String> {
+        if self.gmail_active() {
+            return self.gmail.get_message(id).await;
+        }
+        self.get_message_local(id)
+    }
+
+    pub async fn send_message_async(
+        &mut self,
+        to: Vec<String>,
+        subject: String,
+        body: String,
+    ) -> Result<EmailMessage, String> {
+        if self.gmail_active() {
+            return self.gmail.send_email(&to, &subject, &body).await;
+        }
+        self.send_message_local(to, subject, body)
+    }
+
+    pub async fn search_async(&self, query: &str) -> Result<Vec<EmailMessage>, String> {
+        if self.gmail_active() {
+            return self.gmail.search(query).await;
+        }
+        Ok(self.search_local(query))
+    }
+
+    pub async fn move_to_async(&mut self, id: &str, folder: &str) -> Result<bool, String> {
+        if self.gmail_active() {
+            return self.gmail.move_to(id, folder).await;
+        }
+        self.move_to_local(id, folder)
+    }
+
+    pub async fn mark_read_async(&mut self, id: &str) -> Result<bool, String> {
+        if self.gmail_active() {
+            return self.gmail.mark_read(id).await;
+        }
+        self.mark_read_local(id)
+    }
+
+    // ── In-memory fallback methods (unchanged from original) ───────
+
+    fn list_messages_local(&self, folder: &str, limit: usize) -> Vec<EmailMessage> {
         let mut msgs: Vec<&EmailMessage> = self
             .messages
             .values()
             .filter(|m| m.folder.eq_ignore_ascii_case(folder))
             .collect();
-        // Newest first
         msgs.sort_by(|a, b| b.date.cmp(&a.date));
         msgs.into_iter().take(limit).cloned().collect()
     }
 
-    pub fn get_message(&self, id: &str) -> Result<EmailMessage, String> {
+    fn get_message_local(&self, id: &str) -> Result<EmailMessage, String> {
         self.messages
             .get(id)
             .cloned()
             .ok_or_else(|| format!("Email message '{}' not found", id))
     }
 
-    pub fn send_message(
+    fn send_message_local(
         &mut self,
         to: Vec<String>,
         subject: String,
@@ -139,7 +771,7 @@ impl EmailManager {
         Ok(draft)
     }
 
-    pub fn search(&self, query: &str) -> Vec<EmailMessage> {
+    fn search_local(&self, query: &str) -> Vec<EmailMessage> {
         let q = query.to_lowercase();
         let mut results: Vec<EmailMessage> = self
             .messages
@@ -157,7 +789,7 @@ impl EmailManager {
         results
     }
 
-    pub fn move_to(&mut self, id: &str, folder: &str) -> Result<bool, String> {
+    fn move_to_local(&mut self, id: &str, folder: &str) -> Result<bool, String> {
         match self.messages.get_mut(id) {
             Some(msg) => {
                 msg.folder = folder.to_string();
@@ -167,7 +799,7 @@ impl EmailManager {
         }
     }
 
-    pub fn mark_read(&mut self, id: &str) -> Result<bool, String> {
+    fn mark_read_local(&mut self, id: &str) -> Result<bool, String> {
         match self.messages.get_mut(id) {
             Some(msg) => {
                 msg.read = true;
@@ -178,12 +810,11 @@ impl EmailManager {
     }
 
     /// Simple heuristic triage for an email message.
-    pub fn triage(&self, id: &str) -> Result<EmailTriage, String> {
-        let msg = self.get_message(id)?;
+    pub async fn triage(&self, id: &str) -> Result<EmailTriage, String> {
+        let msg = self.get_message_async(id).await?;
         let subject_lower = msg.subject.to_lowercase();
         let body_lower = msg.body.to_lowercase();
 
-        // Priority
         let priority = if subject_lower.contains("urgent")
             || subject_lower.contains("asap")
             || subject_lower.contains("critical")
@@ -198,7 +829,6 @@ impl EmailManager {
             "medium"
         };
 
-        // Category
         let category = if body_lower.contains("unsubscribe") || subject_lower.contains("promo") {
             "spam"
         } else if subject_lower.contains("action")

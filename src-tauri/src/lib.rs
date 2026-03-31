@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 pub mod agents;
 pub mod analytics;
 pub mod api;
@@ -1598,7 +1600,8 @@ async fn cmd_get_channel_status(
         },
         "discord": {
             "running": channels::discord::is_running(),
-            "connected": false,
+            "connected": channels::discord::is_running(),
+            "bot_name": channels::discord::bot_name(),
         },
         "whatsapp": {
             "running": channels::whatsapp::is_running(),
@@ -1722,6 +1725,108 @@ async fn cmd_get_whatsapp_status(
         "connected": has_config && channels::whatsapp::is_running(),
         "phone_number_id": phone_id,
         "webhook_port": webhook_port,
+    }))
+}
+
+// ── C5: Discord Bot commands ────────────────────────────────
+
+#[tauri::command]
+async fn cmd_discord_start(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let (token, settings_clone) = {
+        let settings = state.settings.lock().map_err(|e| e.to_string())?;
+        if settings.discord_bot_token.is_empty() {
+            return Err("Discord bot token not configured".to_string());
+        }
+        (settings.discord_bot_token.clone(), settings.clone())
+    };
+
+    if channels::discord::is_running() {
+        return Ok(serde_json::json!({ "ok": true, "message": "Discord bot already running" }));
+    }
+
+    tauri::async_runtime::spawn(async move {
+        tracing::info!("Starting Discord bot (WebSocket Gateway)...");
+        channels::discord::run_bot_loop(&token, &settings_clone).await;
+    });
+
+    // Brief wait for connection
+    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+
+    Ok(serde_json::json!({
+        "ok": true,
+        "bot_name": channels::discord::bot_name(),
+    }))
+}
+
+#[tauri::command]
+async fn cmd_discord_stop() -> Result<serde_json::Value, String> {
+    channels::discord::stop();
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+#[tauri::command]
+async fn cmd_discord_test(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let token = {
+        let settings = state.settings.lock().map_err(|e| e.to_string())?;
+        if settings.discord_bot_token.is_empty() {
+            return Err("Discord bot token not configured".to_string());
+        }
+        settings.discord_bot_token.clone()
+    };
+
+    let mut bot = channels::discord::DiscordBot::new(&token);
+    match bot.verify().await {
+        Ok(username) => Ok(serde_json::json!({
+            "connected": true,
+            "bot_name": username,
+        })),
+        Err(e) => Ok(serde_json::json!({
+            "connected": false,
+            "error": e.to_string(),
+        })),
+    }
+}
+
+#[tauri::command]
+async fn cmd_discord_send(
+    channel_id: String,
+    text: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let token = {
+        let settings = state.settings.lock().map_err(|e| e.to_string())?;
+        if settings.discord_bot_token.is_empty() {
+            return Err("Discord bot token not configured".to_string());
+        }
+        settings.discord_bot_token.clone()
+    };
+
+    let bot = channels::discord::DiscordBot::new(&token);
+    bot.send_message(&channel_id, &text)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+#[tauri::command]
+async fn cmd_get_discord_status(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let has_token = {
+        let settings = state.settings.lock().map_err(|e| e.to_string())?;
+        !settings.discord_bot_token.is_empty()
+    };
+
+    Ok(serde_json::json!({
+        "configured": has_token,
+        "running": channels::discord::is_running(),
+        "connected": has_token && channels::discord::is_running(),
+        "bot_name": channels::discord::bot_name(),
     }))
 }
 
@@ -3529,9 +3634,32 @@ async fn cmd_memory_store(
     importance: Option<f64>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
     let imp = importance.unwrap_or(0.5);
-    let mem = memory::MemoryStore::store(db.conn(), &content, &category, imp)?;
+    let api_key = {
+        let settings = state.settings.lock().map_err(|e| e.to_string())?;
+        settings.openai_api_key.clone()
+    };
+
+    // Generate embedding outside DB lock (async network call)
+    let embedding_blob = if !api_key.is_empty() {
+        match memory::store::get_embedding(&content, &api_key).await {
+            Ok(emb) => Some(memory::store::embedding_to_bytes(&emb)),
+            Err(e) => {
+                tracing::warn!("Failed to generate embedding: {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    // Now lock DB and store
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let mem = if let Some(blob) = &embedding_blob {
+        memory::MemoryStore::store_with_embedding(db.conn(), &content, &category, imp, blob)?
+    } else {
+        memory::MemoryStore::store(db.conn(), &content, &category, imp)?
+    };
     serde_json::to_value(&mem).map_err(|e| e.to_string())
 }
 
@@ -3541,9 +3669,38 @@ async fn cmd_memory_search(
     limit: Option<usize>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    let lim = limit.unwrap_or(20);
+    let api_key = {
+        let settings = state.settings.lock().map_err(|e| e.to_string())?;
+        settings.openai_api_key.clone()
+    };
+
+    // Try semantic search: load from DB, generate query embedding, rank
+    if !api_key.is_empty() {
+        // Step 1: load embedded memories (sync, DB lock scoped)
+        let embedded = {
+            let db = state.db.lock().map_err(|e| e.to_string())?;
+            memory::MemoryStore::load_embedded_memories(db.conn()).unwrap_or_default()
+        }; // DB lock dropped here
+        // Step 2: generate query embedding (async, no DB lock held)
+        if !embedded.is_empty() {
+            if let Ok(query_emb) = memory::store::get_embedding(&query, &api_key).await {
+                let scored = memory::MemoryStore::rank_by_similarity(embedded, &query_emb, lim);
+                if !scored.is_empty() {
+                    let ids: Vec<String> = scored.iter().map(|(m, _)| m.id.clone()).collect();
+                    let db = state.db.lock().map_err(|e| e.to_string())?;
+                    memory::MemoryStore::update_access_counts(db.conn(), &ids);
+                    let memories: Vec<_> = scored.into_iter().map(|(m, _)| m).collect();
+                    return Ok(serde_json::json!({ "memories": memories, "method": "semantic" }));
+                }
+            }
+        }
+    }
+
+    // Fallback to LIKE search
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    let memories = memory::MemoryStore::search(db.conn(), &query, limit.unwrap_or(20))?;
-    Ok(serde_json::json!({ "memories": memories }))
+    let memories = memory::MemoryStore::search(db.conn(), &query, lim)?;
+    Ok(serde_json::json!({ "memories": memories, "method": "keyword" }))
 }
 
 #[tauri::command]
@@ -3586,6 +3743,52 @@ async fn cmd_memory_stats(
 ) -> Result<serde_json::Value, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     memory::MemoryStore::stats(db.conn())
+}
+
+#[tauri::command]
+async fn cmd_memory_reindex(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let api_key = {
+        let settings = state.settings.lock().map_err(|e| e.to_string())?;
+        settings.openai_api_key.clone()
+    };
+    if api_key.is_empty() {
+        return Err("OpenAI API key not configured — cannot generate embeddings".to_string());
+    }
+
+    // Step 1: load unembedded memories (sync, scoped DB lock)
+    let unembedded = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        memory::MemoryStore::load_unembedded_memories(db.conn())?
+    }; // DB lock dropped
+
+    let total = unembedded.len();
+    let mut success = 0u64;
+    let mut failed = 0u64;
+
+    // Step 2: generate embeddings one by one (async, no DB lock)
+    for (id, content) in &unembedded {
+        match memory::store::get_embedding(content, &api_key).await {
+            Ok(emb) => {
+                let blob = memory::store::embedding_to_bytes(&emb);
+                // Step 3: write each embedding back (brief DB lock)
+                let db = state.db.lock().map_err(|e| e.to_string())?;
+                memory::MemoryStore::update_embedding(db.conn(), id, &blob).ok();
+                success += 1;
+            }
+            Err(e) => {
+                tracing::warn!("Reindex embedding failed for {}: {}", id, e);
+                failed += 1;
+            }
+        }
+    }
+
+    Ok(serde_json::json!({
+        "total": total,
+        "indexed": success,
+        "failed": failed
+    }))
 }
 
 // ── R56: Smart Notifications commands ──────────────────────────────
@@ -4234,7 +4437,7 @@ async fn cmd_calendar_auth_status(
     }))
 }
 
-// ── R64: Email Integration commands ─────────────────────────────────
+// ── R64: Email Integration commands (C4: dual-mode Gmail API + in-memory) ──
 
 #[tauri::command]
 async fn cmd_email_list(
@@ -4243,7 +4446,7 @@ async fn cmd_email_list(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let mgr = state.email_manager.lock().await;
-    let messages = mgr.list_messages(&folder, limit.unwrap_or(50));
+    let messages = mgr.list_messages_async(&folder, limit.unwrap_or(50)).await?;
     Ok(serde_json::json!({ "messages": messages }))
 }
 
@@ -4253,7 +4456,7 @@ async fn cmd_email_get(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let mgr = state.email_manager.lock().await;
-    let msg = mgr.get_message(&id)?;
+    let msg = mgr.get_message_async(&id).await?;
     serde_json::to_value(&msg).map_err(|e| e.to_string())
 }
 
@@ -4265,7 +4468,7 @@ async fn cmd_email_send(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let mut mgr = state.email_manager.lock().await;
-    let sent = mgr.send_message(to, subject, body)?;
+    let sent = mgr.send_message_async(to, subject, body).await?;
     serde_json::to_value(&sent).map_err(|e| e.to_string())
 }
 
@@ -4287,7 +4490,7 @@ async fn cmd_email_search(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let mgr = state.email_manager.lock().await;
-    let results = mgr.search(&query);
+    let results = mgr.search_async(&query).await?;
     Ok(serde_json::json!({ "results": results }))
 }
 
@@ -4298,7 +4501,7 @@ async fn cmd_email_move(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let mut mgr = state.email_manager.lock().await;
-    let moved = mgr.move_to(&id, &folder)?;
+    let moved = mgr.move_to_async(&id, &folder).await?;
     Ok(serde_json::json!({ "ok": true, "moved": moved }))
 }
 
@@ -4308,8 +4511,84 @@ async fn cmd_email_mark_read(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let mut mgr = state.email_manager.lock().await;
-    let done = mgr.mark_read(&id)?;
+    let done = mgr.mark_read_async(&id).await?;
     Ok(serde_json::json!({ "ok": true, "marked_read": done }))
+}
+
+/// C4: Get Gmail OAuth authorization URL (combined Calendar + Gmail scopes)
+#[tauri::command]
+async fn cmd_gmail_get_auth_url(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.email_manager.lock().await;
+    let redirect_uri = "http://localhost:8080/oauth/google/callback";
+    let url = mgr.gmail.get_auth_url(redirect_uri);
+    Ok(serde_json::json!({ "url": url, "redirect_uri": redirect_uri }))
+}
+
+/// C4: Exchange Gmail OAuth code for tokens (shared with Calendar)
+#[tauri::command]
+async fn cmd_gmail_exchange_code(
+    code: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let redirect_uri = "http://localhost:8080/oauth/google/callback";
+
+    // Exchange code for Gmail
+    {
+        let mut mgr = state.email_manager.lock().await;
+        mgr.gmail.exchange_code(&code, redirect_uri).await?;
+
+        // Persist refresh token to settings (shared with Calendar)
+        if let Some(refresh) = mgr.gmail.get_refresh_token() {
+            let refresh_owned = refresh.to_string();
+            let mut settings = state.settings.lock().map_err(|e| e.to_string())?;
+            settings.set("google_refresh_token", &refresh_owned);
+            settings.set("google_gmail_enabled", "true");
+            let _ = settings.save();
+            mgr.set_gmail_enabled(true);
+        }
+    }
+
+    // Also update Calendar provider's refresh token so both share the same tokens
+    {
+        let email_mgr = state.email_manager.lock().await;
+        if let Some(refresh) = email_mgr.gmail.get_refresh_token() {
+            let mut cal_mgr = state.calendar_manager.lock().await;
+            cal_mgr.set_refresh_token(refresh);
+        }
+    }
+
+    Ok(serde_json::json!({
+        "ok": true,
+        "authenticated": true,
+    }))
+}
+
+/// C4: Refresh Gmail access token
+#[tauri::command]
+async fn cmd_gmail_refresh_token(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.email_manager.lock().await;
+    mgr.gmail.refresh_access_token().await?;
+    Ok(serde_json::json!({
+        "ok": true,
+        "authenticated": mgr.gmail.is_authenticated(),
+    }))
+}
+
+/// C4: Check Gmail auth status
+#[tauri::command]
+async fn cmd_gmail_auth_status(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.email_manager.lock().await;
+    Ok(serde_json::json!({
+        "gmail_enabled": mgr.gmail_active(),
+        "authenticated": mgr.gmail.is_authenticated(),
+        "has_refresh_token": mgr.gmail.get_refresh_token().is_some(),
+    }))
 }
 
 // ── R65: Database Connector commands ─────────────────────────────────
@@ -8087,7 +8366,12 @@ pub fn run() {
                     Arc::new(tokio::sync::Mutex::new(cm))
                 },
                 email_manager: {
-                    let mut em = integrations::EmailManager::new();
+                    let mut em = integrations::EmailManager::with_google(
+                        &settings.google_client_id,
+                        &settings.google_client_secret,
+                        settings.google_gmail_enabled,
+                    );
+                    em.set_refresh_token(&settings.google_refresh_token);
                     em.seed_samples();
                     Arc::new(tokio::sync::Mutex::new(em))
                 },
@@ -8386,14 +8670,17 @@ pub fn run() {
                 });
             }
 
-            // Start Discord bot if configured
-            // Discord token can be stored as discord_bot_token in settings
-            // For now, check if there's a token file or env var
-            if let Ok(discord_token) = std::env::var("DISCORD_BOT_TOKEN") {
-                if !discord_token.is_empty() {
+            // Start Discord bot if configured (from settings or env var)
+            let discord_token = if !settings.discord_bot_token.is_empty() {
+                Some(settings.discord_bot_token.clone())
+            } else {
+                std::env::var("DISCORD_BOT_TOKEN").ok().filter(|t| !t.is_empty())
+            };
+            if let Some(discord_token) = discord_token {
+                if settings.discord_enabled || std::env::var("DISCORD_BOT_TOKEN").is_ok() {
                     let settings_clone = settings.clone();
                     tauri::async_runtime::spawn(async move {
-                        tracing::info!("Starting Discord bot...");
+                        tracing::info!("Starting Discord bot (WebSocket Gateway)...");
                         channels::discord::run_bot_loop(&discord_token, &settings_clone).await;
                     });
                 }
@@ -8657,6 +8944,12 @@ pub fn run() {
             cmd_whatsapp_test,
             cmd_whatsapp_send,
             cmd_get_whatsapp_status,
+            // C5: Discord Bot commands
+            cmd_discord_start,
+            cmd_discord_stop,
+            cmd_discord_test,
+            cmd_discord_send,
+            cmd_get_discord_status,
             // R34: Plugin commands
             cmd_plugin_list,
             cmd_plugin_install,
@@ -8753,6 +9046,7 @@ pub fn run() {
             cmd_memory_delete,
             cmd_memory_forget_all,
             cmd_memory_stats,
+            cmd_memory_reindex,
             // R56: Smart Notifications commands
             cmd_get_notifications,
             cmd_mark_notification_read,
@@ -8813,6 +9107,11 @@ pub fn run() {
             cmd_email_search,
             cmd_email_move,
             cmd_email_mark_read,
+            // C4: Gmail OAuth commands
+            cmd_gmail_get_auth_url,
+            cmd_gmail_exchange_code,
+            cmd_gmail_refresh_token,
+            cmd_gmail_auth_status,
             // R65: Database Connector commands
             cmd_db_add,
             cmd_db_remove,

@@ -35,6 +35,8 @@ tower = "0.4"
 tower-http = { version = "0.5", features = ["cors"] }
 tauri-plugin-updater = "2"
 urlencoding = "2"
+tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
+futures-util = "0.3"
 
 [dev-dependencies]
 tempfile = "3"

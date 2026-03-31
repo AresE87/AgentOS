@@ -123,6 +123,14 @@ export function useAgent() {
         callInvoke<{ ok: boolean }>('whatsapp_send', { to, text });
     const getWhatsappStatus = () => callInvoke<{ configured: boolean; connected: boolean; phone_number_id: string; webhook_port: number }>('get_whatsapp_status');
 
+    // C5: Discord Bot
+    const discordStart = () => callInvoke<{ ok: boolean; bot_name?: string }>('discord_start');
+    const discordStop = () => callInvoke<{ ok: boolean }>('discord_stop');
+    const discordTest = () => callInvoke<{ connected: boolean; bot_name?: string; error?: string }>('discord_test');
+    const discordSend = (channelId: string, text: string) =>
+        callInvoke<{ ok: boolean }>('discord_send', { channel_id: channelId, text });
+    const getDiscordStatus = () => callInvoke<{ configured: boolean; running: boolean; connected: boolean; bot_name?: string }>('get_discord_status');
+
     // R28: Feedback & Insights
     const submitFeedback = (taskId: string, taskText: string, responseText: string, rating: number, comment?: string, modelUsed?: string) =>
         callInvoke<{ ok: boolean }>('submit_feedback', { task_id: taskId, task_text: taskText, response_text: responseText, rating, comment, model_used: modelUsed });
@@ -265,6 +273,8 @@ export function useAgent() {
         callInvoke<any>('memory_forget_all');
     const memoryStats = () =>
         callInvoke<any>('memory_stats');
+    const memoryReindex = () =>
+        callInvoke<any>('memory_reindex');
 
     // R56: Smart Notifications
     const getNotifications = () => callInvoke<any>('get_notifications');
@@ -365,6 +375,16 @@ export function useAgent() {
         callInvoke<{ ok: boolean; moved: boolean }>('email_move', { id, folder });
     const emailMarkRead = (id: string) =>
         callInvoke<{ ok: boolean; marked_read: boolean }>('email_mark_read', { id });
+
+    // C4: Gmail OAuth
+    const gmailGetAuthUrl = () =>
+        callInvoke<{ url: string; redirect_uri: string }>('gmail_get_auth_url', {});
+    const gmailExchangeCode = (code: string) =>
+        callInvoke<{ ok: boolean; authenticated: boolean }>('gmail_exchange_code', { code });
+    const gmailRefreshToken = () =>
+        callInvoke<{ ok: boolean; authenticated: boolean }>('gmail_refresh_token', {});
+    const gmailAuthStatus = () =>
+        callInvoke<{ gmail_enabled: boolean; authenticated: boolean; has_refresh_token: boolean }>('gmail_auth_status', {});
 
     // R65: Database Connector
     const dbAdd = (config: { name: string; db_type: string; connection_string: string; read_only?: boolean }) =>
@@ -1119,6 +1139,8 @@ export function useAgent() {
         getAuditLog, exportAuditLog, getOrg, createOrg, listOrgMembers, addOrgMember,
         // WhatsApp
         whatsappSetup, whatsappTest, whatsappSend, getWhatsappStatus,
+        // Discord
+        discordStart, discordStop, discordTest, discordSend, getDiscordStatus,
         // Smart Playbooks
         runSmartPlaybook, validateSmartPlaybook, getPlaybookVariables,
         // i18n
@@ -1153,7 +1175,7 @@ export function useAgent() {
         // R53: Natural Language Triggers
         parseNLTrigger, createTriggerFromNL, listAllTriggers,
         // R54: Agent Memory (RAG Local)
-        memoryStore, memorySearch, memoryList, memoryDelete, memoryForgetAll, memoryStats,
+        memoryStore, memorySearch, memoryList, memoryDelete, memoryForgetAll, memoryStats, memoryReindex,
         // R56: Smart Notifications
         getNotifications, markNotificationRead, markAllNotificationsRead, runMonitorCheck,
         // R55: File Understanding
@@ -1176,6 +1198,8 @@ export function useAgent() {
         calendarGetAuthUrl, calendarExchangeCode, calendarRefreshToken, calendarAuthStatus,
         // R64: Email Integration
         emailList, emailGet, emailSend, emailDraft, emailSearch, emailMove, emailMarkRead,
+        // C4: Gmail OAuth
+        gmailGetAuthUrl, gmailExchangeCode, gmailRefreshToken, gmailAuthStatus,
         // R65: Database Connector
         dbAdd, dbRemove, dbList, dbTest, dbTables, dbQuery, dbRawQuery,
         // R66: API Orchestrator
