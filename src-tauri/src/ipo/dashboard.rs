@@ -1,4 +1,5 @@
 use crate::enterprise::audit::AuditLog;
+use crate::observability::health::HealthDashboard;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
@@ -31,6 +32,34 @@ pub struct YearProjection {
     pub projected_tasks: u64,
     pub blocked_attempts: u64,
     pub note: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CategoryDemo {
+    pub id: String,
+    pub category: String,
+    pub title: String,
+    pub readiness: String,
+    pub evidence: String,
+    pub steps: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReadinessCheck {
+    pub name: String,
+    pub status: String,
+    pub evidence: String,
+    pub open_gaps: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DefinitiveReadinessReport {
+    pub generated_at: String,
+    pub overall_status: String,
+    pub ready_checks: u64,
+    pub warning_checks: u64,
+    pub blocked_checks: u64,
+    pub checks: Vec<ReadinessCheck>,
 }
 
 pub struct IPODashboard;
@@ -168,6 +197,200 @@ impl IPODashboard {
             })
             .collect()
     }
+
+    pub fn get_category_demos(&self, conn: &Connection) -> Vec<CategoryDemo> {
+        let billing_events = audit_count(conn, "plan_changed");
+        let handoffs = scalar_u64(conn, "SELECT COUNT(*) FROM human_handoffs");
+        let traces = scalar_u64(conn, "SELECT COUNT(*) FROM execution_traces");
+        let creator_projects = scalar_u64(conn, "SELECT COUNT(*) FROM creator_projects");
+        let microtasks = scalar_u64(conn, "SELECT COUNT(*) FROM microtasks");
+        let escrows = scalar_u64(conn, "SELECT COUNT(*) FROM escrows");
+        let org_catalog = scalar_u64(conn, "SELECT COUNT(*) FROM org_marketplace_listings WHERE approved = 1");
+
+        vec![
+            CategoryDemo {
+                id: "billing-hardening".to_string(),
+                category: "operations".to_string(),
+                title: "Billing and upgrade enforcement".to_string(),
+                readiness: if billing_events > 0 { "ready" } else { "partial" }.to_string(),
+                evidence: format!("{} completed plan changes captured in audit log", billing_events),
+                steps: vec![
+                    "Trigger a plan-limited action from a free workspace.".to_string(),
+                    "Open the billing checkout flow.".to_string(),
+                    "Validate plan change and updated usage state.".to_string(),
+                ],
+            },
+            CategoryDemo {
+                id: "handoff-debugger".to_string(),
+                category: "operations".to_string(),
+                title: "Human handoff with debugger trace".to_string(),
+                readiness: if handoffs > 0 && traces > 0 { "ready" } else { "partial" }.to_string(),
+                evidence: format!("{} handoffs and {} traces available for replay", handoffs, traces),
+                steps: vec![
+                    "Create an escalation from a low-confidence task.".to_string(),
+                    "Assign it to a human and attach notes.".to_string(),
+                    "Review the matching execution trace.".to_string(),
+                ],
+            },
+            CategoryDemo {
+                id: "creator-economy".to_string(),
+                category: "creator".to_string(),
+                title: "Creator project to microtask escrow".to_string(),
+                readiness: if creator_projects > 0 && microtasks > 0 && escrows > 0 {
+                    "ready"
+                } else {
+                    "partial"
+                }
+                .to_string(),
+                evidence: format!(
+                    "{} creator projects, {} microtasks, {} escrows recorded",
+                    creator_projects, microtasks, escrows
+                ),
+                steps: vec![
+                    "Run creator test and package a project.".to_string(),
+                    "Publish a microtask linked to the project.".to_string(),
+                    "Create and release escrow after completion.".to_string(),
+                ],
+            },
+            CategoryDemo {
+                id: "partner-distribution".to_string(),
+                category: "partner".to_string(),
+                title: "Partner-branded distribution".to_string(),
+                readiness: if org_catalog > 0 { "ready" } else { "partial" }.to_string(),
+                evidence: format!("{} approved org marketplace listings available for bundle generation", org_catalog),
+                steps: vec![
+                    "Select the partner org and branding variant.".to_string(),
+                    "Prepare the OEM distribution bundle.".to_string(),
+                    "Verify catalog, branding and updater metadata in the manifest.".to_string(),
+                ],
+            },
+        ]
+    }
+
+    pub fn definitive_readiness(&self, conn: &Connection) -> DefinitiveReadinessReport {
+        let reliability = HealthDashboard::reliability_report(conn, 30);
+        let creator_projects = scalar_u64(conn, "SELECT COUNT(*) FROM creator_projects");
+        let tests = scalar_u64(conn, "SELECT COUNT(*) FROM test_run_history");
+        let partner_bundles = scalar_u64(
+            conn,
+            "SELECT COUNT(*) FROM hardware_partners WHERE distribution_bundle_path IS NOT NULL",
+        );
+        let swarms = scalar_u64(conn, "SELECT COUNT(*) FROM swarm_tasks");
+        let docs_ready = u64::from(
+            std::path::Path::new("docs/deployment-runbooks.md").exists()
+                && std::path::Path::new("docs/platform_standardization.md").exists(),
+        );
+
+        let checks = vec![
+            readiness_check(
+                "reliability",
+                reliability.overall_status != "breached",
+                format!(
+                    "SLO status={} objectives_breached={}",
+                    reliability.overall_status,
+                    reliability.breached_objectives.len()
+                ),
+                if reliability.breached_objectives.is_empty() {
+                    vec![]
+                } else {
+                    reliability.breached_objectives.clone()
+                },
+            ),
+            readiness_check(
+                "creator_economy",
+                creator_projects > 0 && tests > 0,
+                format!("{} creator projects and {} test runs tracked", creator_projects, tests),
+                missing_gaps(
+                    creator_projects == 0,
+                    "No creator projects have been persisted yet",
+                    tests == 0,
+                    "No creator tests have been recorded yet",
+                ),
+            ),
+            readiness_check(
+                "partner_distribution",
+                partner_bundles > 0,
+                format!("{} partner distribution bundles prepared", partner_bundles),
+                if partner_bundles == 0 {
+                    vec!["No partner distribution bundle has been generated yet".to_string()]
+                } else {
+                    vec![]
+                },
+            ),
+            readiness_check(
+                "swarm_runtime",
+                swarms > 0,
+                format!("{} swarm task records present", swarms),
+                if swarms == 0 {
+                    vec!["Swarm runtime has not recorded a task yet".to_string()]
+                } else {
+                    vec![]
+                },
+            ),
+            readiness_check(
+                "operator_docs",
+                docs_ready > 0,
+                "Deployment and platform runbooks exist".to_string(),
+                if docs_ready == 0 {
+                    vec!["Operational docs are missing".to_string()]
+                } else {
+                    vec![]
+                },
+            ),
+        ];
+
+        let ready_checks = checks.iter().filter(|check| check.status == "ready").count() as u64;
+        let warning_checks = checks.iter().filter(|check| check.status == "warning").count() as u64;
+        let blocked_checks = checks.iter().filter(|check| check.status == "blocked").count() as u64;
+        let overall_status = if blocked_checks > 0 {
+            "blocked"
+        } else if warning_checks > 0 {
+            "warning"
+        } else {
+            "ready"
+        };
+
+        DefinitiveReadinessReport {
+            generated_at: chrono::Utc::now().to_rfc3339(),
+            overall_status: overall_status.to_string(),
+            ready_checks,
+            warning_checks,
+            blocked_checks,
+            checks,
+        }
+    }
+}
+
+fn readiness_check(name: &str, condition: bool, evidence: String, open_gaps: Vec<String>) -> ReadinessCheck {
+    let status = if condition {
+        "ready"
+    } else if open_gaps.is_empty() {
+        "warning"
+    } else {
+        "blocked"
+    };
+    ReadinessCheck {
+        name: name.to_string(),
+        status: status.to_string(),
+        evidence,
+        open_gaps,
+    }
+}
+
+fn missing_gaps(
+    first_missing: bool,
+    first_message: &str,
+    second_missing: bool,
+    second_message: &str,
+) -> Vec<String> {
+    let mut gaps = Vec::new();
+    if first_missing {
+        gaps.push(first_message.to_string());
+    }
+    if second_missing {
+        gaps.push(second_message.to_string());
+    }
+    gaps
 }
 
 fn readiness_from_count(count: u64) -> String {
@@ -258,5 +481,80 @@ mod tests {
         assert_eq!(metrics.open_handoffs, 1);
         assert_eq!(data_room[0].status, "ready");
         assert!(data_room.iter().any(|doc| doc.name == "Execution Traces"));
+    }
+
+    #[test]
+    fn category_demos_and_readiness_use_real_tables() {
+        let conn = setup_conn();
+        conn.execute(
+            "CREATE TABLE creator_projects (id TEXT PRIMARY KEY)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "CREATE TABLE test_run_history (run_id TEXT PRIMARY KEY)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "CREATE TABLE hardware_partners (
+                id TEXT PRIMARY KEY,
+                distribution_bundle_path TEXT
+            )",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "CREATE TABLE swarm_tasks (id TEXT PRIMARY KEY)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "CREATE TABLE microtasks (id TEXT PRIMARY KEY)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "CREATE TABLE escrows (id TEXT PRIMARY KEY)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "CREATE TABLE org_marketplace_listings (
+                id TEXT PRIMARY KEY,
+                approved INTEGER NOT NULL DEFAULT 0
+            )",
+            [],
+        )
+        .unwrap();
+
+        conn.execute("INSERT INTO creator_projects (id) VALUES ('p1')", []).unwrap();
+        conn.execute("INSERT INTO test_run_history (run_id) VALUES ('r1')", []).unwrap();
+        conn.execute(
+            "INSERT INTO hardware_partners (id, distribution_bundle_path) VALUES ('hp1', 'bundle.json')",
+            [],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO swarm_tasks (id) VALUES ('s1')", []).unwrap();
+        conn.execute("INSERT INTO microtasks (id) VALUES ('m1')", []).unwrap();
+        conn.execute("INSERT INTO escrows (id) VALUES ('e1')", []).unwrap();
+        conn.execute(
+            "INSERT INTO org_marketplace_listings (id, approved) VALUES ('l1', 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO tasks (id, status) VALUES ('t3', 'completed')",
+            [],
+        )
+        .unwrap();
+
+        let dashboard = IPODashboard::new();
+        let demos = dashboard.get_category_demos(&conn);
+        let readiness = dashboard.definitive_readiness(&conn);
+
+        assert_eq!(demos.len(), 4);
+        assert!(demos.iter().any(|demo| demo.id == "partner-distribution"));
+        assert!(readiness.checks.iter().any(|check| check.name == "partner_distribution"));
     }
 }

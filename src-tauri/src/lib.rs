@@ -7179,6 +7179,35 @@ fn cmd_financial_projections(
     serde_json::to_value(&projections).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn cmd_category_demos(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let demos = state.ipo_dashboard.get_category_demos(db.conn());
+    serde_json::to_value(&demos).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn cmd_definitive_readiness(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let report = state.ipo_dashboard.definitive_readiness(db.conn());
+    serde_json::to_value(&report).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn cmd_reliability_report(
+    window_days: Option<u32>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let report = observability::HealthDashboard::reliability_report(
+        db.conn(),
+        window_days.unwrap_or(30),
+    );
+    serde_json::to_value(&report).map_err(|e| e.to_string())
+}
+
 /// Simple non-cryptographic hash for referral IDs (not security-sensitive).
 fn md5_simple(data: &[u8]) -> u64 {
     let mut hash: u64 = 0xcbf29ce484222325;
@@ -8132,7 +8161,7 @@ async fn cmd_email_client_send(
 #[tauri::command]
 async fn cmd_list_partners(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let registry = state.partner_registry.lock().await;
-    let partners = registry.list_partners();
+    let partners = registry.list_partners()?;
     serde_json::to_value(&partners).map_err(|e| e.to_string())
 }
 
@@ -8142,7 +8171,7 @@ async fn cmd_get_partner(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let registry = state.partner_registry.lock().await;
-    match registry.get_partner(&id) {
+    match registry.get_partner(&id)? {
         Some(p) => serde_json::to_value(&p).map_err(|e| e.to_string()),
         None => Err(format!("Partner not found: {}", id)),
     }
@@ -8153,16 +8182,17 @@ async fn cmd_register_partner(
     company: String,
     device_type: String,
     integration_level: String,
+    org_id: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let level = match integration_level.as_str() {
-        "basic" => partnerships::registry::IntegrationLevel::Basic,
-        "premium" => partnerships::registry::IntegrationLevel::Premium,
-        "exclusive" => partnerships::registry::IntegrationLevel::Exclusive,
+        "basic" => partnerships::IntegrationLevel::Basic,
+        "premium" => partnerships::IntegrationLevel::Premium,
+        "exclusive" => partnerships::IntegrationLevel::Exclusive,
         _ => return Err(format!("Invalid integration level: {}", integration_level)),
     };
-    let mut registry = state.partner_registry.lock().await;
-    let partner = registry.register_partner(company, device_type, level);
+    let registry = state.partner_registry.lock().await;
+    let partner = registry.register_partner(company, device_type, level, org_id)?;
     serde_json::to_value(&partner).map_err(|e| e.to_string())
 }
 
@@ -8171,9 +8201,58 @@ async fn cmd_certify_partner(
     id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let mut registry = state.partner_registry.lock().await;
+    let registry = state.partner_registry.lock().await;
     let partner = registry.certify(&id)?;
     serde_json::to_value(&partner).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_partner_configure_distribution(
+    id: String,
+    org_id: Option<String>,
+    distribution_channel: String,
+    artifact_base_url: String,
+    updater_pubkey: Option<String>,
+    contact_email: Option<String>,
+    units_shipped: Option<u64>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let registry = state.partner_registry.lock().await;
+    let partner = registry.configure_distribution(
+        &id,
+        org_id,
+        distribution_channel,
+        artifact_base_url,
+        updater_pubkey,
+        contact_email,
+        units_shipped,
+    )?;
+    serde_json::to_value(&partner).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_partner_prepare_distribution(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let partner = {
+        let registry = state.partner_registry.lock().await;
+        registry
+            .get_partner(&id)?
+            .ok_or_else(|| format!("Partner not found: {}", id))?
+    };
+    let fallback_branding = state.branding.read().await.clone();
+    let org_id = partner
+        .org_id
+        .clone()
+        .ok_or_else(|| "Partner must be linked to an organization before packaging distribution".to_string())?;
+    let view = {
+        let marketplace = state.org_marketplace.lock().await;
+        marketplace.get_view_for_org(&org_id, &fallback_branding)?
+    };
+    let registry = state.partner_registry.lock().await;
+    let bundle = registry.prepare_distribution_bundle(&id, &view.branding, &view)?;
+    serde_json::to_value(&bundle).map_err(|e| e.to_string())
 }
 
 // ── R111: Autonomous Inbox commands ──────────────────────────────────
@@ -9930,6 +10009,17 @@ async fn cmd_creator_trends(
     serde_json::to_value(&trends).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+async fn cmd_creator_dashboard(
+    creator_id: String,
+    limit: Option<usize>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let engine = state.creator_analytics.lock().await;
+    let dashboard = engine.get_creator_dashboard(&creator_id, limit.unwrap_or(5))?;
+    serde_json::to_value(&dashboard).map_err(|e| e.to_string())
+}
+
 // ── R149: Affiliate Program IPC commands ─────────────────────────
 #[tauri::command]
 async fn cmd_affiliate_create(
@@ -10231,7 +10321,8 @@ pub fn run() {
                     email_client::EmailClient::new(),
                 )),
                 partner_registry: Arc::new(tokio::sync::Mutex::new(
-                    partnerships::PartnerRegistry::new(),
+                    partnerships::PartnerRegistry::new(db_path.clone())
+                        .expect("failed to initialize partner registry"),
                 )),
                 // R111-R115: Autonomous Operations
                 auto_inbox: Arc::new(tokio::sync::Mutex::new(autonomous::AutoInbox::new())),
@@ -11166,6 +11257,9 @@ pub fn run() {
             cmd_investor_metrics,
             cmd_data_room,
             cmd_financial_projections,
+            cmd_category_demos,
+            cmd_definitive_readiness,
+            cmd_reliability_report,
             // R91: OS Integration commands
             cmd_get_file_actions,
             cmd_get_text_actions,
@@ -11252,6 +11346,8 @@ pub fn run() {
             cmd_get_partner,
             cmd_register_partner,
             cmd_certify_partner,
+            cmd_partner_configure_distribution,
+            cmd_partner_prepare_distribution,
             // R111: Autonomous Inbox commands
             cmd_auto_inbox_add_rule,
             cmd_auto_inbox_list_rules,
@@ -11426,6 +11522,7 @@ pub fn run() {
             cmd_creator_metrics,
             cmd_creator_revenue,
             cmd_creator_trends,
+            cmd_creator_dashboard,
             // R149: Affiliate Program commands
             cmd_affiliate_create,
             cmd_affiliate_earnings,
