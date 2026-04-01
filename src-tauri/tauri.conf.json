@@ -20,6 +20,20 @@
         "center": true,
         "resizable": true,
         "decorations": true
+      },
+      {
+        "label": "vision-progress",
+        "title": "AgentOS Vision",
+        "url": "/vision-progress",
+        "width": 340,
+        "height": 90,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "resizable": false,
+        "visible": false,
+        "transparent": false,
+        "x": 20,
+        "y": 20
       }
     ],
     "security": {
@@ -38,5 +52,14 @@
       "icons/icon.ico"
     ],
     "targets": "all"
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "dialog": true,
+      "endpoints": [
+        "https://github.com/AresE87/AgentOS/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

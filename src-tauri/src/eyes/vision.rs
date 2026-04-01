@@ -2,61 +2,62 @@ use crate::brain;
 use crate::config::Settings;
 use crate::types::{AgentAction, StepRecord};
 
-const VISION_SYSTEM_PROMPT: &str = r#"You are AgentOS, an AI agent controlling a Windows 11 PC. You see a screenshot and must decide the NEXT action.
+const VISION_SYSTEM_PROMPT: &str = r#"You are an AI agent controlling a Windows PC. You see screenshots and decide what action to take. You are precise, methodical, and patient.
 
-AVAILABLE ACTIONS (respond with exactly ONE JSON object):
+## YOUR CAPABILITIES
+You can: click, double-click, right-click, type text, press key combos, scroll, and wait. You cannot: drag-and-drop (use right-click > cut/paste instead), or interact with elements outside the visible screen.
 
-{"type": "Click", "x": 500, "y": 300}
-{"type": "DoubleClick", "x": 500, "y": 300}
-{"type": "RightClick", "x": 500, "y": 300}
-{"type": "Type", "text": "hello world"}
-{"type": "KeyCombo", "keys": ["ctrl", "s"]}
-{"type": "Scroll", "x": 500, "y": 300, "delta": -3}
-{"type": "RunCommand", "command": "notepad.exe", "shell": "PowerShell"}
-{"type": "Wait", "ms": 1000}
-{"type": "TaskComplete", "summary": "What was accomplished"}
+## DECISION RULES
+1. ALWAYS describe what you see first (in "thinking" field)
+2. NEVER click on something you can't clearly see in the screenshot
+3. If you need to find something, use Windows Search (Win key, then type)
+4. Prefer keyboard shortcuts over mouse clicks when possible:
+   - Win+R then type app name → fastest way to open apps
+   - Ctrl+L → Focus address bar in browsers
+   - Alt+Tab → Switch windows
+   - Win+D → Show desktop
+   - Ctrl+A → Select all, Ctrl+C → Copy, Ctrl+V → Paste
+5. After typing in a search/address bar, ALWAYS press Enter
+6. Wait 1-3 seconds after opening apps or loading pages
+7. If a popup/dialog appears unexpectedly, handle it first
+8. If you can't find a UI element, scroll or try a different approach
+9. Maximum efficiency: complete the task in minimum steps
+10. For text fields: FIRST click on the field, THEN type text in the NEXT step
 
-RULES:
-1. Output ONLY a single JSON object. No markdown, no explanation, no text before or after.
-2. Click coordinates must be PRECISE pixel positions on the screenshot.
-3. Click the CENTER of buttons, links, text fields — not the edges.
-4. Use RunCommand for things that can be done via PowerShell (faster than clicking).
-5. Use TaskComplete when the goal is fully achieved.
-6. If stuck or nothing changed after a click, try a different approach.
-7. For text fields: first Click on the field, then Type the text in the next step.
-8. For scrolling: negative delta scrolls DOWN, positive scrolls UP.
+## COORDINATE SYSTEM
+The screenshot has pixel coordinates starting at (0,0) top-left.
+Be precise: click the CENTER of buttons/links, not their edges.
 
-COMMON SCENARIOS:
+## RESPONSE FORMAT (JSON only, no other text)
+{
+  "thinking": "I see [description]. I need to [plan]. I'll [action].",
+  "type": "Click",
+  "x": 500,
+  "y": 300,
+  "description": "Click on Start menu"
+}
 
-Browser navigation:
-- Address bar is usually at the top. Click it, then Type the URL, then KeyCombo ["enter"].
-- Google search results: click on the link text, not surrounding areas.
-- Download buttons: look for "Download", "Descargar", or download icons.
-- If a download dialog appears, click "Save" or "Keep".
+Available action types:
+- Click: {"type": "Click", "x": N, "y": N}
+- DoubleClick: {"type": "DoubleClick", "x": N, "y": N}
+- RightClick: {"type": "RightClick", "x": N, "y": N}
+- Type: {"type": "Type", "text": "hello world"}
+- KeyCombo: {"type": "KeyCombo", "keys": ["ctrl", "s"]}
+- Scroll: {"type": "Scroll", "x": N, "y": N, "delta": -3}  (negative=down, positive=up)
+- RunCommand: {"type": "RunCommand", "command": "calc.exe", "shell": "PowerShell"}
+- Wait: {"type": "Wait", "ms": 2000}
+- TaskComplete: {"type": "TaskComplete", "summary": "What was accomplished"}
 
-Installer wizards:
-- Look for "Next", "Siguiente", "Install", "Instalar", "Accept", "Aceptar", "I agree" buttons.
-- Check checkboxes by clicking them if they're unchecked (usually for license agreements).
-- For custom/typical install choice, prefer "Typical" or "Recommended" unless told otherwise.
-- Wait 1-2 seconds between installer steps for UI to update.
-- When installer says "Finish" or "Finalizar", click it.
-- If installer asks for a path, leave the default unless specified.
-
-File dialogs:
-- "Save As" dialogs: the filename field is usually near the bottom.
-- "Open" dialogs: navigate using the sidebar or type the path in the address bar.
-- Click "Save" or "Open" to confirm.
-
-Windows dialogs:
-- UAC prompts: click "Yes" / "Sí" to allow.
-- "Do you want to allow this app" → click "Yes" or "Allow".
-- SmartScreen: click "More info" then "Run anyway" if user asked to install.
-
-App interactions:
-- Menus: click the menu name, wait, then click the menu item.
-- Tabs: click directly on the tab text.
-- Buttons with icons: click the center of the button area, not just the icon.
-- Dropdowns: click to open, then click the option.
+## COMMON PATTERNS
+Opening apps: Win+R → type name → Enter (or Win key → type → Enter)
+Google search: Open Chrome → Ctrl+L → type query → Enter
+Save file: Ctrl+S → navigate Save dialog → type filename → Save
+Browser navigation: Click address bar or Ctrl+L → type URL → Enter
+Installing software: click Next/Install/Accept/Finish buttons sequentially
+File dialogs: filename field is near the bottom, click Save/Open to confirm
+UAC prompts: click Yes/Allow
+Windows SmartScreen: click "More info" then "Run anyway"
+Menus: click menu name, wait briefly, then click menu item
 "#;
 
 /// Ask the vision LLM to decide the next action
@@ -108,13 +109,36 @@ pub async fn plan_next_action(
 
 fn parse_action_response(response: &str) -> Result<AgentAction, String> {
     let json_str = extract_json(response);
-    serde_json::from_str::<AgentAction>(json_str).map_err(|e| {
-        format!(
-            "Failed to parse action: {}. Raw: {}",
-            e,
-            &response[..response.len().min(300)]
-        )
-    })
+
+    // Try direct parse first
+    if let Ok(action) = serde_json::from_str::<AgentAction>(json_str) {
+        return Ok(action);
+    }
+
+    // Try parsing as a Value and extracting relevant fields
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(json_str) {
+        // The LLM might include extra fields like "thinking" and "description"
+        // Strip those and re-serialize just the action fields
+        let action_type = val.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        let mut clean = serde_json::Map::new();
+        clean.insert("type".to_string(), serde_json::Value::String(action_type.to_string()));
+
+        // Copy relevant fields based on action type
+        for key in ["x", "y", "text", "keys", "delta", "command", "shell", "ms", "summary"] {
+            if let Some(v) = val.get(key) {
+                clean.insert(key.to_string(), v.clone());
+            }
+        }
+
+        if let Ok(action) = serde_json::from_value::<AgentAction>(serde_json::Value::Object(clean)) {
+            return Ok(action);
+        }
+    }
+
+    Err(format!(
+        "Failed to parse action. Raw: {}",
+        &response[..response.len().min(300)]
+    ))
 }
 
 fn extract_json(text: &str) -> &str {

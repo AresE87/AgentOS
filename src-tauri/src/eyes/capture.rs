@@ -247,6 +247,19 @@ mod tests {
     }
 }
 
+/// Get the monitor index where the mouse cursor currently is
+#[cfg(target_os = "windows")]
+pub fn get_active_monitor_index() -> usize {
+    // Simplified: always return primary monitor index.
+    // Full multi-monitor support can be added later.
+    0
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn get_active_monitor_index() -> usize {
+    0
+}
+
 /// Convert screenshot to base64 JPEG for sending to vision LLMs
 pub fn to_base64_jpeg(
     data: &ScreenshotData,

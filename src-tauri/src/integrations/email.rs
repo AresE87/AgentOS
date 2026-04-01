@@ -587,6 +587,144 @@ fn extract_attachment_names(payload: Option<&serde_json::Value>) -> Vec<String> 
     names
 }
 
+// ── Standalone Gmail convenience functions ────────────────────────────
+//
+// These mirror the GmailProvider methods but accept a raw access_token,
+// making them easy to call from Tauri commands or other modules without
+// needing a full GmailProvider instance.
+
+/// List message IDs from Gmail (lightweight — does not fetch full bodies).
+pub async fn gmail_list_messages(
+    access_token: &str,
+    query: Option<&str>,
+    max: u32,
+) -> Result<Vec<serde_json::Value>, String> {
+    let client = Client::new();
+    let mut url = format!("{}/messages?maxResults={}", GMAIL_API, max);
+    if let Some(q) = query {
+        url.push_str(&format!("&q={}", urlencoding::encode(q)));
+    }
+    let resp = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", access_token))
+        .send()
+        .await
+        .map_err(|e| format!("Gmail API error: {}", e))?;
+    let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    if let Some(err) = json.get("error") {
+        return Err(format!("Gmail API error: {}", err));
+    }
+    Ok(json["messages"].as_array().cloned().unwrap_or_default())
+}
+
+/// Fetch a single Gmail message by ID (full format).
+pub async fn gmail_get_message(
+    access_token: &str,
+    msg_id: &str,
+) -> Result<serde_json::Value, String> {
+    let client = Client::new();
+    let resp = client
+        .get(format!("{}/messages/{}?format=full", GMAIL_API, msg_id))
+        .header("Authorization", format!("Bearer {}", access_token))
+        .send()
+        .await
+        .map_err(|e| format!("Gmail API error: {}", e))?;
+    let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    if let Some(err) = json.get("error") {
+        return Err(format!("Gmail API error: {}", err));
+    }
+    Ok(json)
+}
+
+/// Send an email through Gmail using a raw access token.
+pub async fn gmail_send(
+    access_token: &str,
+    to: &str,
+    subject: &str,
+    body: &str,
+) -> Result<serde_json::Value, String> {
+    let raw = URL_SAFE_NO_PAD.encode(format!(
+        "To: {}\r\nSubject: {}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n{}",
+        to, subject, body
+    ));
+    let client = Client::new();
+    let resp = client
+        .post(format!("{}/messages/send", GMAIL_API))
+        .header("Authorization", format!("Bearer {}", access_token))
+        .json(&serde_json::json!({ "raw": raw }))
+        .send()
+        .await
+        .map_err(|e| format!("Gmail send error: {}", e))?;
+    let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    if let Some(err) = json.get("error") {
+        return Err(format!("Gmail send error: {}", err));
+    }
+    Ok(json)
+}
+
+/// Refresh a Google OAuth2 access token using a refresh token.
+/// Returns the new access token string on success.
+pub async fn refresh_google_token(
+    client_id: &str,
+    client_secret: &str,
+    refresh_token: &str,
+) -> Result<String, String> {
+    let client = Client::new();
+    let resp = client
+        .post(GOOGLE_TOKEN_URL)
+        .form(&[
+            ("client_id", client_id),
+            ("client_secret", client_secret),
+            ("refresh_token", refresh_token),
+            ("grant_type", "refresh_token"),
+        ])
+        .send()
+        .await
+        .map_err(|e| format!("Token refresh error: {}", e))?;
+    let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    json["access_token"]
+        .as_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| format!("No access_token in response: {}", json))
+}
+
+/// Trash a Gmail message by ID.
+pub async fn gmail_trash_message(
+    access_token: &str,
+    msg_id: &str,
+) -> Result<(), String> {
+    let client = Client::new();
+    let resp = client
+        .post(format!("{}/messages/{}/trash", GMAIL_API, msg_id))
+        .header("Authorization", format!("Bearer {}", access_token))
+        .send()
+        .await
+        .map_err(|e| format!("Gmail trash error: {}", e))?;
+    if !resp.status().is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Gmail trash error: {}", body));
+    }
+    Ok(())
+}
+
+/// List Gmail labels for the authenticated user.
+pub async fn gmail_list_labels(
+    access_token: &str,
+) -> Result<Vec<serde_json::Value>, String> {
+    let client = Client::new();
+    let resp = client
+        .get(format!("{}/labels", GMAIL_API))
+        .header("Authorization", format!("Bearer {}", access_token))
+        .send()
+        .await
+        .map_err(|e| format!("Gmail labels error: {}", e))?;
+    let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    if let Some(err) = json.get("error") {
+        return Err(format!("Gmail API error: {}", err));
+    }
+    Ok(json["labels"].as_array().cloned().unwrap_or_default())
+}
+
 // ── EmailManager — dual-mode: Gmail API or in-memory fallback ──────────
 
 pub struct EmailManager {

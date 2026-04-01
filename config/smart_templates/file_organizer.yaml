@@ -1,0 +1,24 @@
+id: file_organizer
+name: "File Organizer"
+description: "Organize files in a folder by type"
+variables:
+  - name: folder_path
+    var_type: string
+    prompt: "Which folder to organize?"
+    default: "$env:USERPROFILE\\Desktop"
+steps:
+  - id: list_files
+    step_type:
+      type: command
+      command: "Get-ChildItem '{folder_path}' -File | Select-Object Name, Extension, Length, LastWriteTime | Format-Table -AutoSize"
+    description: "List all files in the folder"
+  - id: organize
+    step_type:
+      type: command
+      command: "$exts = @('.jpg','.png','.gif','.bmp'); $docs = @('.pdf','.docx','.xlsx','.pptx','.txt'); $path = '{folder_path}'; foreach($ext in $exts) { $dir = Join-Path $path 'Images'; if(!(Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }; Get-ChildItem $path -Filter \"*$ext\" -File | Move-Item -Destination $dir -Force }; foreach($ext in $docs) { $dir = Join-Path $path 'Documents'; if(!(Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }; Get-ChildItem $path -Filter \"*$ext\" -File | Move-Item -Destination $dir -Force }; Write-Output 'Files organized into Images/ and Documents/ folders'"
+    description: "Organize files by type into subfolders"
+  - id: done
+    step_type:
+      type: done
+      result: "Files in {folder_path} organized into subfolders by type"
+    description: "Complete"

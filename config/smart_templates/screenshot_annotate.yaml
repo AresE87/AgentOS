@@ -1,0 +1,19 @@
+id: screenshot_annotate
+name: "Screenshot & Describe"
+description: "Capture the current screen and get an AI description"
+variables:
+  - name: focus
+    var_type: string
+    prompt: "What should I focus on describing?"
+    default: "everything visible"
+steps:
+  - id: capture
+    step_type:
+      type: vision_check
+      question: "Describe what you see on this screen in detail, focusing on: {focus}"
+    description: "Capture and analyze the screen"
+  - id: done
+    step_type:
+      type: done
+      result: "Screen captured and analyzed"
+    description: "Complete"

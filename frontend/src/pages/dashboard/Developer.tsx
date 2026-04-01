@@ -1,585 +1,741 @@
-import { useEffect, useState } from 'react';
-import Card from '../../components/Card';
-import Button from '../../components/Button';
+import { useEffect, useState, useCallback } from 'react';
 import { useAgent } from '../../hooks/useAgent';
 import {
-  Bug,
   Camera,
   Eye,
-  FolderOpen,
-  Keyboard,
-  MousePointer,
-  RefreshCw,
+  Key,
+  Copy,
+  Plus,
+  Trash2,
+  Zap,
   Terminal,
+  CheckCircle2,
+  XCircle,
+  AlertTriangle,
+  Check,
+  Loader2,
 } from 'lucide-react';
 
-interface DebugTraceStep {
+/* ------------------------------------------------------------------ */
+/*  Design Tokens                                                      */
+/* ------------------------------------------------------------------ */
+
+const T = {
+  bgPrimary:   '#0A0E14',
+  bgSurface:   '#0D1117',
+  bgDeep:      '#080B10',
+  bgElevated:  '#1A1E26',
+  cyan:        '#00E5E5',
+  textPrimary: '#E6EDF3',
+  textSecondary: '#C5D0DC',
+  textMuted:   '#3D4F5F',
+  textDim:     '#2A3441',
+  success:     '#2ECC71',
+  error:       '#E74C3C',
+  warning:     '#F39C12',
+  info:        '#378ADD',
+  purple:      '#5865F2',
+  border:      'rgba(0,229,229,0.08)',
+  fontUI:      'Inter, system-ui, sans-serif',
+  fontMono:    '"JetBrains Mono", "Fira Code", monospace',
+} as const;
+
+/* ------------------------------------------------------------------ */
+/*  Types                                                              */
+/* ------------------------------------------------------------------ */
+
+interface ApiKey {
   id: string;
-  timestamp: string;
-  phase: string;
-  planned_action: string;
-  agent_name: string;
-  model: string;
-  input_summary: string;
-  output_summary: string;
-  status: string;
-  error?: string | null;
-  duration_ms: number;
-  cost: number;
-  evidence: string[];
+  name: string;
+  prefix: string;
+  created_at: string;
+  last_used?: string | null;
 }
 
-interface DebugTrace {
-  id: string;
-  task_id: string;
-  agent_name: string;
+interface ScreenshotResult {
+  path: string;
+  width?: number;
+  height?: number;
+}
+
+interface VisionResult {
   model: string;
-  status: string;
-  created_at: string;
-  updated_at: string;
-  total_duration_ms: number;
-  total_cost: number;
-  steps: DebugTraceStep[];
+  analysis: string;
+}
+
+interface GatewayResult {
+  response: string;
+  model: string;
+  tokens: number;
+  cost: number;
+  latency_ms: number;
 }
 
 interface ShellRegistrationStatus {
   platform: string;
   supported: boolean;
   installed: boolean;
-  menu_label: string;
-  command_preview?: string | null;
-  issues: string[];
 }
 
-interface ShellInvocation {
-  action_id: string;
-  target_path: string;
-  target_kind: string;
-  received_at: string;
+/* ------------------------------------------------------------------ */
+/*  Shared style objects                                                */
+/* ------------------------------------------------------------------ */
+
+const cardStyle: React.CSSProperties = {
+  background: T.bgSurface,
+  border: `0.5px solid ${T.border}`,
+  borderRadius: 12,
+  padding: 24,
+};
+
+const deepBoxStyle: React.CSSProperties = {
+  background: T.bgDeep,
+  border: `0.5px solid ${T.border}`,
+  borderRadius: 10,
+};
+
+const actionCardBase: React.CSSProperties = {
+  ...deepBoxStyle,
+  padding: 20,
+  transition: 'border-color 0.2s, box-shadow 0.2s',
+  cursor: 'default',
+};
+
+/* ------------------------------------------------------------------ */
+/*  Tiny sub-components                                                */
+/* ------------------------------------------------------------------ */
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <p
+      style={{
+        fontSize: 11,
+        fontWeight: 600,
+        letterSpacing: '0.08em',
+        textTransform: 'uppercase',
+        color: T.textMuted,
+        marginBottom: 16,
+        fontFamily: T.fontUI,
+      }}
+    >
+      {children}
+    </p>
+  );
 }
 
-interface ShellExecutionRecord {
-  invocation: ShellInvocation;
-  context_summary: string;
-  prompt: string;
-  agent_status?: string | null;
-  agent_output?: string | null;
-  error?: string | null;
-  completed_at: string;
-}
-
-export default function Developer() {
-  const {
-    debuggerListTraces,
-    debuggerGetTrace,
-    getShellRegistrationStatus,
-    installWindowsContextMenu,
-    uninstallWindowsContextMenu,
-    getPendingShellInvocation,
-    getLastShellExecution,
-    consumePendingShellInvocation,
-  } = useAgent();
-
-  const [log, setLog] = useState<string[]>([]);
-  const [loading, setLoading] = useState<string | null>(null);
-  const [traceLoading, setTraceLoading] = useState(false);
-  const [shellLoading, setShellLoading] = useState<string | null>(null);
-  const [traceFilter, setTraceFilter] = useState({
-    taskId: '',
-    agentName: '',
-    status: '',
-  });
-  const [traces, setTraces] = useState<DebugTrace[]>([]);
-  const [selectedTraceId, setSelectedTraceId] = useState<string | null>(null);
-  const [selectedTrace, setSelectedTrace] = useState<DebugTrace | null>(null);
-  const [shellStatus, setShellStatus] = useState<ShellRegistrationStatus | null>(null);
-  const [pendingInvocation, setPendingInvocation] = useState<ShellInvocation | null>(null);
-  const [lastShellExecution, setLastShellExecution] = useState<ShellExecutionRecord | null>(null);
-  const [shellRunResult, setShellRunResult] = useState<any | null>(null);
-
-  const addLog = (msg: string) =>
-    setLog((prev) => [...prev.slice(-20), `[${new Date().toLocaleTimeString()}] ${msg}`]);
-
-  const callBackend = async (cmd: string, args?: Record<string, unknown>) => {
-    setLoading(cmd);
-    try {
-      const isTauri = '__TAURI_INTERNALS__' in window || '__TAURI__' in window;
-      if (!isTauri) {
-        addLog(`[MOCK] ${cmd} requires Tauri backend`);
-        setLoading(null);
-        return null;
-      }
-      const { invoke } = await import('@tauri-apps/api/core');
-      const result = await invoke<any>(`cmd_${cmd}`, args);
-      addLog(`${cmd}: OK`);
-      setLoading(null);
-      return result;
-    } catch (e: any) {
-      addLog(`${cmd}: ERROR ${e?.message || e}`);
-      setLoading(null);
-      return null;
-    }
+function Btn({
+  children,
+  onClick,
+  variant = 'primary',
+  disabled = false,
+  loading = false,
+  small = false,
+}: {
+  children: React.ReactNode;
+  onClick?: () => void;
+  variant?: 'primary' | 'secondary' | 'danger';
+  disabled?: boolean;
+  loading?: boolean;
+  small?: boolean;
+}) {
+  const base: React.CSSProperties = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    fontFamily: T.fontUI,
+    fontSize: small ? 12 : 13,
+    fontWeight: 500,
+    padding: small ? '5px 12px' : '7px 16px',
+    borderRadius: 8,
+    border: 'none',
+    cursor: disabled || loading ? 'not-allowed' : 'pointer',
+    opacity: disabled ? 0.45 : 1,
+    transition: 'background 0.15s, opacity 0.15s',
   };
 
-  const refreshTraces = async (keepSelection = true) => {
-    setTraceLoading(true);
-    try {
-      const items = await debuggerListTraces(
-        20,
-        traceFilter.taskId.trim() || undefined,
-        traceFilter.agentName.trim() || undefined,
-        traceFilter.status.trim() || undefined,
-      );
-      setTraces(items);
-
-      const nextId =
-        keepSelection && selectedTraceId && items.some((item: DebugTrace) => item.id === selectedTraceId)
-          ? selectedTraceId
-          : items[0]?.id ?? null;
-
-      setSelectedTraceId(nextId);
-      if (nextId) {
-        const trace = await debuggerGetTrace(nextId);
-        setSelectedTrace(trace);
-      } else {
-        setSelectedTrace(null);
-      }
-    } finally {
-      setTraceLoading(false);
-    }
-  };
-
-  const refreshShell = async (autoConsume = false) => {
-    setShellLoading((current) => current ?? 'refresh');
-    try {
-      const [status, pending, last] = await Promise.all([
-        getShellRegistrationStatus(),
-        getPendingShellInvocation(),
-        getLastShellExecution(),
-      ]);
-      setShellStatus(status);
-      setPendingInvocation(pending);
-      setLastShellExecution(last);
-
-      if (autoConsume && pending) {
-        await runPendingShellInvocation();
-      }
-    } finally {
-      setShellLoading(null);
-    }
-  };
-
-  useEffect(() => {
-    refreshTraces(false);
-    refreshShell(true);
-  }, []);
-
-  const selectTrace = async (traceId: string) => {
-    setSelectedTraceId(traceId);
-    const trace = await debuggerGetTrace(traceId);
-    setSelectedTrace(trace);
-  };
-
-  const runPendingShellInvocation = async () => {
-    setShellLoading('consume');
-    try {
-      const result = await consumePendingShellInvocation();
-      if (!result) {
-        setPendingInvocation(null);
-        return;
-      }
-      setShellRunResult(result);
-      setPendingInvocation(null);
-      addLog(`Shell invocation processed: ${result.invocation.target_path}`);
-      await refreshTraces(false);
-      const last = await getLastShellExecution();
-      setLastShellExecution(last);
-    } catch (e: any) {
-      addLog(`shell invocation: ERROR ${e?.message || e}`);
-    } finally {
-      setShellLoading(null);
-    }
-  };
-
-  const handleInstallShell = async () => {
-    setShellLoading('install');
-    try {
-      const status = await installWindowsContextMenu();
-      setShellStatus(status);
-      addLog('Windows context menu installed');
-    } catch (e: any) {
-      addLog(`install_windows_context_menu: ERROR ${e?.message || e}`);
-    } finally {
-      setShellLoading(null);
-    }
-  };
-
-  const handleUninstallShell = async () => {
-    setShellLoading('uninstall');
-    try {
-      const status = await uninstallWindowsContextMenu();
-      setShellStatus(status);
-      addLog('Windows context menu removed');
-    } catch (e: any) {
-      addLog(`uninstall_windows_context_menu: ERROR ${e?.message || e}`);
-    } finally {
-      setShellLoading(null);
-    }
-  };
-
-  const handleCapture = async () => {
-    const result = await callBackend('capture_screenshot');
-    if (result) {
-      addLog(`Screenshot saved: ${result.path}`);
-    }
-  };
-
-  const handleVision = async () => {
-    const result = await callBackend('test_vision');
-    if (result) {
-      addLog(`Vision analysis (${result.model}):`);
-      addLog((result.analysis || '').substring(0, 200) + '...');
-    }
-  };
-
-  const handleClick = async () => {
-    const x = prompt('X coordinate:');
-    const y = prompt('Y coordinate:');
-    if (x && y) {
-      await callBackend('test_click', { x: parseInt(x, 10), y: parseInt(y, 10) });
-    }
-  };
-
-  const handleType = async () => {
-    const text = prompt('Text to type:');
-    if (text) {
-      await callBackend('test_type', { text });
-    }
+  const variants: Record<string, React.CSSProperties> = {
+    primary:   { ...base, background: T.cyan, color: T.bgPrimary },
+    secondary: { ...base, background: T.bgElevated, color: T.textSecondary, border: `0.5px solid ${T.border}` },
+    danger:    { ...base, background: 'rgba(231,76,60,0.12)', color: T.error, border: `0.5px solid rgba(231,76,60,0.2)` },
   };
 
   return (
-    <div className="p-6 space-y-6 max-w-6xl">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold text-[#E6EDF3]">Developer Tools</h1>
-          <p className="text-sm text-[#3D4F5F] mt-1">
-            Inspect execution traces, validate Windows shell integration, and run low-level PC checks.
-          </p>
+    <button style={variants[variant]} onClick={onClick} disabled={disabled || loading}>
+      {loading && <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} />}
+      {children}
+    </button>
+  );
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = () => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+  return (
+    <button
+      onClick={handleCopy}
+      title="Copy"
+      style={{
+        background: 'none',
+        border: 'none',
+        cursor: 'pointer',
+        padding: 4,
+        color: copied ? T.success : T.textMuted,
+        transition: 'color 0.15s',
+      }}
+    >
+      {copied ? <Check size={14} /> : <Copy size={14} />}
+    </button>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Main Component                                                     */
+/* ------------------------------------------------------------------ */
+
+export default function Developer() {
+  const { captureScreenshot, testVision, healthCheck } = useAgent();
+
+  /* ---- API Keys ---- */
+  const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [newKeyName, setNewKeyName] = useState('');
+  const [revealedKey, setRevealedKey] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [revokeConfirm, setRevokeConfirm] = useState<string | null>(null);
+
+  /* ---- Debug tools ---- */
+  const [screenshotResult, setScreenshotResult] = useState<ScreenshotResult | null>(null);
+  const [visionResult, setVisionResult] = useState<VisionResult | null>(null);
+  const [gatewayResult, setGatewayResult] = useState<GatewayResult | null>(null);
+  const [debugLoading, setDebugLoading] = useState<string | null>(null);
+
+  /* ---- Shell ---- */
+  const [shellStatus, setShellStatus] = useState<ShellRegistrationStatus | null>(null);
+
+  /* ---- Tauri bridge ---- */
+  const isTauri = '__TAURI_INTERNALS__' in window || '__TAURI__' in window;
+
+  const invokeCmd = useCallback(
+    async <T,>(cmd: string, args?: Record<string, unknown>): Promise<T | null> => {
+      if (!isTauri) return null;
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        return await invoke<T>(cmd, args);
+      } catch {
+        return null;
+      }
+    },
+    [isTauri],
+  );
+
+  /* ---- Initial load ---- */
+  useEffect(() => {
+    (async () => {
+      const keys = await invokeCmd<{ keys: ApiKey[] }>('cmd_get_api_keys');
+      if (keys) setApiKeys(keys.keys ?? []);
+      const shell = await invokeCmd<ShellRegistrationStatus>('cmd_get_shell_registration_status');
+      if (shell) setShellStatus(shell);
+    })();
+  }, [invokeCmd]);
+
+  /* ---- API Key actions ---- */
+  const handleCreateKey = async () => {
+    if (!newKeyName.trim()) return;
+    setCreating(true);
+    try {
+      const result = await invokeCmd<{ key: string; id: string }>('cmd_create_api_key', { name: newKeyName });
+      if (result) {
+        setRevealedKey(result.key);
+        const keys = await invokeCmd<{ keys: ApiKey[] }>('cmd_get_api_keys');
+        if (keys) setApiKeys(keys.keys ?? []);
+      }
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleRevokeKey = async (id: string) => {
+    await invokeCmd('cmd_revoke_api_key', { id });
+    setApiKeys((prev) => prev.filter((k) => k.id !== id));
+    setRevokeConfirm(null);
+  };
+
+  /* ---- Debug actions ---- */
+  const handleCapture = async () => {
+    setDebugLoading('screenshot');
+    try {
+      const result = await captureScreenshot();
+      setScreenshotResult(result as ScreenshotResult);
+    } catch { /* noop */ }
+    setDebugLoading(null);
+  };
+
+  const handleVision = async () => {
+    setDebugLoading('vision');
+    try {
+      const result = await testVision();
+      if (result) setVisionResult(result as VisionResult);
+    } catch { /* noop */ }
+    setDebugLoading(null);
+  };
+
+  const handleGateway = async () => {
+    setDebugLoading('gateway');
+    try {
+      const result = await healthCheck();
+      setGatewayResult({
+        response: (result as any).message ?? 'OK',
+        model: (result as any).model ?? 'default',
+        tokens: (result as any).tokens ?? 0,
+        cost: (result as any).cost ?? 0,
+        latency_ms: (result as any).latency_ms ?? 0,
+      });
+    } catch { /* noop */ }
+    setDebugLoading(null);
+  };
+
+  /* ---- Formatters ---- */
+  const censorKey = (prefix: string) => `${prefix}...****`;
+  const fmtDate = (iso: string) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const timeAgo = (iso?: string | null) => {
+    if (!iso) return 'Never';
+    const diff = Date.now() - new Date(iso).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'Just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    return `${Math.floor(hrs / 24)}d ago`;
+  };
+
+  const curlExample = `curl -H "Authorization: Bearer aos_..." \\
+  http://localhost:8080/v1/message \\
+  -d '{"text":"hello"}'`;
+
+  /* ---------------------------------------------------------------- */
+  /*  Render                                                           */
+  /* ---------------------------------------------------------------- */
+
+  return (
+    <div
+      style={{
+        padding: 28,
+        maxWidth: 960,
+        fontFamily: T.fontUI,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 28,
+      }}
+    >
+      {/* ---- keyframes for spinner ---- */}
+      <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+
+      {/* ========== HEADER ========== */}
+      <div>
+        <h1 style={{ fontSize: 22, fontWeight: 700, color: T.textPrimary, margin: 0 }}>
+          Developer Tools
+        </h1>
+        <p style={{ fontSize: 13, color: T.textMuted, marginTop: 6 }}>
+          API keys, debug utilities, and system integration status.
+        </p>
+      </div>
+
+      {/* ========== API KEYS ========== */}
+      <div style={cardStyle}>
+        <SectionLabel>API Keys</SectionLabel>
+
+        {/* Key list */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+          {apiKeys.length === 0 && (
+            <p style={{ fontSize: 13, color: T.textMuted }}>No API keys created yet.</p>
+          )}
+          {apiKeys.map((k) => (
+            <div
+              key={k.id}
+              style={{
+                ...deepBoxStyle,
+                padding: '12px 16px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 16,
+              }}
+            >
+              {/* name + censored key */}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 500, color: T.textPrimary }}>{k.name}</div>
+                <div style={{ fontSize: 12, color: T.textMuted, fontFamily: T.fontMono, marginTop: 2 }}>
+                  {censorKey(k.prefix)}
+                </div>
+              </div>
+
+              {/* meta */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexShrink: 0 }}>
+                <span style={{ fontSize: 11, color: T.textDim, fontFamily: T.fontMono }}>
+                  Created {fmtDate(k.created_at)}
+                </span>
+                <span style={{ fontSize: 11, color: T.textDim, fontFamily: T.fontMono }}>
+                  Last used {timeAgo(k.last_used)}
+                </span>
+
+                {/* Revoke */}
+                {revokeConfirm === k.id ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontSize: 11, color: T.warning }}>Revoke?</span>
+                    <Btn small variant="danger" onClick={() => handleRevokeKey(k.id)}>Yes</Btn>
+                    <Btn small variant="secondary" onClick={() => setRevokeConfirm(null)}>No</Btn>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setRevokeConfirm(k.id)}
+                    title="Revoke key"
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      padding: 6,
+                      borderRadius: 6,
+                      color: T.textMuted,
+                      transition: 'color 0.15s, background 0.15s',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.color = T.error; e.currentTarget.style.background = 'rgba(231,76,60,0.1)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.color = T.textMuted; e.currentTarget.style.background = 'none'; }}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
-        <div className="flex gap-2">
-          <Button variant="secondary" size="sm" onClick={() => refreshShell(false)} loading={shellLoading === 'refresh'}>
-            <RefreshCw size={14} />
-            Refresh Shell
-          </Button>
-          <Button variant="secondary" size="sm" onClick={() => refreshTraces()} loading={traceLoading}>
-            <RefreshCw size={14} />
-            Refresh Traces
-          </Button>
+
+        {/* Create Key button */}
+        <Btn variant="secondary" onClick={() => { setShowCreateModal(true); setRevealedKey(null); setNewKeyName(''); }}>
+          <Plus size={14} /> Create Key
+        </Btn>
+
+        {/* Usage example */}
+        <div style={{ ...deepBoxStyle, padding: '14px 18px', marginTop: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: T.textMuted }}>
+              Usage Example
+            </span>
+            <CopyButton text={curlExample} />
+          </div>
+          <pre
+            style={{
+              margin: 0,
+              fontSize: 12,
+              lineHeight: 1.6,
+              color: T.textSecondary,
+              fontFamily: T.fontMono,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-all',
+            }}
+          >
+            {curlExample}
+          </pre>
         </div>
       </div>
 
-      <Card header="OS Integration (C23)">
-        <div className="space-y-4">
-          <div className="grid grid-cols-3 gap-3">
-            <div className="rounded-lg border border-[#1A1E26] bg-[#11161D] p-3">
-              <p className="text-[11px] uppercase tracking-wide text-[#3D4F5F]">Platform</p>
-              <p className="mt-2 text-sm font-semibold text-[#E6EDF3]">{shellStatus?.platform ?? 'loading'}</p>
-            </div>
-            <div className="rounded-lg border border-[#1A1E26] bg-[#11161D] p-3">
-              <p className="text-[11px] uppercase tracking-wide text-[#3D4F5F]">Support</p>
-              <p className="mt-2 text-sm font-semibold text-[#E6EDF3]">
-                {shellStatus?.supported ? 'context-menu ready' : 'not supported'}
-              </p>
-            </div>
-            <div className="rounded-lg border border-[#1A1E26] bg-[#11161D] p-3">
-              <p className="text-[11px] uppercase tracking-wide text-[#3D4F5F]">Install State</p>
-              <p className="mt-2 text-sm font-semibold text-[#E6EDF3]">
-                {shellStatus?.installed ? 'installed' : 'not installed'}
-              </p>
-            </div>
-          </div>
+      {/* ---- Create Key Modal ---- */}
+      {showCreateModal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 100,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'rgba(0,0,0,0.65)',
+            backdropFilter: 'blur(4px)',
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowCreateModal(false); }}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: 420,
+              background: T.bgSurface,
+              border: `0.5px solid ${T.border}`,
+              borderRadius: 14,
+              padding: 28,
+              boxShadow: '0 24px 48px rgba(0,0,0,0.4)',
+            }}
+          >
+            <h3 style={{ fontSize: 15, fontWeight: 600, color: T.textPrimary, margin: '0 0 20px 0' }}>
+              {revealedKey ? 'Key Created' : 'Create API Key'}
+            </h3>
 
-          {shellStatus?.command_preview && (
-            <div className="rounded-lg border border-[#1A1E26] bg-[#11161D] p-3">
-              <p className="text-[11px] uppercase tracking-wide text-[#3D4F5F]">Explorer command</p>
-              <p className="mt-2 break-all font-mono text-xs text-[#C5D0DC]">{shellStatus.command_preview}</p>
-            </div>
-          )}
-
-          {shellStatus?.issues?.length ? (
-            <div className="rounded-lg border border-[#F39C12]/30 bg-[#F39C12]/10 px-3 py-2 text-xs text-[#F7C97C]">
-              {shellStatus.issues.join(' ')}
-            </div>
-          ) : null}
-
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="secondary" onClick={handleInstallShell} loading={shellLoading === 'install'}>
-              <FolderOpen size={14} />
-              Install Explorer Menu
-            </Button>
-            <Button size="sm" variant="secondary" onClick={handleUninstallShell} loading={shellLoading === 'uninstall'}>
-              <FolderOpen size={14} />
-              Remove Explorer Menu
-            </Button>
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={runPendingShellInvocation}
-              loading={shellLoading === 'consume'}
-              disabled={!pendingInvocation}
-            >
-              <FolderOpen size={14} />
-              Process Pending Invocation
-            </Button>
-          </div>
-
-          {pendingInvocation ? (
-            <div className="rounded-lg border border-[#00E5E5]/30 bg-[rgba(0,229,229,0.06)] p-4">
-              <p className="text-sm font-medium text-[#E6EDF3]">Pending Explorer launch</p>
-              <p className="mt-1 text-xs text-[#3D4F5F]">
-                {pendingInvocation.action_id} · {pendingInvocation.target_kind}
-              </p>
-              <p className="mt-2 font-mono text-xs text-[#C5D0DC] break-all">{pendingInvocation.target_path}</p>
-            </div>
-          ) : (
-            <p className="text-sm text-[#3D4F5F]">
-              No pending shell invocation. Right-click a file or folder and choose <span className="text-[#E6EDF3]">Ask AgentOS</span>.
-            </p>
-          )}
-
-          {shellRunResult && (
-            <div className="rounded-lg border border-[#1A1E26] bg-[#11161D] p-4 space-y-3">
-              <div>
-                <p className="text-sm font-medium text-[#E6EDF3]">Latest OS-triggered run</p>
-                <p className="mt-1 text-xs text-[#3D4F5F]">
-                  {shellRunResult.invocation?.target_kind} · {shellRunResult.agent_response?.status ?? 'unknown'}
-                </p>
-              </div>
-              <p className="font-mono text-xs text-[#C5D0DC] break-all">{shellRunResult.invocation?.target_path}</p>
-              <div>
-                <p className="text-[11px] uppercase tracking-wide text-[#3D4F5F]">Context sent to AgentOS</p>
-                <p className="mt-2 whitespace-pre-wrap text-xs text-[#C5D0DC]">{shellRunResult.action?.context_summary}</p>
-              </div>
-              <div>
-                <p className="text-[11px] uppercase tracking-wide text-[#3D4F5F]">Agent response</p>
-                <p className="mt-2 whitespace-pre-wrap text-xs text-[#C5D0DC]">
-                  {shellRunResult.agent_response?.output || shellRunResult.record?.agent_output || '-'}
-                </p>
-              </div>
-            </div>
-          )}
-
-          {lastShellExecution && !shellRunResult && (
-            <div className="rounded-lg border border-[#1A1E26] bg-[#11161D] p-4">
-              <p className="text-sm font-medium text-[#E6EDF3]">Last completed shell execution</p>
-              <p className="mt-2 font-mono text-xs text-[#C5D0DC] break-all">
-                {lastShellExecution.invocation.target_path}
-              </p>
-              <p className="mt-2 text-xs text-[#3D4F5F]">
-                {lastShellExecution.agent_status ?? 'unknown'} · {new Date(lastShellExecution.completed_at).toLocaleString()}
-              </p>
-            </div>
-          )}
-        </div>
-      </Card>
-
-      <Card header="Agent Debugger (R96)">
-        <div className="grid grid-cols-[280px,1fr] gap-5">
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <input
-                className="w-full rounded-lg border border-[#1A1E26] bg-[#11161D] px-3 py-2 text-sm text-[#E6EDF3]"
-                placeholder="Filter by task id"
-                value={traceFilter.taskId}
-                onChange={(e) => setTraceFilter((prev) => ({ ...prev, taskId: e.target.value }))}
-              />
-              <input
-                className="w-full rounded-lg border border-[#1A1E26] bg-[#11161D] px-3 py-2 text-sm text-[#E6EDF3]"
-                placeholder="Filter by agent"
-                value={traceFilter.agentName}
-                onChange={(e) => setTraceFilter((prev) => ({ ...prev, agentName: e.target.value }))}
-              />
-              <input
-                className="w-full rounded-lg border border-[#1A1E26] bg-[#11161D] px-3 py-2 text-sm text-[#E6EDF3]"
-                placeholder="Filter by status"
-                value={traceFilter.status}
-                onChange={(e) => setTraceFilter((prev) => ({ ...prev, status: e.target.value }))}
-              />
-              <Button size="sm" variant="secondary" onClick={() => refreshTraces(false)} loading={traceLoading}>
-                Apply Filters
-              </Button>
-            </div>
-
-            <div className="space-y-2 max-h-[520px] overflow-y-auto">
-              {traces.length === 0 ? (
-                <p className="text-sm text-[#3D4F5F]">No traces captured yet. Run a PC task or Explorer action and return here.</p>
-              ) : (
-                traces.map((trace) => (
-                  <button
-                    key={trace.id}
-                    type="button"
-                    onClick={() => selectTrace(trace.id)}
-                    className={`w-full rounded-lg border p-3 text-left transition-colors ${
-                      selectedTraceId === trace.id
-                        ? 'border-[#00E5E5] bg-[rgba(0,229,229,0.06)]'
-                        : 'border-[#1A1E26] hover:bg-[#11161D]'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <Bug size={14} className="text-[#00E5E5]" />
-                      <span className="text-sm font-medium text-[#E6EDF3]">{trace.task_id}</span>
-                    </div>
-                    <p className="mt-1 text-xs text-[#3D4F5F]">
-                      {trace.agent_name} · {trace.model}
-                    </p>
-                    <p className="mt-1 text-xs text-[#3D4F5F]">
-                      {trace.steps.length} steps · {trace.status}
-                    </p>
-                  </button>
-                ))
-              )}
-            </div>
-          </div>
-
-          <div>
-            {!selectedTrace ? (
-              <p className="text-sm text-[#3D4F5F]">Select a trace to inspect execution steps.</p>
-            ) : (
-              <div className="space-y-4">
-                <div className="grid grid-cols-4 gap-3">
-                  <div className="rounded-lg border border-[#1A1E26] bg-[#11161D] p-3">
-                    <p className="text-[11px] uppercase tracking-wide text-[#3D4F5F]">Task</p>
-                    <p className="mt-2 text-sm font-semibold text-[#E6EDF3]">{selectedTrace.task_id}</p>
-                  </div>
-                  <div className="rounded-lg border border-[#1A1E26] bg-[#11161D] p-3">
-                    <p className="text-[11px] uppercase tracking-wide text-[#3D4F5F]">Agent</p>
-                    <p className="mt-2 text-sm font-semibold text-[#E6EDF3]">{selectedTrace.agent_name}</p>
-                  </div>
-                  <div className="rounded-lg border border-[#1A1E26] bg-[#11161D] p-3">
-                    <p className="text-[11px] uppercase tracking-wide text-[#3D4F5F]">Status</p>
-                    <p className="mt-2 text-sm font-semibold text-[#E6EDF3]">{selectedTrace.status}</p>
-                  </div>
-                  <div className="rounded-lg border border-[#1A1E26] bg-[#11161D] p-3">
-                    <p className="text-[11px] uppercase tracking-wide text-[#3D4F5F]">Duration</p>
-                    <p className="mt-2 text-sm font-semibold text-[#E6EDF3]">{selectedTrace.total_duration_ms} ms</p>
-                  </div>
+            {revealedKey ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: T.warning }}>
+                  <AlertTriangle size={14} />
+                  Copy this key now. It will not be shown again.
                 </div>
-
-                <Card header="Execution Steps">
-                  <div className="space-y-3 max-h-[520px] overflow-y-auto">
-                    {selectedTrace.steps.map((step, index) => (
-                      <div key={step.id} className="rounded-lg border border-[#1A1E26] bg-[#11161D] p-4">
-                        <div className="flex items-center justify-between gap-3">
-                          <div>
-                            <p className="text-sm font-medium text-[#E6EDF3]">
-                              {index + 1}. {step.planned_action}
-                            </p>
-                            <p className="mt-1 text-xs text-[#3D4F5F]">
-                              {new Date(step.timestamp).toLocaleString()} · {step.phase} · {step.agent_name} · {step.model}
-                            </p>
-                          </div>
-                          <span
-                            className={`rounded-full px-2 py-1 text-[11px] font-medium ${
-                              step.status === 'completed'
-                                ? 'bg-[#2ECC71]/10 text-[#2ECC71]'
-                                : 'bg-[#E74C3C]/10 text-[#E74C3C]'
-                            }`}
-                          >
-                            {step.status}
-                          </span>
-                        </div>
-                        <div className="mt-3 grid grid-cols-2 gap-4 text-xs">
-                          <div>
-                            <p className="uppercase tracking-wide text-[#3D4F5F] mb-1">Input Summary</p>
-                            <p className="text-[#C5D0DC] whitespace-pre-wrap">{step.input_summary}</p>
-                          </div>
-                          <div>
-                            <p className="uppercase tracking-wide text-[#3D4F5F] mb-1">Output Summary</p>
-                            <p className="text-[#C5D0DC] whitespace-pre-wrap">{step.output_summary || '-'}</p>
-                          </div>
-                        </div>
-                        {step.error && (
-                          <div className="mt-3 rounded-lg border border-[#E74C3C]/30 bg-[#E74C3C]/10 px-3 py-2 text-xs text-[#F6C0BA]">
-                            {step.error}
-                          </div>
-                        )}
-                        {step.evidence.length > 0 && (
-                          <div className="mt-3">
-                            <p className="uppercase tracking-wide text-[#3D4F5F] mb-1 text-xs">Evidence</p>
-                            <ul className="space-y-1 text-xs text-[#C5D0DC]">
-                              {step.evidence.map((item, idx) => (
-                                <li key={`${step.id}-evidence-${idx}`} className="rounded bg-[#0D1117] px-2 py-1">
-                                  {item}
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </Card>
+                <div
+                  style={{
+                    ...deepBoxStyle,
+                    padding: '10px 14px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                  }}
+                >
+                  <code
+                    style={{
+                      flex: 1,
+                      fontSize: 13,
+                      color: T.cyan,
+                      fontFamily: T.fontMono,
+                      wordBreak: 'break-all',
+                    }}
+                  >
+                    {revealedKey}
+                  </code>
+                  <CopyButton text={revealedKey} />
+                </div>
+                <Btn onClick={() => setShowCreateModal(false)}>Done</Btn>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <div>
+                  <label style={{ fontSize: 12, color: T.textSecondary, display: 'block', marginBottom: 6 }}>
+                    Key Name
+                  </label>
+                  <input
+                    type="text"
+                    value={newKeyName}
+                    onChange={(e) => setNewKeyName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleCreateKey(); }}
+                    placeholder="e.g. CI Pipeline"
+                    autoFocus
+                    style={{
+                      width: '100%',
+                      padding: '9px 14px',
+                      fontSize: 13,
+                      fontFamily: T.fontUI,
+                      color: T.textPrimary,
+                      background: T.bgPrimary,
+                      border: `0.5px solid ${T.border}`,
+                      borderRadius: 8,
+                      outline: 'none',
+                      boxSizing: 'border-box',
+                    }}
+                    onFocus={(e) => { e.currentTarget.style.borderColor = 'rgba(0,229,229,0.3)'; }}
+                    onBlur={(e) => { e.currentTarget.style.borderColor = `${T.border}`; }}
+                  />
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <Btn onClick={handleCreateKey} loading={creating} disabled={!newKeyName.trim()}>
+                    <Key size={14} /> Create
+                  </Btn>
+                  <Btn variant="secondary" onClick={() => setShowCreateModal(false)}>Cancel</Btn>
+                </div>
               </div>
             )}
           </div>
         </div>
-      </Card>
+      )}
 
-      <Card header="Vision E2E Tests (R2)">
-        <p className="text-xs text-[#3D4F5F] mb-4">
-          Test individual vision pipeline components. Requires Tauri backend running.
-        </p>
-        <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="secondary" onClick={handleCapture} loading={loading === 'capture_screenshot'}>
-            <Camera size={14} /> Capture Screen
-          </Button>
-          <Button size="sm" variant="secondary" onClick={handleVision} loading={loading === 'test_vision'}>
-            <Eye size={14} /> Vision Analyze
-          </Button>
-          <Button size="sm" variant="secondary" onClick={handleClick} loading={loading === 'test_click'}>
-            <MousePointer size={14} /> Test Click
-          </Button>
-          <Button size="sm" variant="secondary" onClick={handleType} loading={loading === 'test_type'}>
-            <Keyboard size={14} /> Test Type
-          </Button>
-        </div>
-      </Card>
+      {/* ========== DEBUG TOOLS ========== */}
+      <div style={cardStyle}>
+        <SectionLabel>Debug Tools</SectionLabel>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
 
-      <Card header="Log">
-        <div className="font-mono text-xs space-y-1 max-h-[220px] overflow-y-auto">
-          {log.length === 0 ? (
-            <p className="text-[#3D4F5F]">Run a test to see output here.</p>
-          ) : (
-            log.map((line, i) => (
-              <div
-                key={i}
-                className={`${
-                  line.includes('ERROR')
-                    ? 'text-[#E74C3C]'
-                    : line.includes('OK')
-                      ? 'text-[#2ECC71]'
-                      : 'text-[#C5D0DC]'
-                }`}
-              >
-                {line}
+          {/* -- Capture Screenshot -- */}
+          <div
+            style={actionCardBase}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = 'rgba(0,229,229,0.18)';
+              e.currentTarget.style.boxShadow = '0 0 20px rgba(0,229,229,0.04)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = T.border;
+              e.currentTarget.style.boxShadow = 'none';
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+              <div style={{ padding: 8, borderRadius: 8, background: 'rgba(0,229,229,0.08)' }}>
+                <Camera size={18} color={T.cyan} />
               </div>
-            ))
-          )}
-        </div>
-      </Card>
+              <span style={{ fontSize: 14, fontWeight: 600, color: T.textPrimary }}>Capture Screenshot</span>
+            </div>
+            <p style={{ fontSize: 12, color: T.textMuted, marginBottom: 14, lineHeight: 1.5 }}>
+              Take a screenshot and return the saved file path.
+            </p>
+            <Btn small variant="secondary" onClick={handleCapture} loading={debugLoading === 'screenshot'}>
+              Capture
+            </Btn>
+            {screenshotResult && (
+              <div style={{ ...deepBoxStyle, padding: '10px 14px', marginTop: 12 }}>
+                <span style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: T.textMuted }}>
+                  Result
+                </span>
+                <p style={{ fontSize: 12, color: T.textSecondary, fontFamily: T.fontMono, marginTop: 4, wordBreak: 'break-all' }}>
+                  {screenshotResult.path}
+                </p>
+                {screenshotResult.width && (
+                  <p style={{ fontSize: 10, color: T.textDim, fontFamily: T.fontMono, marginTop: 2 }}>
+                    {screenshotResult.width} x {screenshotResult.height}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
 
-      <Card header="IPC Commands">
-        <div className="grid grid-cols-2 gap-2 text-xs font-mono text-[#3D4F5F]">
-          <div className="flex items-center gap-2"><Terminal size={12} /> cmd_install_windows_context_menu</div>
-          <div className="flex items-center gap-2"><Terminal size={12} /> cmd_consume_pending_shell_invocation</div>
-          <div className="flex items-center gap-2"><Terminal size={12} /> cmd_capture_screenshot</div>
-          <div className="flex items-center gap-2"><Terminal size={12} /> cmd_test_vision</div>
-          <div className="flex items-center gap-2"><Terminal size={12} /> cmd_test_click</div>
-          <div className="flex items-center gap-2"><Terminal size={12} /> cmd_test_type</div>
-          <div className="flex items-center gap-2"><Terminal size={12} /> cmd_run_pc_task</div>
-          <div className="flex items-center gap-2"><Terminal size={12} /> cmd_debugger_list_traces</div>
+          {/* -- Vision Analyze -- */}
+          <div
+            style={actionCardBase}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = 'rgba(0,229,229,0.18)';
+              e.currentTarget.style.boxShadow = '0 0 20px rgba(0,229,229,0.04)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = T.border;
+              e.currentTarget.style.boxShadow = 'none';
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+              <div style={{ padding: 8, borderRadius: 8, background: 'rgba(0,229,229,0.08)' }}>
+                <Eye size={18} color={T.cyan} />
+              </div>
+              <span style={{ fontSize: 14, fontWeight: 600, color: T.textPrimary }}>Vision Analyze</span>
+            </div>
+            <p style={{ fontSize: 12, color: T.textMuted, marginBottom: 14, lineHeight: 1.5 }}>
+              Run vision model analysis on the latest screenshot.
+            </p>
+            <Btn small variant="secondary" onClick={handleVision} loading={debugLoading === 'vision'}>
+              Analyze
+            </Btn>
+            {visionResult && (
+              <div style={{ ...deepBoxStyle, padding: '10px 14px', marginTop: 12 }}>
+                <span style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: T.textMuted }}>
+                  Model: <span style={{ color: T.cyan }}>{visionResult.model}</span>
+                </span>
+                <p style={{
+                  fontSize: 12,
+                  color: T.textSecondary,
+                  marginTop: 6,
+                  lineHeight: 1.5,
+                  display: '-webkit-box',
+                  WebkitLineClamp: 5,
+                  WebkitBoxOrient: 'vertical',
+                  overflow: 'hidden',
+                }}>
+                  {visionResult.analysis}
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* -- Test Gateway -- */}
+          <div
+            style={actionCardBase}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = 'rgba(0,229,229,0.18)';
+              e.currentTarget.style.boxShadow = '0 0 20px rgba(0,229,229,0.04)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = T.border;
+              e.currentTarget.style.boxShadow = 'none';
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+              <div style={{ padding: 8, borderRadius: 8, background: 'rgba(0,229,229,0.08)' }}>
+                <Zap size={18} color={T.cyan} />
+              </div>
+              <span style={{ fontSize: 14, fontWeight: 600, color: T.textPrimary }}>Test Gateway</span>
+            </div>
+            <p style={{ fontSize: 12, color: T.textMuted, marginBottom: 14, lineHeight: 1.5 }}>
+              Send a test prompt and measure response metrics.
+            </p>
+            <Btn small variant="secondary" onClick={handleGateway} loading={debugLoading === 'gateway'}>
+              Test
+            </Btn>
+            {gatewayResult && (
+              <div style={{ ...deepBoxStyle, padding: '10px 14px', marginTop: 12 }}>
+                <p style={{ fontSize: 12, color: T.textSecondary, marginBottom: 8, lineHeight: 1.4 }}>
+                  {gatewayResult.response}
+                </p>
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 1fr',
+                  gap: '4px 16px',
+                  fontSize: 11,
+                  fontFamily: T.fontMono,
+                  color: T.textDim,
+                }}>
+                  <span>model: <span style={{ color: T.textMuted }}>{gatewayResult.model}</span></span>
+                  <span>tokens: <span style={{ color: T.textMuted }}>{gatewayResult.tokens}</span></span>
+                  <span>cost: <span style={{ color: T.textMuted }}>${gatewayResult.cost.toFixed(4)}</span></span>
+                  <span>latency: <span style={{ color: T.textMuted }}>{gatewayResult.latency_ms}ms</span></span>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
-      </Card>
+      </div>
+
+      {/* ========== SHELL REGISTRATION ========== */}
+      <div style={cardStyle}>
+        <SectionLabel>Shell Registration</SectionLabel>
+        <div style={{ ...deepBoxStyle, padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 16 }}>
+          <div style={{ padding: 8, borderRadius: 8, background: 'rgba(0,229,229,0.08)' }}>
+            <Terminal size={18} color={T.cyan} />
+          </div>
+
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 13, fontWeight: 500, color: T.textPrimary }}>Platform</div>
+            <div style={{ fontSize: 12, color: T.textMuted, fontFamily: T.fontMono, marginTop: 2 }}>
+              {shellStatus?.platform ?? 'Detecting...'}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 11, color: T.textDim }}>Installation</span>
+            {shellStatus?.installed ? (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  fontSize: 11,
+                  fontWeight: 500,
+                  padding: '3px 10px',
+                  borderRadius: 20,
+                  background: 'rgba(46,204,113,0.1)',
+                  color: T.success,
+                  border: '0.5px solid rgba(46,204,113,0.2)',
+                }}
+              >
+                <CheckCircle2 size={12} /> Installed
+              </span>
+            ) : (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  fontSize: 11,
+                  fontWeight: 500,
+                  padding: '3px 10px',
+                  borderRadius: 20,
+                  background: T.bgElevated,
+                  color: T.textMuted,
+                  border: `0.5px solid ${T.border}`,
+                }}
+              >
+                <XCircle size={12} /> Not Installed
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

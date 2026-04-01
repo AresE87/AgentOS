@@ -158,4 +158,88 @@ impl MeshOrchestrator {
     pub fn local_capabilities_mut(&mut self) -> &mut NodeCapabilities {
         &mut self.local_capabilities
     }
+
+    /// Execute a distributed plan: for each subtask, either execute locally or delegate to the best remote node.
+    /// Returns a map of subtask_id -> (node_selection, result_output).
+    pub async fn execute_distributed(
+        &self,
+        subtasks: &[SubTask],
+        settings: &crate::config::Settings,
+    ) -> Vec<(String, NodeSelection, Result<String, String>)> {
+        let plan = self.plan_execution(subtasks);
+        let groups = self.get_parallel_groups(subtasks);
+        let mut results: Vec<(String, NodeSelection, Result<String, String>)> = Vec::new();
+
+        for group in &groups {
+            let mut handles = Vec::new();
+
+            for subtask_id in group {
+                let selection = plan.iter().find(|(id, _)| id == subtask_id).map(|(_, s)| s.clone());
+                let subtask = subtasks.iter().find(|st| st.id == *subtask_id);
+
+                if let (Some(selection), Some(subtask)) = (selection, subtask) {
+                    let desc = subtask.description.clone();
+                    let sel = selection.clone();
+                    let id = subtask_id.clone();
+                    let settings = settings.clone();
+
+                    match &sel {
+                        NodeSelection::Remote(node_id) => {
+                            // Find the node's IP and port from remote_nodes
+                            let node_id_owned = node_id.clone();
+                            if let Some(node) = self.remote_nodes.get(node_id) {
+                                let ip = node.ip.clone();
+                                let port = node.mesh_port;
+                                let handle = tokio::spawn(async move {
+                                    let result = super::transport::send_task(&ip, port, &desc).await;
+                                    (id, NodeSelection::Remote(node_id_owned), result)
+                                });
+                                handles.push(handle);
+                            } else {
+                                // Node not found, execute locally
+                                let handle = tokio::spawn(async move {
+                                    let gateway = crate::brain::Gateway::new(&settings);
+                                    let result = gateway
+                                        .complete_as_agent(
+                                            &desc,
+                                            "Complete this subtask concisely.",
+                                            &settings,
+                                        )
+                                        .await
+                                        .map(|r| r.content);
+                                    (id, NodeSelection::Local, result)
+                                });
+                                handles.push(handle);
+                            }
+                        }
+                        NodeSelection::Local => {
+                            let handle = tokio::spawn(async move {
+                                let gateway = crate::brain::Gateway::new(&settings);
+                                let result = gateway
+                                    .complete_as_agent(
+                                        &desc,
+                                        "Complete this subtask concisely.",
+                                        &settings,
+                                    )
+                                    .await
+                                    .map(|r| r.content);
+                                (id, NodeSelection::Local, result)
+                            });
+                            handles.push(handle);
+                        }
+                    }
+                }
+            }
+
+            // Wait for all tasks in this group to complete
+            for handle in handles {
+                match handle.await {
+                    Ok((id, sel, result)) => results.push((id, sel, result)),
+                    Err(e) => tracing::warn!("Distributed task join error: {}", e),
+                }
+            }
+        }
+
+        results
+    }
 }

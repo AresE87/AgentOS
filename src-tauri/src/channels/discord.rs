@@ -580,6 +580,189 @@ async fn handle_message_create(
     }
 }
 
+// ── Standalone REST helper functions ───────────────────────────────
+
+/// Send a message to a Discord channel using the REST API.
+/// This is a standalone function that does not require a `DiscordBot` instance.
+pub async fn send_discord_message(
+    channel_id: &str,
+    content: &str,
+    token: &str,
+) -> Result<(), String> {
+    let client = Client::new();
+    let resp = client
+        .post(format!("{}/channels/{}/messages", DISCORD_API, channel_id))
+        .header("Authorization", format!("Bot {}", token))
+        .json(&json!({ "content": content }))
+        .send()
+        .await
+        .map_err(|e| format!("Discord send failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Discord API error: {}", body));
+    }
+    Ok(())
+}
+
+/// Fetch recent messages from a Discord channel via REST API (polling mode).
+/// Returns raw JSON message objects from the Discord API.
+pub async fn get_discord_messages(
+    channel_id: &str,
+    token: &str,
+    limit: u32,
+) -> Result<Vec<serde_json::Value>, String> {
+    let client = Client::new();
+    let resp = client
+        .get(format!(
+            "{}/channels/{}/messages?limit={}",
+            DISCORD_API, channel_id, limit.min(100)
+        ))
+        .header("Authorization", format!("Bot {}", token))
+        .send()
+        .await
+        .map_err(|e| format!("Discord fetch failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Discord API error: {}", body));
+    }
+
+    resp.json::<Vec<serde_json::Value>>()
+        .await
+        .map_err(|e| format!("Discord JSON parse error: {}", e))
+}
+
+/// Fetch messages from a channel that were posted after a specific message ID.
+/// Useful for incremental polling to avoid re-processing messages.
+pub async fn get_discord_messages_after(
+    channel_id: &str,
+    token: &str,
+    after_id: &str,
+    limit: u32,
+) -> Result<Vec<serde_json::Value>, String> {
+    let client = Client::new();
+    let resp = client
+        .get(format!(
+            "{}/channels/{}/messages?after={}&limit={}",
+            DISCORD_API, channel_id, after_id, limit.min(100)
+        ))
+        .header("Authorization", format!("Bot {}", token))
+        .send()
+        .await
+        .map_err(|e| format!("Discord fetch failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Discord API error: {}", body));
+    }
+
+    resp.json::<Vec<serde_json::Value>>()
+        .await
+        .map_err(|e| format!("Discord JSON parse error: {}", e))
+}
+
+/// Get information about a Discord guild (server).
+pub async fn get_guild_info(
+    guild_id: &str,
+    token: &str,
+) -> Result<serde_json::Value, String> {
+    let client = Client::new();
+    let resp = client
+        .get(format!("{}/guilds/{}", DISCORD_API, guild_id))
+        .header("Authorization", format!("Bot {}", token))
+        .send()
+        .await
+        .map_err(|e| format!("Discord API error: {}", e))?;
+
+    if !resp.status().is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Discord API error: {}", body));
+    }
+
+    resp.json().await.map_err(|e| format!("Discord JSON error: {}", e))
+}
+
+/// List channels in a Discord guild.
+pub async fn get_guild_channels(
+    guild_id: &str,
+    token: &str,
+) -> Result<Vec<serde_json::Value>, String> {
+    let client = Client::new();
+    let resp = client
+        .get(format!("{}/guilds/{}/channels", DISCORD_API, guild_id))
+        .header("Authorization", format!("Bot {}", token))
+        .send()
+        .await
+        .map_err(|e| format!("Discord API error: {}", e))?;
+
+    if !resp.status().is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Discord API error: {}", body));
+    }
+
+    resp.json().await.map_err(|e| format!("Discord JSON error: {}", e))
+}
+
+/// Add a reaction to a message.
+/// For Unicode emoji, pass the emoji directly (e.g. "\u{1F44D}").
+/// For custom emoji, pass "name:id" (e.g. "myemoji:123456").
+pub async fn add_reaction(
+    channel_id: &str,
+    message_id: &str,
+    emoji: &str,
+    token: &str,
+) -> Result<(), String> {
+    let client = Client::new();
+    let encoded_emoji = urlencoding::encode(emoji);
+    let resp = client
+        .put(format!(
+            "{}/channels/{}/messages/{}/reactions/{}/@me",
+            DISCORD_API, channel_id, message_id, encoded_emoji
+        ))
+        .header("Authorization", format!("Bot {}", token))
+        .header("Content-Length", "0")
+        .send()
+        .await
+        .map_err(|e| format!("Discord reaction failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Discord API error: {}", body));
+    }
+    Ok(())
+}
+
+/// Filter messages that start with the given command prefix (e.g. "!").
+/// Returns (command, args, channel_id, message_id) tuples for messages
+/// that are not from bots and start with the prefix.
+pub fn extract_commands(
+    messages: &[serde_json::Value],
+    prefix: &str,
+) -> Vec<(String, String, String, String)> {
+    let mut commands = Vec::new();
+    for msg in messages {
+        let is_bot = msg["author"]["bot"].as_bool().unwrap_or(false);
+        if is_bot {
+            continue;
+        }
+        let content = msg["content"].as_str().unwrap_or("");
+        if !content.starts_with(prefix) {
+            continue;
+        }
+        let channel_id = msg["channel_id"].as_str().unwrap_or("").to_string();
+        let message_id = msg["id"].as_str().unwrap_or("").to_string();
+        let without_prefix = &content[prefix.len()..];
+        let mut parts = without_prefix.splitn(2, char::is_whitespace);
+        let command = parts.next().unwrap_or("").to_string();
+        let args = parts.next().unwrap_or("").trim().to_string();
+        if !command.is_empty() {
+            commands.push((command, args, channel_id, message_id));
+        }
+    }
+    commands
+}
+
 /// Split message at word boundaries to respect Discord's 2000 char limit
 fn split_message_smart(text: &str, max_len: usize) -> Vec<String> {
     if text.len() <= max_len {

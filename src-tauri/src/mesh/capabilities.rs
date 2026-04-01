@@ -14,6 +14,10 @@ pub struct NodeCapabilities {
     pub configured_providers: Vec<String>,
     pub current_load: f64,
     pub active_tasks: usize,
+    /// Network address for mesh transport (IP or hostname)
+    pub ip: String,
+    /// TCP port for mesh task exchange
+    pub mesh_port: u16,
 }
 
 impl NodeCapabilities {
@@ -40,6 +44,8 @@ impl NodeCapabilities {
             configured_providers: vec![],
             current_load: 0.0,
             active_tasks: 0,
+            ip: "127.0.0.1".to_string(),
+            mesh_port: 9099,
         }
     }
 

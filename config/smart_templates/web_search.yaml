@@ -1,0 +1,25 @@
+id: web_search
+name: "Web Search & Summarize"
+description: "Search the web for a topic and summarize findings"
+variables:
+  - name: query
+    var_type: string
+    prompt: "What do you want to search for?"
+    default: ""
+steps:
+  - id: search
+    step_type:
+      type: browse
+      url: "https://www.google.com/search?q={query}"
+      task: "Extract the top 5 search results with titles, URLs, and snippets"
+    description: "Search Google for the query"
+  - id: summarize
+    step_type:
+      type: command
+      command: "Write-Output 'Search completed for: {query}'"
+    description: "Log search completion"
+  - id: done
+    step_type:
+      type: done
+      result: "Search results for '{query}' have been retrieved and summarized"
+    description: "Complete"

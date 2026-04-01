@@ -1,0 +1,20 @@
+id: daily_report
+name: "Daily Status Report"
+description: "Generate a daily system status report"
+variables: []
+steps:
+  - id: system_info
+    step_type:
+      type: command
+      command: "$r = \"=== Daily Report $(Get-Date -Format 'yyyy-MM-dd HH:mm') ===\"; $r += \"`nOS: $(Get-CimInstance Win32_OperatingSystem | Select-Object -ExpandProperty Caption)\"; $r += \"`nUptime: $((Get-Date) - (Get-CimInstance Win32_OperatingSystem).LastBootUpTime)\"; $r += \"`nCPU: $((Get-CimInstance Win32_Processor).LoadPercentage)%\"; $r += \"`nRAM: $([math]::Round((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory/1MB,1))GB free\"; Write-Output $r"
+    description: "Collect system information"
+  - id: disk_info
+    step_type:
+      type: command
+      command: "Get-PSDrive -PSProvider FileSystem | Where-Object {$_.Used -gt 0} | ForEach-Object { Write-Output \"$($_.Name): $([math]::Round($_.Free/1GB,1))GB free / $([math]::Round(($_.Used+$_.Free)/1GB,1))GB total\" }"
+    description: "Check disk space"
+  - id: done
+    step_type:
+      type: done
+      result: "Daily report generated with system and disk information"
+    description: "Complete"

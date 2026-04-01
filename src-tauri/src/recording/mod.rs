@@ -1,3 +1,4 @@
+pub mod input_hooks;
 pub mod recorder;
 
-pub use recorder::{Frame, Recording, RecordingSummary, ScreenRecorder};
+pub use recorder::ScreenRecorder;

@@ -128,7 +128,20 @@ impl Database {
                 tasks_count INTEGER NOT NULL DEFAULT 0,
                 tokens_used INTEGER NOT NULL DEFAULT 0,
                 plan_type TEXT NOT NULL DEFAULT 'free'
-            );",
+            );
+
+            -- Embedding pipeline table
+            CREATE TABLE IF NOT EXISTS embeddings (
+                id TEXT PRIMARY KEY,
+                content TEXT NOT NULL,
+                source TEXT NOT NULL,
+                source_id TEXT,
+                embedding BLOB NOT NULL,
+                dimensions INTEGER NOT NULL,
+                model TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_embeddings_source ON embeddings(source, source_id);",
         )
     }
 

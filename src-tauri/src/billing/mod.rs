@@ -4,3 +4,7 @@ pub mod stripe;
 
 pub use limits::UsageLimiter;
 pub use plans::{Plan, PlanType};
+pub use stripe::{
+    cancel_subscription, create_checkout_session, create_portal_session, get_customer,
+    list_invoices, StripeClient,
+};

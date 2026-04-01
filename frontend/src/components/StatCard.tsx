@@ -1,86 +1,84 @@
 import { ReactNode } from 'react';
+import { LineChart, Line } from 'recharts';
 
 interface StatCardProps {
   label: string;
   value: string | number;
+  delta?: number;
+  sparklineData?: number[];
+  color?: string;
   icon?: ReactNode;
-  delta?: number; // percentage change, e.g. 12 for +12%
-  sparkData?: number[]; // array of 6-8 values for mini sparkline
   className?: string;
-}
-
-function Sparkline({ data }: { data: number[] }) {
-  if (!data || data.length < 2) return null;
-  const min = Math.min(...data);
-  const max = Math.max(...data);
-  const range = max - min || 1;
-  const w = 40;
-  const h = 20;
-  const points = data
-    .map((v, i) => {
-      const x = (i / (data.length - 1)) * w;
-      const y = h - ((v - min) / range) * h;
-      return `${x},${y}`;
-    })
-    .join(' ');
-
-  return (
-    <svg width={w} height={h} className="shrink-0">
-      <polyline
-        points={points}
-        fill="none"
-        stroke="rgba(0,229,229,0.5)"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
 }
 
 export default function StatCard({
   label,
   value,
-  icon,
   delta,
-  sparkData,
+  sparklineData,
+  color = '#00E5E5',
+  icon,
   className = '',
 }: StatCardProps) {
   const deltaColor =
     delta !== undefined
       ? delta >= 0
-        ? 'text-success'
-        : 'text-error'
+        ? 'text-[#2ECC71]'
+        : 'text-[#E74C3C]'
       : '';
+  const deltaArrow = delta !== undefined ? (delta >= 0 ? '\u2191' : '\u2193') : '';
   const deltaSign = delta !== undefined && delta >= 0 ? '+' : '';
+
+  const chartData = sparklineData?.map((v) => ({ v }));
 
   return (
     <div
-      className={`rounded-lg border border-[rgba(0,229,229,0.08)] bg-bg-surface px-5 py-4
+      className={`rounded-lg border border-[rgba(0,229,229,0.08)] bg-[#0D1117] px-5 py-4
         shadow-md shadow-black/20 transition-all duration-150 ease-out
         hover:border-[rgba(0,229,229,0.15)] ${className}`}
     >
-      <div className="flex items-start justify-between">
-        <div className="flex-1 min-w-0">
-          <p className="text-[22px] font-bold text-text-primary leading-tight">{value}</p>
-          <p className="font-mono text-[10px] uppercase tracking-[0.5px] text-text-muted mt-1">
-            {label}
-          </p>
+      {/* Label */}
+      <p className="font-mono text-[10px] uppercase tracking-wider text-[#3D4F5F] mb-2">
+        {label}
+      </p>
+
+      {/* Value row */}
+      <div className="flex items-end justify-between gap-3">
+        <div className="flex items-baseline gap-3 min-w-0">
+          <span className="text-2xl font-semibold text-[#E6EDF3] leading-none">
+            {value}
+          </span>
+
+          {delta !== undefined && (
+            <span className={`text-xs font-medium ${deltaColor} whitespace-nowrap`}>
+              {deltaArrow} {deltaSign}{delta}%
+            </span>
+          )}
         </div>
-        <div className="flex items-center gap-2 shrink-0 ml-3">
-          {sparkData && <Sparkline data={sparkData} />}
+
+        <div className="flex items-center gap-2 shrink-0">
+          {chartData && chartData.length >= 2 && (
+            <LineChart width={40} height={20} data={chartData}>
+              <Line
+                type="monotone"
+                dataKey="v"
+                stroke={color}
+                strokeWidth={1.5}
+                dot={false}
+                isAnimationActive={false}
+              />
+            </LineChart>
+          )}
           {icon && (
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-cyan/10 text-cyan">
+            <div
+              className="flex h-9 w-9 items-center justify-center rounded-lg"
+              style={{ backgroundColor: `${color}1A`, color }}
+            >
               {icon}
             </div>
           )}
         </div>
       </div>
-      {delta !== undefined && (
-        <p className={`mt-2 text-xs font-medium ${deltaColor}`}>
-          {deltaSign}{delta}% vs yesterday
-        </p>
-      )}
     </div>
   );
 }

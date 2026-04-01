@@ -157,10 +157,142 @@ impl StripeClient {
     }
 }
 
+// ── Standalone convenience functions ────────────────────────────────
+//
+// These accept a raw Stripe secret key and make direct HTTP calls,
+// without requiring a StripeClient instance.
+
+/// Create a Stripe Checkout Session for a subscription.
+/// Returns the checkout URL on success.
+pub async fn create_checkout_session(
+    price_id: &str,
+    stripe_key: &str,
+    success_url: &str,
+    cancel_url: &str,
+) -> Result<String, String> {
+    let client = Client::new();
+    let resp = client
+        .post(format!("{}/checkout/sessions", STRIPE_API_BASE))
+        .header("Authorization", format!("Bearer {}", stripe_key))
+        .form(&[
+            ("mode", "subscription"),
+            ("line_items[0][price]", price_id),
+            ("line_items[0][quantity]", "1"),
+            ("success_url", success_url),
+            ("cancel_url", cancel_url),
+        ])
+        .send()
+        .await
+        .map_err(|e| format!("Stripe API error: {}", e))?;
+    let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    json["url"]
+        .as_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| {
+            let err = json
+                .get("error")
+                .map(|e| format!("{}", e))
+                .unwrap_or_else(|| "No checkout URL in response".into());
+            format!("Stripe error: {}", err)
+        })
+}
+
+/// Create a Stripe Billing Portal session.
+/// Returns the portal URL on success.
+pub async fn create_portal_session(
+    customer_id: &str,
+    stripe_key: &str,
+    return_url: &str,
+) -> Result<String, String> {
+    let client = Client::new();
+    let resp = client
+        .post(format!("{}/billing_portal/sessions", STRIPE_API_BASE))
+        .header("Authorization", format!("Bearer {}", stripe_key))
+        .form(&[("customer", customer_id), ("return_url", return_url)])
+        .send()
+        .await
+        .map_err(|e| format!("Stripe API error: {}", e))?;
+    let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    json["url"]
+        .as_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| {
+            let err = json
+                .get("error")
+                .map(|e| format!("{}", e))
+                .unwrap_or_else(|| "No portal URL in response".into());
+            format!("Stripe error: {}", err)
+        })
+}
+
+/// Retrieve a Stripe customer by ID.
+pub async fn get_customer(
+    customer_id: &str,
+    stripe_key: &str,
+) -> Result<serde_json::Value, String> {
+    let client = Client::new();
+    let resp = client
+        .get(format!("{}/customers/{}", STRIPE_API_BASE, customer_id))
+        .header("Authorization", format!("Bearer {}", stripe_key))
+        .send()
+        .await
+        .map_err(|e| format!("Stripe API error: {}", e))?;
+    let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    if let Some(err) = json.get("error") {
+        return Err(format!("Stripe error: {}", err));
+    }
+    Ok(json)
+}
+
+/// List invoices for a customer.
+pub async fn list_invoices(
+    customer_id: &str,
+    stripe_key: &str,
+    limit: u32,
+) -> Result<Vec<serde_json::Value>, String> {
+    let client = Client::new();
+    let resp = client
+        .get(format!(
+            "{}/invoices?customer={}&limit={}",
+            STRIPE_API_BASE, customer_id, limit
+        ))
+        .header("Authorization", format!("Bearer {}", stripe_key))
+        .send()
+        .await
+        .map_err(|e| format!("Stripe API error: {}", e))?;
+    let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    if let Some(err) = json.get("error") {
+        return Err(format!("Stripe error: {}", err));
+    }
+    Ok(json["data"].as_array().cloned().unwrap_or_default())
+}
+
+/// Cancel a subscription immediately.
+pub async fn cancel_subscription(
+    subscription_id: &str,
+    stripe_key: &str,
+) -> Result<serde_json::Value, String> {
+    let client = Client::new();
+    let resp = client
+        .delete(format!(
+            "{}/subscriptions/{}",
+            STRIPE_API_BASE, subscription_id
+        ))
+        .header("Authorization", format!("Bearer {}", stripe_key))
+        .send()
+        .await
+        .map_err(|e| format!("Stripe API error: {}", e))?;
+    let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    if let Some(err) = json.get("error") {
+        return Err(format!("Stripe error: {}", err));
+    }
+    Ok(json)
+}
+
 // ── Backward-compatible helpers for existing callers ──────────────
 
 /// Fallback checkout URL when no Stripe secret key is configured.
-/// Real callers should use `StripeClient::create_checkout_session` instead.
+/// Real callers should use `create_checkout_session` or `StripeClient::create_checkout_session`.
 pub fn get_checkout_url(plan: &str, email: &str) -> String {
     let encoded_email = email.replace('@', "%40").replace('+', "%2B");
     format!(

@@ -164,3 +164,49 @@ body {
     to { opacity: 1; transform: translateY(0); }
 }
 .animate-fade-in { animation: fade-in 0.2s ease-out; }
+
+/* Toast slide-in from right */
+@keyframes slide-in-right {
+    from { opacity: 0; transform: translateX(100%); }
+    to { opacity: 1; transform: translateX(0); }
+}
+.animate-slide-in-right { animation: slide-in-right 0.25s ease-out; }
+
+/* Progress bar slide animation */
+@keyframes progress-slide {
+    0% { transform: translateX(-100%); }
+    50% { transform: translateX(150%); }
+    100% { transform: translateX(-100%); }
+}
+
+/* Recording pulse */
+@keyframes rec-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+@keyframes rec-dot {
+    0%, 100% { box-shadow: 0 0 4px rgba(231,76,60,0.4); }
+    50% { box-shadow: 0 0 12px rgba(231,76,60,0.8); }
+}
+.rec-pulse { animation: rec-pulse 1.5s ease-in-out infinite; }
+
+/* Stagger animation for list items */
+@keyframes stagger-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+.animate-stagger { animation: stagger-in 0.2s ease-out both; }
+
+/* Card hover lift */
+.card-hover {
+    transition: border-color 150ms ease-out, transform 150ms ease-out, box-shadow 150ms ease-out;
+}
+.card-hover:hover {
+    border-color: rgba(0,229,229,0.15);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+}
+
+/* Glow effects */
+.glow-cyan { box-shadow: 0 0 12px rgba(0,229,229,0.15); }
+.glow-cyan-strong { box-shadow: 0 0 20px rgba(0,229,229,0.25); }

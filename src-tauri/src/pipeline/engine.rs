@@ -30,7 +30,7 @@ fn scale_action_coords(
     let scale = |x: i32, y: i32| -> (i32, i32) {
         let real_x = (x as f64 * capture_w as f64 / img_w as f64) as i32;
         let real_y = (y as f64 * capture_h as f64 / img_h as f64) as i32;
-        (real_x, real_y)
+        (real_x.clamp(0, capture_w as i32 - 1), real_y.clamp(0, capture_h as i32 - 1))
     };
 
     match action {
@@ -654,6 +654,12 @@ pub async fn run_task(
                     description, screen_task
                 );
 
+                // Show floating progress window
+                if let Some(progress_win) = app_handle.get_webview_window("vision-progress") {
+                    let _ = progress_win.show();
+                    let _ = progress_win.set_focus();
+                }
+
                 // Minimize self so we don't capture our own window
                 if let Some(win) = app_handle.get_webview_window("main") {
                     let _ = win.minimize();
@@ -692,31 +698,66 @@ pub async fn run_task(
                         step_num,
                         "Screen interaction",
                     );
+                    emit_vision_step(app_handle, task_id, step_num, "Screen interaction", &b64, "capture");
 
                     // Check for action repetition (before LLM call so warning fires on 2nd repeat)
-                    let dedup_warning = recent_actions.len() >= 2
-                        && recent_actions[recent_actions.len() - 1]
-                            == recent_actions[recent_actions.len() - 2];
+                    let repeat_count = {
+                        let mut count = 1usize;
+                        let len = recent_actions.len();
+                        if len >= 2 {
+                            let last = &recent_actions[len - 1];
+                            for i in (0..len - 1).rev() {
+                                if &recent_actions[i] == last { count += 1; } else { break; }
+                            }
+                        }
+                        count
+                    };
+                    let dedup_warning = repeat_count >= 2;
 
-                    let action = match vision::plan_next_action(
-                        &b64,
-                        &combined_task,
-                        &step_history,
-                        settings,
-                        &gateway,
-                        Some((img_w, img_h)),
-                        dedup_warning,
-                    )
-                    .await
-                    {
-                        Ok(a) => a,
-                        Err(e) => {
-                            warn!(task_id, error = %e, "Vision failed in command_then_screen");
-                            accumulated_output = format!(
-                                "Commands ran successfully but screen interaction failed: {}",
-                                e
-                            );
-                            break;
+                    // Graceful timeout: warn on penultimate step
+                    let mut prompt_extra = String::new();
+                    if vs >= 14 {
+                        prompt_extra = format!(
+                            "URGENT: You have used {}/15 steps. This is your LAST chance. \
+                             Either complete the task NOW or report what you accomplished so far \
+                             using TaskComplete.",
+                            vs
+                        );
+                    }
+
+                    let effective_task = if prompt_extra.is_empty() {
+                        combined_task.clone()
+                    } else {
+                        format!("{}\n\n{}", combined_task, prompt_extra)
+                    };
+
+                    let action = {
+                        let mut last_err = String::new();
+                        let mut result = None;
+                        for attempt in 0..3u32 {
+                            match vision::plan_next_action(
+                                &b64, &effective_task, &step_history, settings, &gateway,
+                                Some((img_w, img_h)), dedup_warning,
+                            ).await {
+                                Ok(a) => { result = Some(a); break; }
+                                Err(e) => {
+                                    last_err = e;
+                                    if attempt < 2 {
+                                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                                    }
+                                }
+                            }
+                        }
+                        match result {
+                            Some(a) => a,
+                            None => {
+                                warn!(task_id, error = %last_err, "Vision failed after 3 retries");
+                                accumulated_output = format!(
+                                    "Commands ran successfully but screen interaction failed: {}",
+                                    last_err
+                                );
+                                break;
+                            }
                         }
                     };
 
@@ -777,6 +818,11 @@ pub async fn run_task(
                     }
                 }
 
+                // Hide floating progress window
+                if let Some(progress_win) = app_handle.get_webview_window("vision-progress") {
+                    let _ = progress_win.hide();
+                }
+
                 if accumulated_output.is_empty() {
                     accumulated_output =
                         "Task completed (command + screen interaction)".to_string();
@@ -787,6 +833,12 @@ pub async fn run_task(
             "screen" => {
                 let reason = plan_json["reason"].as_str().unwrap_or("UI task");
                 info!(task_id, reason, "Vision mode");
+
+                // Show floating progress window
+                if let Some(progress_win) = app_handle.get_webview_window("vision-progress") {
+                    let _ = progress_win.show();
+                    let _ = progress_win.set_focus();
+                }
 
                 // Minimize self so we don't capture our own window
                 if let Some(win) = app_handle.get_webview_window("main") {
@@ -818,27 +870,63 @@ pub async fn run_task(
                     .map_err(|e| e.to_string())??;
 
                     let (sp, b64, img_w, img_h, cap_w, cap_h) = screenshot;
+                    emit_vision_step(app_handle, task_id, 10 + vs, "Screen interaction", &b64, "capture");
 
                     // Check for action repetition (before LLM call so warning fires on 2nd repeat)
-                    let dedup_warning = recent_actions.len() >= 2
-                        && recent_actions[recent_actions.len() - 1]
-                            == recent_actions[recent_actions.len() - 2];
+                    let repeat_count = {
+                        let mut count = 1usize;
+                        let len = recent_actions.len();
+                        if len >= 2 {
+                            let last = &recent_actions[len - 1];
+                            for i in (0..len - 1).rev() {
+                                if &recent_actions[i] == last { count += 1; } else { break; }
+                            }
+                        }
+                        count
+                    };
+                    let dedup_warning = repeat_count >= 2;
 
-                    let action = match vision::plan_next_action(
-                        &b64,
-                        description,
-                        &step_history,
-                        settings,
-                        &gateway,
-                        Some((img_w, img_h)),
-                        dedup_warning,
-                    )
-                    .await
-                    {
-                        Ok(a) => a,
-                        Err(e) => {
-                            accumulated_output = format!("Vision error: {}", e);
-                            break;
+                    // Graceful timeout: warn on penultimate step
+                    let mut prompt_extra = String::new();
+                    if vs >= 14 {
+                        prompt_extra = format!(
+                            "URGENT: You have used {}/15 steps. This is your LAST chance. \
+                             Either complete the task NOW or report what you accomplished so far \
+                             using TaskComplete.",
+                            vs
+                        );
+                    }
+
+                    let effective_task = if prompt_extra.is_empty() {
+                        description.to_string()
+                    } else {
+                        format!("{}\n\n{}", description, prompt_extra)
+                    };
+
+                    let action = {
+                        let mut last_err = String::new();
+                        let mut result = None;
+                        for attempt in 0..3u32 {
+                            match vision::plan_next_action(
+                                &b64, &effective_task, &step_history, settings, &gateway,
+                                Some((img_w, img_h)), dedup_warning,
+                            ).await {
+                                Ok(a) => { result = Some(a); break; }
+                                Err(e) => {
+                                    last_err = e;
+                                    if attempt < 2 {
+                                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                                    }
+                                }
+                            }
+                        }
+                        match result {
+                            Some(a) => a,
+                            None => {
+                                warn!(task_id, error = %last_err, "Vision failed after 3 retries");
+                                accumulated_output = format!("Vision error after retries: {}", last_err);
+                                break;
+                            }
                         }
                     };
 
@@ -892,6 +980,11 @@ pub async fn run_task(
                     if let Err(e) = win.unminimize() {
                         warn!("Failed to restore window: {}", e);
                     }
+                }
+
+                // Hide floating progress window
+                if let Some(progress_win) = app_handle.get_webview_window("vision-progress") {
+                    let _ = progress_win.hide();
                 }
 
                 if accumulated_output.is_empty() {
@@ -1301,6 +1394,19 @@ fn emit(app: &tauri::AppHandle, event: &str, task_id: &str, step: u32, desc: &st
         event,
         serde_json::json!({
             "task_id": task_id, "step_number": step, "description": desc,
+        }),
+    );
+}
+
+fn emit_vision_step(app: &tauri::AppHandle, task_id: &str, step: u32, desc: &str, screenshot_b64: &str, action_type: &str) {
+    let _ = app.emit(
+        "agent:vision_step",
+        serde_json::json!({
+            "task_id": task_id,
+            "step_number": step,
+            "description": desc,
+            "screenshot_base64": screenshot_b64,
+            "action_type": action_type,
         }),
     );
 }

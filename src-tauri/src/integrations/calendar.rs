@@ -426,6 +426,156 @@ impl GoogleCalendarProvider {
     }
 }
 
+// ── Standalone Google Calendar convenience functions ──────────────────
+//
+// These accept a raw OAuth2 access_token and make direct HTTP calls
+// to the Google Calendar API, without requiring a GoogleCalendarProvider.
+
+/// List events from Google Calendar between two ISO-8601 timestamps.
+pub async fn calendar_list_events(
+    access_token: &str,
+    time_min: &str,
+    time_max: &str,
+) -> Result<Vec<serde_json::Value>, String> {
+    let client = Client::new();
+    let url = format!(
+        "{}/calendars/primary/events?timeMin={}&timeMax={}&singleEvents=true&orderBy=startTime&maxResults=100",
+        GOOGLE_CALENDAR_API,
+        urlencoding::encode(time_min),
+        urlencoding::encode(time_max)
+    );
+    let resp = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", access_token))
+        .send()
+        .await
+        .map_err(|e| format!("Calendar API error: {}", e))?;
+    let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    if let Some(err) = json.get("error") {
+        return Err(format!("Calendar API error: {}", err));
+    }
+    Ok(json["items"].as_array().cloned().unwrap_or_default())
+}
+
+/// Create a new event on Google Calendar.
+pub async fn calendar_create_event(
+    access_token: &str,
+    summary: &str,
+    start: &str,
+    end: &str,
+    description: Option<&str>,
+) -> Result<serde_json::Value, String> {
+    let client = Client::new();
+    let body = serde_json::json!({
+        "summary": summary,
+        "start": { "dateTime": format_rfc3339(start) },
+        "end": { "dateTime": format_rfc3339(end) },
+        "description": description.unwrap_or("")
+    });
+    let resp = client
+        .post(format!(
+            "{}/calendars/primary/events",
+            GOOGLE_CALENDAR_API
+        ))
+        .header("Authorization", format!("Bearer {}", access_token))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Calendar API error: {}", e))?;
+    let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    if let Some(err) = json.get("error") {
+        return Err(format!("Calendar API error: {}", err));
+    }
+    Ok(json)
+}
+
+/// Update an existing event on Google Calendar (PATCH).
+pub async fn calendar_update_event(
+    access_token: &str,
+    event_id: &str,
+    summary: Option<&str>,
+    start: Option<&str>,
+    end: Option<&str>,
+    description: Option<&str>,
+) -> Result<serde_json::Value, String> {
+    let client = Client::new();
+    let mut body = serde_json::Map::new();
+    if let Some(s) = summary {
+        body.insert("summary".to_string(), serde_json::json!(s));
+    }
+    if let Some(s) = start {
+        body.insert(
+            "start".to_string(),
+            serde_json::json!({ "dateTime": format_rfc3339(s) }),
+        );
+    }
+    if let Some(e) = end {
+        body.insert(
+            "end".to_string(),
+            serde_json::json!({ "dateTime": format_rfc3339(e) }),
+        );
+    }
+    if let Some(d) = description {
+        body.insert("description".to_string(), serde_json::json!(d));
+    }
+    let resp = client
+        .patch(format!(
+            "{}/calendars/primary/events/{}",
+            GOOGLE_CALENDAR_API, event_id
+        ))
+        .header("Authorization", format!("Bearer {}", access_token))
+        .json(&serde_json::Value::Object(body))
+        .send()
+        .await
+        .map_err(|e| format!("Calendar API error: {}", e))?;
+    let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    if let Some(err) = json.get("error") {
+        return Err(format!("Calendar API error: {}", err));
+    }
+    Ok(json)
+}
+
+/// Delete an event from Google Calendar.
+pub async fn calendar_delete_event(
+    access_token: &str,
+    event_id: &str,
+) -> Result<(), String> {
+    let client = Client::new();
+    let resp = client
+        .delete(format!(
+            "{}/calendars/primary/events/{}",
+            GOOGLE_CALENDAR_API, event_id
+        ))
+        .header("Authorization", format!("Bearer {}", access_token))
+        .send()
+        .await
+        .map_err(|e| format!("Calendar API error: {}", e))?;
+    let status = resp.status();
+    if !status.is_success() && status.as_u16() != 204 {
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Calendar delete failed ({}): {}", status, body));
+    }
+    Ok(())
+}
+
+/// List all calendars for the authenticated user.
+pub async fn calendar_list_calendars(
+    access_token: &str,
+) -> Result<Vec<serde_json::Value>, String> {
+    let client = Client::new();
+    let resp = client
+        .get(format!("{}/users/me/calendarList", GOOGLE_CALENDAR_API))
+        .header("Authorization", format!("Bearer {}", access_token))
+        .send()
+        .await
+        .map_err(|e| format!("Calendar API error: {}", e))?;
+    let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    if let Some(err) = json.get("error") {
+        return Err(format!("Calendar API error: {}", err));
+    }
+    Ok(json["items"].as_array().cloned().unwrap_or_default())
+}
+
 // ── CalendarManager — wraps Google provider + in-memory fallback ────────
 
 pub struct CalendarManager {

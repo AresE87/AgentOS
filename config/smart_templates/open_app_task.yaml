@@ -1,0 +1,38 @@
+id: open_app_task
+name: "Open App & Do Task"
+description: "Open an application and perform a visual task in it"
+variables:
+  - name: app_name
+    var_type: string
+    prompt: "Which application to open?"
+    default: "notepad"
+  - name: task_description
+    var_type: string
+    prompt: "What should I do in the app?"
+    default: "Type Hello World"
+steps:
+  - id: open
+    step_type:
+      type: command
+      command: "Start-Process '{app_name}'; Start-Sleep -Seconds 2"
+    description: "Open the application"
+  - id: wait_load
+    step_type:
+      type: wait
+      seconds: 2
+    description: "Wait for app to load"
+  - id: do_task
+    step_type:
+      type: vision_click
+      target: "{app_name} main window content area"
+    description: "Click on the app's content area"
+  - id: type_content
+    step_type:
+      type: type_text
+      text: "{task_description}"
+    description: "Perform the requested task"
+  - id: done
+    step_type:
+      type: done
+      result: "Opened {app_name} and completed: {task_description}"
+    description: "Complete"

@@ -3,10 +3,16 @@ import { useEffect, useState } from 'react';
 import { useAgent } from './hooks/useAgent';
 import Wizard from './pages/Wizard';
 import Dashboard from './pages/Dashboard';
+import VisionProgress from './pages/VisionProgress';
 
 type View = 'loading' | 'wizard' | 'dashboard';
 
 function App() {
+    // Check if this is the vision progress window
+    if (window.location.pathname === '/vision-progress') {
+        return <VisionProgress />;
+    }
+
     const [view, setView] = useState<View>('loading');
     const { getStatus } = useAgent();
 

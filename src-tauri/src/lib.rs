@@ -30,6 +30,7 @@ pub mod feedback;
 pub mod files;
 pub mod growth;
 pub mod hands;
+pub mod health;
 pub mod infrastructure;
 pub mod integrations;
 pub mod ipo;
@@ -248,6 +249,8 @@ pub struct AppState {
     pub conversations: Arc<tokio::sync::Mutex<Vec<conversations::ConversationChain>>>,
     /// R52: Screen Recording & Replay
     pub screen_recorder: Arc<tokio::sync::Mutex<recording::ScreenRecorder>>,
+    /// Auto-recording: captures real user input (mouse/keyboard) for playbook generation
+    pub input_recorder: Arc<std::sync::Mutex<recording::input_hooks::InputRecorder>>,
     /// R56: Smart Notifications — monitor manager
     pub monitor_manager: Arc<tokio::sync::Mutex<monitors::MonitorManager>>,
     /// R57: Collaborative Chains — intervention manager
@@ -1734,6 +1737,7 @@ async fn cmd_get_mesh_nodes() -> Result<serde_json::Value, String> {
 async fn cmd_send_mesh_task(
     node_id: String,
     description: String,
+    app_handle: tauri::AppHandle,
 ) -> Result<serde_json::Value, String> {
     let nodes = mesh::discovery::get_discovered_nodes();
     let node = nodes
@@ -1760,17 +1764,34 @@ async fn cmd_send_mesh_task(
         port
     );
 
+    // Emit delegation event
+    let _ = app_handle.emit("mesh:task_delegated", serde_json::json!({
+        "task_id": &task_id, "node_id": &node_id, "description": &description,
+        "node_name": &node.display_name,
+    }));
+
     match mesh::transport::send_task(&ip, port, &description).await {
-        Ok(output) => Ok(serde_json::json!({
-            "task_id": task_id,
-            "status": "completed",
-            "output": output,
-        })),
-        Err(e) => Ok(serde_json::json!({
-            "task_id": task_id,
-            "status": "error",
-            "error": e,
-        })),
+        Ok(output) => {
+            let _ = app_handle.emit("mesh:task_completed", serde_json::json!({
+                "task_id": &task_id, "node_id": &node_id, "success": true,
+                "output": &output[..output.len().min(500)],
+            }));
+            Ok(serde_json::json!({
+                "task_id": task_id,
+                "status": "completed",
+                "output": output,
+            }))
+        }
+        Err(e) => {
+            let _ = app_handle.emit("mesh:task_completed", serde_json::json!({
+                "task_id": &task_id, "node_id": &node_id, "success": false, "error": &e,
+            }));
+            Ok(serde_json::json!({
+                "task_id": task_id,
+                "status": "error",
+                "error": e,
+            }))
+        }
     }
 }
 
@@ -1854,15 +1875,31 @@ async fn cmd_execute_distributed_chain(
     let plan = orch.plan_execution(&subtasks);
     let groups = orch.get_parallel_groups(&subtasks);
 
-    // For now, return the execution plan (actual remote dispatch uses existing transport)
-    let assignments: Vec<serde_json::Value> = plan
+    // Execute distributed: actually delegate to remote nodes via transport
+    let settings = state.settings.lock().map_err(|e| e.to_string())?.clone();
+    drop(orch); // Release read lock before executing
+
+    let orch = state.mesh_orchestrator.read().await;
+    let results = orch.execute_distributed(&subtasks, &settings).await;
+    drop(orch);
+
+    let result_entries: Vec<serde_json::Value> = results
         .iter()
-        .map(|(id, selection)| {
+        .map(|(id, selection, result)| {
             let node = match selection {
                 mesh::orchestrator::NodeSelection::Local => "local".to_string(),
                 mesh::orchestrator::NodeSelection::Remote(nid) => nid.clone(),
             };
-            serde_json::json!({ "subtask_id": id, "assigned_node": node })
+            let (success, output) = match result {
+                Ok(out) => (true, out.clone()),
+                Err(err) => (false, err.clone()),
+            };
+            serde_json::json!({
+                "subtask_id": id,
+                "assigned_node": node,
+                "success": success,
+                "output": output,
+            })
         })
         .collect();
 
@@ -1871,13 +1908,93 @@ async fn cmd_execute_distributed_chain(
         .map(|st| serde_json::json!({ "id": st.id, "description": st.description }))
         .collect();
 
+    let all_success = results.iter().all(|(_, _, r)| r.is_ok());
+
     Ok(serde_json::json!({
-        "status": "planned",
+        "status": if all_success { "completed" } else { "partial" },
         "description": description,
         "subtasks": subtask_descs,
-        "assignments": assignments,
+        "results": result_entries,
         "parallel_groups": groups,
-        "node_count": orch.online_node_count(),
+        "node_count": 1 + results.iter().filter(|(_, s, _)| matches!(s, mesh::orchestrator::NodeSelection::Remote(_))).count(),
+    }))
+}
+
+// ── Auto-Recording Commands (FASE 3) ─────────────────────────────
+
+#[tauri::command]
+async fn cmd_start_auto_recording(
+    name: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let recorder = state.input_recorder.lock().map_err(|e| e.to_string())?;
+    if recorder.is_recording() {
+        return Err("Already recording".to_string());
+    }
+    recorder.start_recording();
+    Ok(serde_json::json!({ "ok": true, "session_id": name }))
+}
+
+#[tauri::command]
+async fn cmd_stop_auto_recording(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let recorder = state.input_recorder.lock().map_err(|e| e.to_string())?;
+    let inputs = recorder.stop_recording();
+    let steps = recording::input_hooks::inputs_to_playbook_steps(&inputs);
+    let steps_json: Vec<serde_json::Value> = steps
+        .iter()
+        .map(|s| {
+            serde_json::json!({
+                "step_number": s.step_number,
+                "description": s.description,
+                "screenshot_path": s.screenshot_path,
+                "timestamp": s.timestamp,
+                "action_type": format!("{:?}", s.action),
+            })
+        })
+        .collect();
+    Ok(serde_json::json!({ "ok": true, "steps": steps_json, "count": steps_json.len() }))
+}
+
+#[tauri::command]
+async fn cmd_get_auto_recording_status(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let recorder = state.input_recorder.lock().map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({
+        "recording": recorder.is_recording(),
+        "step_count": recorder.step_count(),
+    }))
+}
+
+#[tauri::command]
+async fn cmd_save_auto_recording(
+    name: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let recorder = state.input_recorder.lock().map_err(|e| e.to_string())?;
+    let inputs = recorder.stop_recording();
+    let steps = recording::input_hooks::inputs_to_playbook_steps(&inputs);
+
+    let playbook = playbooks::recorder::PlaybookFile {
+        name: name.clone(),
+        description: format!("Auto-recorded playbook: {}", name),
+        version: 1,
+        author: "user".to_string(),
+        steps,
+        created_at: chrono::Utc::now().to_rfc3339(),
+    };
+
+    let playbooks_dir = state.screenshots_dir.parent().unwrap_or(&state.screenshots_dir).join("playbooks");
+    std::fs::create_dir_all(&playbooks_dir).map_err(|e| e.to_string())?;
+    let path = playbooks::recorder::PlaybookRecorder::save_playbook(&playbook, &playbooks_dir)
+        .map_err(|e| e.to_string())?;
+
+    Ok(serde_json::json!({
+        "ok": true,
+        "path": path.to_string_lossy(),
+        "steps": playbook.steps.len(),
     }))
 }
 
@@ -4664,6 +4781,74 @@ async fn cmd_memory_reindex(
         "failed": failed
     }))
 }
+
+// ── C2 RAG: Semantic search and indexing commands ─────────────────
+
+#[tauri::command]
+async fn cmd_search_semantic(
+    query: String,
+    source: Option<String>,
+    top_k: Option<usize>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let settings = state.settings.lock().map_err(|e| e.to_string())?.clone();
+    let openai_key = if settings.openai_api_key.is_empty() { None } else { Some(settings.openai_api_key.as_str()) };
+    let ollama_url = if settings.use_local_llm { Some(settings.local_llm_url.as_str()) } else { None };
+
+    // Get query embedding
+    let (query_emb, model) = memory::embeddings::get_embedding(
+        &query, openai_key, ollama_url,
+    ).await?;
+
+    // Search
+    let db_path = &state.db_path;
+    let conn = rusqlite::Connection::open(db_path).map_err(|e| e.to_string())?;
+    let results = memory::embeddings::semantic_search(
+        &conn,
+        &query_emb,
+        source.as_deref(),
+        top_k.unwrap_or(5),
+    )?;
+
+    let items: Vec<serde_json::Value> = results.iter().map(|(id, content, score)| {
+        serde_json::json!({
+            "id": id,
+            "content": content,
+            "score": score,
+        })
+    }).collect();
+
+    Ok(serde_json::json!({
+        "results": items,
+        "model": model,
+        "query": query,
+    }))
+}
+
+#[tauri::command]
+async fn cmd_index_content(
+    content: String,
+    source: String,
+    source_id: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let settings = state.settings.lock().map_err(|e| e.to_string())?.clone();
+    let openai_key = if settings.openai_api_key.is_empty() { None } else { Some(settings.openai_api_key.as_str()) };
+    let ollama_url = if settings.use_local_llm { Some(settings.local_llm_url.as_str()) } else { None };
+
+    let (embedding, model) = memory::embeddings::get_embedding(
+        &content, openai_key, ollama_url,
+    ).await?;
+
+    let conn = rusqlite::Connection::open(&state.db_path).map_err(|e| e.to_string())?;
+    let id = memory::embeddings::store_embedding(
+        &conn, &content, &source, source_id.as_deref(), &embedding, &model,
+    )?;
+
+    Ok(serde_json::json!({ "ok": true, "id": id, "dimensions": embedding.len() }))
+}
+
+// ── D7: Health check command (duplicate removed — see primary definition above) ──
 
 // ── R56: Smart Notifications commands ──────────────────────────────
 
@@ -10315,6 +10500,9 @@ pub fn run() {
                 screen_recorder: Arc::new(tokio::sync::Mutex::new(recording::ScreenRecorder::new(
                     app_dir.join("recordings"),
                 ))),
+                input_recorder: Arc::new(std::sync::Mutex::new(recording::input_hooks::InputRecorder::new(
+                    &app_dir.join("recordings"),
+                ))),
                 monitor_manager: Arc::new(tokio::sync::Mutex::new(monitors::MonitorManager::new())),
                 intervention_manager: Arc::new(tokio::sync::Mutex::new(
                     chains::intervention::InterventionManager::new(),
@@ -11624,9 +11812,19 @@ pub fn run() {
             cmd_affiliate_earnings,
             cmd_affiliate_list,
             cmd_affiliate_track,
+            // C2: RAG semantic search
+            cmd_search_semantic,
+            cmd_index_content,
+            // D7: Health check
+            cmd_health_check,
             // C2: Auto-Update commands
             cmd_check_for_update,
             cmd_get_current_version,
+            // FASE 3: Auto-recording commands
+            cmd_start_auto_recording,
+            cmd_stop_auto_recording,
+            cmd_get_auto_recording_status,
+            cmd_save_auto_recording,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");

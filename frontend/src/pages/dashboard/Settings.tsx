@@ -1,458 +1,510 @@
-// AOS-R20 — Settings page (release polish)
 import { useState, useEffect, useCallback } from 'react';
-import Card from '../../components/Card';
-import Button from '../../components/Button';
-import Input from '../../components/Input';
-import Toggle from '../../components/Toggle';
-import { useAgent } from '../../hooks/useAgent';
-import type { AgentSettings } from '../../types/ipc';
 import {
+  CheckCircle2,
+  XCircle,
   ExternalLink,
-  RotateCcw,
-  Trash2,
-  MessageCircle,
-  RefreshCw,
+  Monitor,
+  FolderOpen,
+  Wifi,
+  Shield,
 } from 'lucide-react';
+import { useAgent } from '../../hooks/useAgent';
 
-interface SettingsPageProps {
+/* ------------------------------------------------------------------ */
+/*  Props                                                              */
+/* ------------------------------------------------------------------ */
+
+interface SettingsProps {
   onResetWizard?: () => void;
 }
 
-export default function Settings({ onResetWizard }: SettingsPageProps) {
-  const { getSettings, updateSettings, healthCheck, getChannelStatus } = useAgent();
-  const [settings, setSettings] = useState<AgentSettings | null>(null);
+/* ------------------------------------------------------------------ */
+/*  Shared styles                                                      */
+/* ------------------------------------------------------------------ */
+
+const border = '0.5px solid rgba(0,229,229,0.08)';
+const inputBase =
+  'w-full rounded-lg bg-[#0A0E14] px-3 py-2 text-sm text-[#E6EDF3] placeholder-[#3D4F5F] focus:outline-none focus:ring-2 focus:ring-[#00E5E5]/40';
+
+/* ------------------------------------------------------------------ */
+/*  Component                                                          */
+/* ------------------------------------------------------------------ */
+
+export default function Settings({ onResetWizard }: SettingsProps) {
+  const { getSettings, saveSettings, healthCheck, getPermissions, savePermissions } = useAgent();
+
   const [loading, setLoading] = useState(true);
 
-  // Provider key inputs
+  /* Provider keys */
   const [keyInputs, setKeyInputs] = useState<Record<string, string>>({});
   const [testing, setTesting] = useState<string | null>(null);
-  const [testResults, setTestResults] = useState<Record<string, boolean>>({});
+  const [testResults, setTestResults] = useState<Record<string, 'connected' | 'failed' | null>>({});
+  const [hasKeys, setHasKeys] = useState<Record<string, boolean>>({});
 
-  // Channel status from backend
-  const [channelStatus, setChannelStatus] = useState<Record<string, { connected: boolean; info?: string }>>({});
-  const [channelLoading, setChannelLoading] = useState(false);
+  /* Ollama */
+  const [ollamaUrl, setOllamaUrl] = useState('http://localhost:11434');
+  const [ollamaModel, setOllamaModel] = useState('llama3');
 
-  // Permission state
+  /* Agent config */
+  const [maxCost, setMaxCost] = useState(1.0);
+  const [execTimeout, setExecTimeout] = useState(120);
+
+  /* Permissions */
   const [permissions, setPermissions] = useState({
-    cli: true,
     screen: false,
     files: true,
     network: true,
   });
 
-  // Agent config
-  const [logLevel, setLogLevel] = useState('info');
-  const [maxCost, setMaxCost] = useState('5.00');
-  const [cliTimeout, setCliTimeout] = useState('30');
-  const [defaultLevel, setDefaultLevel] = useState('auto');
-  const [maxConcurrent, setMaxConcurrent] = useState('3');
+  /* Plan & billing */
+  const [plan] = useState<'Free' | 'Pro' | 'Team'>('Free');
+  const [tasksUsed] = useState(42);
+  const [tasksLimit] = useState(100);
+  const [tokensUsed] = useState(128_000);
+  const [tokensLimit] = useState(500_000);
 
-  const refreshChannels = useCallback(async () => {
-    setChannelLoading(true);
-    try {
-      const result = await getChannelStatus();
-      setChannelStatus((result as any).channels || {});
-    } catch { /* ignore */ }
-    setChannelLoading(false);
-  }, [getChannelStatus]);
+  /* Saving indicator */
+  const [saving, setSaving] = useState(false);
 
+  /* ---- Data fetch ---- */
   const refresh = useCallback(async () => {
     try {
       const s = await getSettings();
-      setSettings(s);
-      setLogLevel(s.log_level);
-      setMaxCost(String(s.max_cost_per_task));
-      setCliTimeout(String(s.cli_timeout));
-    } catch {
-      // backend not ready
-    }
-    await refreshChannels();
+      setMaxCost(s.max_cost_per_task ?? 1.0);
+      setExecTimeout(s.cli_timeout ?? 120);
+      setHasKeys({
+        anthropic: s.has_anthropic ?? false,
+        openai: s.has_openai ?? false,
+        google: s.has_google ?? false,
+      });
+    } catch { /* backend not ready */ }
+    try {
+      const p = await getPermissions();
+      if (p) setPermissions(p);
+    } catch { /* ignore */ }
     setLoading(false);
-  }, [getSettings, refreshChannels]);
+  }, [getSettings, getPermissions]);
 
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
+  useEffect(() => { refresh(); }, [refresh]);
 
+  /* ---- Provider test ---- */
   const handleTestProvider = async (provider: string) => {
     const key = keyInputs[provider];
     if (!key) return;
     setTesting(provider);
+    setTestResults((prev) => ({ ...prev, [provider]: null }));
     try {
-      await updateSettings(`${provider}_api_key`, key);
+      await saveSettings(`${provider}_api_key`, key);
       const result = await healthCheck();
-      setTestResults((prev) => ({ ...prev, [provider]: result.providers[provider] ?? false }));
-      await refresh();
+      const ok = (result as any).providers?.[provider] ?? false;
+      setTestResults((prev) => ({ ...prev, [provider]: ok ? 'connected' : 'failed' }));
+      setHasKeys((prev) => ({ ...prev, [provider]: ok }));
     } catch {
-      setTestResults((prev) => ({ ...prev, [provider]: false }));
+      setTestResults((prev) => ({ ...prev, [provider]: 'failed' }));
     }
     setTesting(null);
   };
 
-  const savePermissions = async (perms: typeof permissions) => {
-    const enabled = Object.entries(perms)
-      .filter(([, v]) => v)
-      .map(([k]) => k)
-      .join(',');
+  /* ---- Save all providers ---- */
+  const handleSaveProviders = async () => {
+    setSaving(true);
     try {
-      await updateSettings('permissions', enabled);
-    } catch {
-      // handle error
-    }
+      for (const [provider, key] of Object.entries(keyInputs)) {
+        if (key.trim()) {
+          await saveSettings(`${provider}_api_key`, key);
+        }
+      }
+      await saveSettings('ollama_url', ollamaUrl);
+      await saveSettings('ollama_model', ollamaModel);
+      await refresh();
+    } catch { /* ignore */ }
+    setSaving(false);
   };
 
-  const handleSaveConfig = async (key: string, value: string) => {
+  /* ---- Save permissions ---- */
+  const handleTogglePermission = async (key: keyof typeof permissions) => {
+    const next = { ...permissions, [key]: !permissions[key] };
+    setPermissions(next);
     try {
-      await updateSettings(key, value);
-    } catch {
-      // handle error
-    }
+      await savePermissions(next);
+    } catch { /* ignore */ }
   };
 
+  /* ---- Derived ---- */
   const providers = [
-    { id: 'anthropic', label: 'Anthropic', hasKey: settings?.has_anthropic },
-    { id: 'openai', label: 'OpenAI', hasKey: settings?.has_openai },
-    { id: 'google', label: 'Google AI', hasKey: settings?.has_google },
+    { id: 'anthropic', label: 'Anthropic' },
+    { id: 'openai', label: 'OpenAI' },
+    { id: 'google', label: 'Google AI' },
+  ];
+
+  const tasksPct = Math.round((tasksUsed / tasksLimit) * 100);
+  const tokensPct = Math.round((tokensUsed / tokensLimit) * 100);
+
+  const permissionItems = [
+    {
+      key: 'screen' as const,
+      label: 'Screen Access',
+      description: 'Allow the agent to view and interact with your screen',
+      icon: Monitor,
+    },
+    {
+      key: 'files' as const,
+      label: 'File Access',
+      description: 'Allow reading and writing files',
+      icon: FolderOpen,
+    },
+    {
+      key: 'network' as const,
+      label: 'Network Access',
+      description: 'Allow HTTP requests and network operations',
+      icon: Wifi,
+    },
   ];
 
   if (loading) {
     return (
       <div className="p-6">
-        <p className="text-sm text-[#3D4F5F]">Loading settings...</p>
+        <p className="text-sm text-[#3D4F5F]" style={{ fontFamily: 'Inter, sans-serif' }}>Loading settings...</p>
       </div>
     );
   }
 
+  /* ---------------------------------------------------------------- */
+  /*  Status badge                                                     */
+  /* ---------------------------------------------------------------- */
+  const StatusBadge = ({ provider }: { provider: string }) => {
+    const result = testResults[provider];
+    const configured = hasKeys[provider];
+
+    if (result === 'connected' || (configured && result === null)) {
+      return (
+        <span className="inline-flex items-center gap-1.5 text-[11px] px-2 py-0.5 rounded-full bg-[#2ECC71]/10 text-[#2ECC71]" style={{ border: '0.5px solid rgba(46,204,113,0.2)' }}>
+          <span className="h-1.5 w-1.5 rounded-full bg-[#2ECC71]" />
+          Connected
+        </span>
+      );
+    }
+    if (result === 'failed') {
+      return (
+        <span className="inline-flex items-center gap-1.5 text-[11px] px-2 py-0.5 rounded-full bg-[#E74C3C]/10 text-[#E74C3C]" style={{ border: '0.5px solid rgba(231,76,60,0.2)' }}>
+          <XCircle size={10} />
+          Failed
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-[#1A1E26] text-[#3D4F5F]" style={{ border }}>
+        Not configured
+      </span>
+    );
+  };
+
+  /* ---------------------------------------------------------------- */
+  /*  Render                                                           */
+  /* ---------------------------------------------------------------- */
   return (
-    <div className="p-6 space-y-6 max-w-4xl">
+    <div className="p-6 space-y-6 max-w-4xl" style={{ fontFamily: 'Inter, sans-serif' }}>
       <h1 className="text-xl font-bold text-[#E6EDF3]">Settings</h1>
 
-      {/* Plan info */}
-      <div className="rounded-lg border border-[#00E5E5]/20 bg-gradient-to-r from-[#00E5E5]/5 to-transparent p-5 shadow-md shadow-black/20">
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] font-bold tracking-widest text-[#3D4F5F] uppercase">Plan:</span>
-          <span className="text-sm font-bold text-[#00E5E5]">AgentOS Free</span>
-          <span className="text-xs text-[#3D4F5F]">&mdash; Bring your own API keys</span>
+      {/* ============================================================ */}
+      {/*  AI PROVIDERS                                                 */}
+      {/* ============================================================ */}
+      <div className="rounded-xl p-5 space-y-5" style={{ backgroundColor: '#0D1117', border }}>
+        <h2 className="text-sm font-semibold text-[#E6EDF3]">AI Providers</h2>
+
+        {providers.map((p) => (
+          <div key={p.id} className="space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-[#E6EDF3]">{p.label}</span>
+                <StatusBadge provider={p.id} />
+              </div>
+              {testResults[p.id] === 'connected' && <CheckCircle2 size={14} className="text-[#2ECC71]" />}
+            </div>
+            <div className="flex items-end gap-2">
+              <div className="flex-1">
+                <input
+                  type="password"
+                  placeholder={hasKeys[p.id] ? '********' : 'Enter API key'}
+                  value={keyInputs[p.id] || ''}
+                  onChange={(e) => setKeyInputs((prev) => ({ ...prev, [p.id]: e.target.value }))}
+                  className={inputBase}
+                  style={{ border }}
+                />
+              </div>
+              <button
+                onClick={() => handleTestProvider(p.id)}
+                disabled={!keyInputs[p.id] || testing === p.id}
+                className="rounded-lg px-3 py-2 text-xs font-medium text-[#C5D0DC] hover:bg-[#1A1E26] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                style={{ border }}
+              >
+                {testing === p.id ? 'Testing...' : 'Test'}
+              </button>
+            </div>
+          </div>
+        ))}
+
+        {/* Ollama */}
+        <div className="pt-4" style={{ borderTop: border }}>
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-sm font-medium text-[#E6EDF3]">Local LLM (Ollama)</span>
+            <span className="text-[11px] px-2 py-0.5 rounded-full bg-[#1A1E26] text-[#3D4F5F]" style={{ border }}>
+              Optional
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-[#C5D0DC] mb-1 block">URL</label>
+              <input
+                type="text"
+                value={ollamaUrl}
+                onChange={(e) => setOllamaUrl(e.target.value)}
+                className={inputBase}
+                style={{ border, fontFamily: 'JetBrains Mono, monospace' }}
+              />
+            </div>
+            <div>
+              <label className="text-xs text-[#C5D0DC] mb-1 block">Model Name</label>
+              <input
+                type="text"
+                value={ollamaModel}
+                onChange={(e) => setOllamaModel(e.target.value)}
+                placeholder="llama3"
+                className={inputBase}
+                style={{ border, fontFamily: 'JetBrains Mono, monospace' }}
+              />
+            </div>
+          </div>
+          <button
+            onClick={() => handleTestProvider('ollama')}
+            disabled={testing === 'ollama'}
+            className="mt-3 rounded-lg px-3 py-2 text-xs font-medium text-[#C5D0DC] hover:bg-[#1A1E26] transition-colors disabled:opacity-40"
+            style={{ border }}
+          >
+            {testing === 'ollama' ? 'Testing...' : 'Test Connection'}
+          </button>
+        </div>
+
+        {/* Save button */}
+        <div className="pt-4" style={{ borderTop: border }}>
+          <button
+            onClick={handleSaveProviders}
+            disabled={saving}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-[#00E5E5] px-4 py-2 text-xs font-semibold text-[#0A0E14] hover:brightness-110 transition-all disabled:opacity-40"
+          >
+            {saving ? 'Saving...' : 'Save'}
+          </button>
         </div>
       </div>
 
-      {/* AI Providers */}
-      <Card header="AI Providers">
-        <div className="space-y-4">
-          {providers.map((p) => (
-            <div key={p.id} className="space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-[#E6EDF3]">{p.label}</span>
-                  {p.hasKey ? (
-                    <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full
-                      bg-[#2ECC71]/10 text-[#2ECC71] border border-[#2ECC71]/20
-                      shadow-[0_0_8px_rgba(46,204,113,0.15)]">
-                      <span className="h-1.5 w-1.5 rounded-full bg-[#2ECC71] shadow-[0_0_4px_#2ECC71]" />
-                      Connected
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full
-                      bg-[#1A1E26] text-[#3D4F5F] border border-[#1A1E26]">
-                      Not Configured
-                    </span>
-                  )}
-                </div>
-              </div>
-              <div className="flex items-end gap-2">
-                <div className="flex-1">
-                  <Input
-                    isPassword
-                    placeholder={p.hasKey ? '********' : 'Enter API key'}
-                    value={keyInputs[p.id] || ''}
-                    onChange={(e) =>
-                      setKeyInputs((prev) => ({ ...prev, [p.id]: (e.target as HTMLInputElement).value }))
-                    }
-                  />
-                </div>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  loading={testing === p.id}
-                  onClick={() => handleTestProvider(p.id)}
-                  disabled={!keyInputs[p.id]}
-                >
-                  Test
-                </Button>
-              </div>
-              {testResults[p.id] !== undefined && (
-                <p className={`text-xs ${testResults[p.id] ? 'text-[#2ECC71]' : 'text-[#E74C3C]'}`}>
-                  {testResults[p.id] ? 'Connection successful' : 'Connection failed'}
-                </p>
-              )}
-            </div>
-          ))}
-        </div>
-      </Card>
+      {/* ============================================================ */}
+      {/*  AGENT CONFIGURATION                                          */}
+      {/* ============================================================ */}
+      <div className="rounded-xl p-5 space-y-5" style={{ backgroundColor: '#0D1117', border }}>
+        <h2 className="text-sm font-semibold text-[#E6EDF3]">Agent Configuration</h2>
 
-      {/* Messaging Channels */}
-      <Card header="Messaging Channels">
-        <div className="space-y-3">
-          {[
-            { key: 'telegram', name: 'Telegram', fallback: settings?.has_telegram ?? false },
-            { key: 'discord', name: 'Discord', fallback: false },
-            { key: 'whatsapp', name: 'WhatsApp', fallback: false },
-          ].map((ch) => {
-            const status = channelStatus[ch.key];
-            const connected = status ? status.connected : ch.fallback;
+        {/* Max cost */}
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <label className="text-xs text-[#C5D0DC]">Max Cost per Task</label>
+            <span className="text-xs text-[#00E5E5]" style={{ fontFamily: 'JetBrains Mono, monospace' }}>
+              ${maxCost.toFixed(2)}
+            </span>
+          </div>
+          <input
+            type="number"
+            min={0.01}
+            max={5.0}
+            step={0.01}
+            value={maxCost}
+            onChange={(e) => setMaxCost(parseFloat(e.target.value) || 0.01)}
+            onBlur={() => saveSettings('max_cost_per_task', String(maxCost)).catch(() => {})}
+            className={`${inputBase} max-w-[200px]`}
+            style={{ border, fontFamily: 'JetBrains Mono, monospace' }}
+          />
+          <p className="text-[10px] text-[#3D4F5F] mt-1">Range: $0.01 - $5.00</p>
+        </div>
+
+        {/* Execution timeout */}
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <label className="text-xs text-[#C5D0DC]">Execution Timeout</label>
+            <span className="text-xs text-[#00E5E5]" style={{ fontFamily: 'JetBrains Mono, monospace' }}>
+              {execTimeout}s
+            </span>
+          </div>
+          <input
+            type="number"
+            min={30}
+            max={600}
+            step={10}
+            value={execTimeout}
+            onChange={(e) => setExecTimeout(parseInt(e.target.value) || 30)}
+            onBlur={() => saveSettings('cli_timeout', String(execTimeout)).catch(() => {})}
+            className={`${inputBase} max-w-[200px]`}
+            style={{ border, fontFamily: 'JetBrains Mono, monospace' }}
+          />
+          <p className="text-[10px] text-[#3D4F5F] mt-1">Range: 30 - 600 seconds</p>
+        </div>
+
+        {/* Permission toggles */}
+        <div className="pt-4 space-y-4" style={{ borderTop: border }}>
+          {permissionItems.map((item) => {
+            const Icon = item.icon;
             return (
-              <div key={ch.key} className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <MessageCircle size={16} className="text-[#E6EDF3]" />
-                  <span className="text-sm text-[#E6EDF3]">{ch.name}</span>
-                  {status?.info && (
-                    <span className="text-[10px] text-[#3D4F5F]">{status.info}</span>
-                  )}
+              <div key={item.key} className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div
+                    className="h-8 w-8 rounded-lg flex items-center justify-center"
+                    style={{ backgroundColor: 'rgba(0,229,229,0.06)' }}
+                  >
+                    <Icon size={14} className="text-[#00E5E5]" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-[#E6EDF3]">{item.label}</p>
+                    <p className="text-[11px] text-[#3D4F5F]">{item.description}</p>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  {connected ? (
-                    <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full
-                      bg-[#2ECC71]/10 text-[#2ECC71] border border-[#2ECC71]/20
-                      shadow-[0_0_8px_rgba(46,204,113,0.15)]">
-                      <span className="h-1.5 w-1.5 rounded-full bg-[#2ECC71] shadow-[0_0_4px_#2ECC71]" />
-                      Connected
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full
-                      bg-[#1A1E26] text-[#3D4F5F] border border-[#1A1E26]">
-                      Not Configured
-                    </span>
-                  )}
-                </div>
+                <button
+                  onClick={() => handleTogglePermission(item.key)}
+                  className="relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-[#00E5E5]/30"
+                  style={{ backgroundColor: permissions[item.key] ? '#00E5E5' : '#1A1E26' }}
+                >
+                  <span
+                    className="inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm transition-transform duration-200"
+                    style={{
+                      marginTop: '3px',
+                      transform: permissions[item.key] ? 'translateX(18px)' : 'translateX(3px)',
+                    }}
+                  />
+                </button>
               </div>
             );
           })}
         </div>
-        <div className="flex items-center justify-between mt-3">
-          <p className="text-xs text-[#3D4F5F]">
-            Configure Telegram in the setup wizard. Discord via DISCORD_BOT_TOKEN env var. WhatsApp via Meta Business API.
-          </p>
-          <button
-            onClick={refreshChannels}
-            disabled={channelLoading}
-            className="text-[#3D4F5F] hover:text-[#C5D0DC] transition-colors disabled:opacity-50"
-            title="Refresh channel status"
-          >
-            <RefreshCw size={14} className={channelLoading ? 'animate-spin' : ''} />
-          </button>
-        </div>
-      </Card>
+      </div>
 
-      {/* Integrations — working features */}
-      <Card header="Integrations">
+      {/* ============================================================ */}
+      {/*  PLAN & BILLING                                               */}
+      {/* ============================================================ */}
+      <div className="rounded-xl p-5 space-y-4" style={{ backgroundColor: '#0D1117', border }}>
+        <h2 className="text-sm font-semibold text-[#E6EDF3]">Plan & Billing</h2>
+
+        {/* Current plan */}
+        <div className="flex items-center gap-3">
+          <span
+            className={`rounded-full px-3 py-1 text-xs font-bold tracking-wide ${
+              plan === 'Free'
+                ? 'bg-[#1A1E26] text-[#C5D0DC]'
+                : plan === 'Pro'
+                  ? 'bg-[#00E5E5]/10 text-[#00E5E5]'
+                  : 'bg-[#5865F2]/10 text-[#5865F2]'
+            }`}
+            style={{
+              border: plan === 'Pro'
+                ? '0.5px solid rgba(0,229,229,0.2)'
+                : plan === 'Team'
+                  ? '0.5px solid rgba(88,101,242,0.2)'
+                  : border,
+            }}
+          >
+            {plan}
+          </span>
+          <span className="text-xs text-[#3D4F5F]">Bring your own API keys</span>
+        </div>
+
+        {/* Usage bars */}
         <div className="space-y-3">
-          {[
-            { name: 'Google Calendar', desc: 'OAuth via Settings or agent chat', key: 'calendar' },
-            { name: 'Gmail', desc: 'OAuth via Settings or agent chat', key: 'gmail' },
-            { name: 'Voice (TTS/STT)', desc: 'Built-in speech synthesis and transcription', key: 'voice' },
-            { name: 'Ollama', desc: 'Local LLM — auto-detected when running', key: 'ollama' },
-            { name: 'API Server', desc: 'REST API for external integrations', key: 'api_server' },
-            { name: 'Stripe Billing', desc: 'Usage-based billing via Stripe checkout', key: 'stripe' },
-          ].map((item) => (
-            <div key={item.key} className="flex items-center justify-between">
-              <div>
-                <span className="text-sm text-[#E6EDF3]">{item.name}</span>
-                <p className="text-[10px] text-[#3D4F5F]">{item.desc}</p>
-              </div>
-              <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full
-                bg-[#2ECC71]/10 text-[#2ECC71] border border-[#2ECC71]/20">
-                Available
+          <div>
+            <div className="flex items-center justify-between text-xs mb-1">
+              <span className="text-[#C5D0DC]">Tasks Used</span>
+              <span className="text-[#3D4F5F]" style={{ fontFamily: 'JetBrains Mono, monospace' }}>
+                {tasksUsed} / {tasksLimit}
               </span>
             </div>
+            <div className="h-2 rounded-full bg-[#1A1E26] overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all"
+                style={{
+                  width: `${tasksPct}%`,
+                  backgroundColor: tasksPct > 80 ? '#E74C3C' : '#00E5E5',
+                }}
+              />
+            </div>
+          </div>
+          <div>
+            <div className="flex items-center justify-between text-xs mb-1">
+              <span className="text-[#C5D0DC]">Tokens Used</span>
+              <span className="text-[#3D4F5F]" style={{ fontFamily: 'JetBrains Mono, monospace' }}>
+                {(tokensUsed / 1000).toFixed(0)}k / {(tokensLimit / 1000).toFixed(0)}k
+              </span>
+            </div>
+            <div className="h-2 rounded-full bg-[#1A1E26] overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all"
+                style={{
+                  width: `${tokensPct}%`,
+                  backgroundColor: tokensPct > 80 ? '#E74C3C' : '#00E5E5',
+                }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {plan === 'Free' && (
+          <button className="inline-flex items-center gap-1.5 rounded-lg bg-[#00E5E5] px-4 py-2 text-xs font-semibold text-[#0A0E14] hover:brightness-110 transition-all">
+            Upgrade to Pro
+          </button>
+        )}
+      </div>
+
+      {/* ============================================================ */}
+      {/*  ABOUT                                                        */}
+      {/* ============================================================ */}
+      <div className="rounded-xl p-5 space-y-4" style={{ backgroundColor: '#0D1117', border }}>
+        <h2 className="text-sm font-semibold text-[#E6EDF3]">About</h2>
+
+        <div className="flex items-center gap-3">
+          <div
+            className="h-10 w-10 rounded-lg flex items-center justify-center text-[#0A0E14] font-bold text-sm shadow-md"
+            style={{ background: 'linear-gradient(135deg, #00E5E5, #00B8D4)', boxShadow: '0 0 12px rgba(0,229,229,0.2)' }}
+          >
+            AOS
+          </div>
+          <div>
+            <p className="text-sm font-medium text-[#E6EDF3]">AgentOS</p>
+            <p className="text-xs text-[#3D4F5F]" style={{ fontFamily: 'JetBrains Mono, monospace' }}>v0.1.0</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 text-xs text-[#3D4F5F]">
+          <div className="rounded-lg px-3 py-2" style={{ border, backgroundColor: '#080B10' }}>
+            <span className="text-[10px] uppercase tracking-wide">Platform</span>
+            <p className="text-[#C5D0DC] mt-0.5">{navigator.platform}</p>
+          </div>
+          <div className="rounded-lg px-3 py-2" style={{ border, backgroundColor: '#080B10' }}>
+            <span className="text-[10px] uppercase tracking-wide">Database</span>
+            <p className="text-[#C5D0DC] mt-0.5">SQLite (local)</p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-4 pt-3" style={{ borderTop: border }}>
+          {[
+            { label: 'Docs', href: '#' },
+            { label: 'GitHub', href: '#' },
+            { label: 'Discord', href: '#' },
+          ].map((link) => (
+            <a
+              key={link.label}
+              href={link.href}
+              className="flex items-center gap-1 text-xs text-[#00E5E5] hover:text-[#00B8D4] transition-colors"
+            >
+              {link.label}
+              <ExternalLink size={10} />
+            </a>
           ))}
         </div>
-      </Card>
-
-      {/* Permissions */}
-      <Card header="Permissions">
-        <div className="space-y-4">
-          <Toggle
-            label="Command Line"
-            description="Allow the agent to execute shell commands."
-            checked={permissions.cli}
-            onChange={(v) => {
-              const next = { ...permissions, cli: v };
-              setPermissions(next);
-              savePermissions(next);
-            }}
-          />
-          <Toggle
-            label="Screen Access"
-            description="Allow the agent to view and interact with your screen."
-            checked={permissions.screen}
-            onChange={(v) => {
-              const next = { ...permissions, screen: v };
-              setPermissions(next);
-              savePermissions(next);
-            }}
-          />
-          <Toggle
-            label="File System"
-            description="Allow the agent to read and write files."
-            checked={permissions.files}
-            onChange={(v) => {
-              const next = { ...permissions, files: v };
-              setPermissions(next);
-              savePermissions(next);
-            }}
-          />
-          <Toggle
-            label="Network"
-            description="Allow the agent to make outbound HTTP requests."
-            checked={permissions.network}
-            onChange={(v) => {
-              const next = { ...permissions, network: v };
-              setPermissions(next);
-              savePermissions(next);
-            }}
-          />
-        </div>
-        <p className="text-xs text-[#3D4F5F] mt-3">Changes are saved automatically.</p>
-      </Card>
-
-      {/* Agent Configuration — expanded */}
-      <Card header="Agent Configuration">
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div>
-              <label className="text-xs text-[#C5D0DC] mb-1 block">Default Level</label>
-              <select
-                value={defaultLevel}
-                onChange={(e) => {
-                  setDefaultLevel(e.target.value);
-                  handleSaveConfig('default_level', e.target.value);
-                }}
-                className="w-full rounded-lg border border-[#1A1E26] bg-[#0A0E14] px-3 py-2 text-sm text-[#E6EDF3]
-                  focus:outline-none focus:ring-2 focus:ring-[#00E5E5]/50"
-              >
-                <option value="auto">Auto</option>
-                <option value="basic">Basic</option>
-                <option value="advanced">Advanced</option>
-                <option value="specialist">Specialist</option>
-              </select>
-            </div>
-            <div>
-              <label className="text-xs text-[#C5D0DC] mb-1 block">Max Cost per Task ($)</label>
-              <input
-                type="number"
-                step="0.01"
-                value={maxCost}
-                onChange={(e) => setMaxCost(e.target.value)}
-                onBlur={() => handleSaveConfig('max_cost_per_task', maxCost)}
-                className="w-full rounded-lg border border-[#1A1E26] bg-[#0A0E14] px-3 py-2 text-sm text-[#E6EDF3]
-                  focus:outline-none focus:ring-2 focus:ring-[#00E5E5]/50"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-[#C5D0DC] mb-1 block">CLI Timeout (sec)</label>
-              <input
-                type="number"
-                value={cliTimeout}
-                onChange={(e) => setCliTimeout(e.target.value)}
-                onBlur={() => handleSaveConfig('cli_timeout', cliTimeout)}
-                className="w-full rounded-lg border border-[#1A1E26] bg-[#0A0E14] px-3 py-2 text-sm text-[#E6EDF3]
-                  focus:outline-none focus:ring-2 focus:ring-[#00E5E5]/50"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-[#C5D0DC] mb-1 block">Max Concurrent Tasks</label>
-              <input
-                type="number"
-                min="1"
-                max="10"
-                value={maxConcurrent}
-                onChange={(e) => setMaxConcurrent(e.target.value)}
-                onBlur={() => handleSaveConfig('max_concurrent_tasks', maxConcurrent)}
-                className="w-full rounded-lg border border-[#1A1E26] bg-[#0A0E14] px-3 py-2 text-sm text-[#E6EDF3]
-                  focus:outline-none focus:ring-2 focus:ring-[#00E5E5]/50"
-              />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="text-xs text-[#C5D0DC] mb-1 block">Log Level</label>
-              <select
-                value={logLevel}
-                onChange={(e) => {
-                  setLogLevel(e.target.value);
-                  handleSaveConfig('log_level', e.target.value);
-                }}
-                className="w-full rounded-lg border border-[#1A1E26] bg-[#0A0E14] px-3 py-2 text-sm text-[#E6EDF3]
-                  focus:outline-none focus:ring-2 focus:ring-[#00E5E5]/50"
-              >
-                <option value="debug">Debug</option>
-                <option value="info">Info</option>
-                <option value="warn">Warn</option>
-                <option value="error">Error</option>
-              </select>
-            </div>
-            <div>
-              <label className="text-xs text-[#C5D0DC] mb-1 block">Active Playbook</label>
-              <select
-                className="w-full rounded-lg border border-[#1A1E26] bg-[#0A0E14] px-3 py-2 text-sm text-[#E6EDF3]
-                  focus:outline-none focus:ring-2 focus:ring-[#00E5E5]/50"
-                disabled
-              >
-                <option>Manage in Playbooks tab</option>
-              </select>
-            </div>
-          </div>
-        </div>
-      </Card>
-
-      {/* About — enhanced */}
-      <Card header="About">
-        <div className="space-y-4">
-          {/* Logo & version */}
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-[#00E5E5] to-[#00B8D4] flex items-center justify-center
-              text-[#0A0E14] font-bold text-sm shadow-md shadow-[#00E5E5]/20">
-              AOS
-            </div>
-            <div>
-              <p className="text-sm font-medium text-[#E6EDF3]">AgentOS</p>
-              <p className="text-xs text-[#3D4F5F]">Version 1.0.0</p>
-            </div>
-          </div>
-
-          {/* Links */}
-          <div className="flex items-center gap-4">
-            {[
-              { label: 'Docs', href: '#' },
-              { label: 'GitHub', href: '#' },
-              { label: 'Discord', href: '#' },
-            ].map((link) => (
-              <a
-                key={link.label}
-                href={link.href}
-                className="flex items-center gap-1 text-xs text-[#00E5E5] hover:text-[#00B8D4] transition-colors"
-              >
-                {link.label}
-                <ExternalLink size={10} />
-              </a>
-            ))}
-          </div>
-
-          {/* Actions */}
-          <div className="flex items-center gap-2 pt-2 border-t border-[#1A1E26]">
-            {onResetWizard && (
-              <Button size="sm" variant="secondary" onClick={onResetWizard}>
-                <RotateCcw size={14} />
-                Re-run Wizard
-              </Button>
-            )}
-            <Button size="sm" variant="danger">
-              <Trash2 size={14} />
-              Reset Data
-            </Button>
-          </div>
-        </div>
-      </Card>
+      </div>
     </div>
   );
 }

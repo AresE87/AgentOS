@@ -418,6 +418,72 @@ fn parse_classification_json(content: &str) -> Result<TaskClassification, String
     })
 }
 
+/// Classify with LLM when keyword matching is ambiguous
+pub async fn classify_with_llm_fallback(
+    task: &str,
+    gateway: &super::gateway::Gateway,
+    settings: &crate::config::Settings,
+) -> Result<TaskClassification, String> {
+    let prompt = format!(
+        "Classify this task into exactly one category and complexity.\n\
+         Task: \"{}\"\n\
+         Categories: command, screen, browse, chat, multi\n\
+         Complexity: low, medium, high\n\
+         Respond ONLY with JSON: {{\"category\": \"...\", \"complexity\": \"...\"}}",
+        task
+    );
+
+    let response = gateway.complete_cheap(&prompt, settings).await?;
+    let content = response.content.trim();
+
+    // Parse the response
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        let category = val["category"].as_str().unwrap_or("chat");
+        let complexity = val["complexity"].as_str().unwrap_or("medium");
+
+        let task_type = match category {
+            "command" => TaskType::Code,
+            "screen" => TaskType::Vision,
+            "browse" => TaskType::Text,
+            "multi" => TaskType::Code,
+            _ => TaskType::Text,
+        };
+
+        let tier = match complexity {
+            "low" => TaskTier::Cheap,
+            "high" => TaskTier::Premium,
+            _ => TaskTier::Standard,
+        };
+
+        Ok(TaskClassification {
+            task_type,
+            tier,
+            complexity: match complexity {
+                "low" => 1,
+                "high" => 3,
+                _ => 2,
+            },
+            suggested_specialist: match task_type {
+                TaskType::Code => "Programmer",
+                TaskType::Vision => "Vision Specialist",
+                TaskType::Data => "Data Analyst",
+                TaskType::Generation => "Creative Writer",
+                TaskType::Text => "General Assistant",
+            }
+            .to_string(),
+            confidence: 0.75,
+            inference_source: "llm_fallback".to_string(),
+            local_available: false,
+            local_active: false,
+            fallback_reason: None,
+            latency_ms: 0,
+        })
+    } else {
+        // Fallback to keyword classification
+        Ok(classify(task))
+    }
+}
+
 fn has_any(text: &str, patterns: &[&str]) -> bool {
     patterns.iter().any(|pattern| text.contains(pattern))
 }
