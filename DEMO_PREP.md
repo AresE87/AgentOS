@@ -1,5 +1,14 @@
 # DEMO PREP — Setup por Demo
 
+**Ultima revision:** 2026-03-31
+**Estado verificado:** App arranca, API server OK, DB existe, SIN API keys configuradas
+**Guia detallada de setup:** docs/SETUP_DEMO.md
+
+**ORDEN RECOMENDADO DE DEMOS:**
+1. Demo 2 (Factura) — mas facil, solo necesita API key LLM
+2. Demo 3 (Swarm) — solo necesita API key LLM
+3. Demo 1 (Inbox) — necesita API key LLM + Google OAuth (30 min extra)
+
 ---
 
 ## DEMO 1 — SMB / Operacion Personal

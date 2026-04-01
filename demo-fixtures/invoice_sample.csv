@@ -1,0 +1,6 @@
+invoice_number,date,client,description,quantity,unit_price,subtotal,tax_rate,tax,total
+INV-2026-001,2026-03-15,Acme Corp,Web Development Services,40,150.00,6000.00,0.21,1260.00,7260.00
+INV-2026-002,2026-03-18,TechStart SRL,API Integration Consulting,20,175.00,3500.00,0.21,735.00,4235.00
+INV-2026-003,2026-03-20,DataFlow Inc,Database Optimization,15,200.00,3000.00,0.21,630.00,3630.00
+INV-2026-004,2026-03-22,CloudBase LLC,Infrastructure Setup,30,125.00,3750.00,0.21,787.50,4537.50
+INV-2026-005,2026-03-25,NextGen AI,ML Pipeline Development,25,225.00,5625.00,0.21,1181.25,6806.25
