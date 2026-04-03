@@ -353,7 +353,7 @@ export default function Operations() {
               </div>
               {alerts.length === 0 ? (
                 <EmptyState
-                  icon={<CircleAlert size={34} />}
+                  icon={CircleAlert}
                   title="No active alerts"
                   description="The current alert manager has no unacknowledged incidents."
                 />
@@ -444,7 +444,7 @@ export default function Operations() {
         >
           {logs.length === 0 ? (
             <EmptyState
-              icon={<ServerCog size={36} />}
+              icon={ServerCog}
               title="No logs captured yet"
               description="Run more backend actions or widen the module filter to populate the structured log stream."
             />

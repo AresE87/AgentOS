@@ -1,6 +1,6 @@
 // AOS-R4 — Dashboard Home: premium dark sci-fi command center
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Send, Zap, Activity, DollarSign, ListChecks, ArrowUp, ArrowDown, Minus } from 'lucide-react';
+import { Send, Zap, ArrowUp, ArrowDown, Minus } from 'lucide-react';
 import { LineChart, Line, ResponsiveContainer } from 'recharts';
 import { useAgent } from '../../hooks/useAgent';
 import type { AgentStatus, TaskResult } from '../../types/ipc';

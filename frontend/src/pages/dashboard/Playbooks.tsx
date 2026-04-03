@@ -15,10 +15,6 @@ import {
   Search,
   Star,
   Download,
-  Shield,
-  Terminal,
-  Eye,
-  FileText,
   Edit3,
 } from 'lucide-react';
 
@@ -142,7 +138,7 @@ function renderStars(rating: number) {
 export default function Playbooks() {
   const {
     getPlaybooks, playPlaybook, deletePlaybook,
-    startRecording, stopRecording, recordStep,
+    // startRecording, stopRecording, recordStep, // TODO: wire to real recording UI
   } = useAgent();
 
   const [tab, setTab] = useState<Tab>('my-playbooks');

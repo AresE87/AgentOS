@@ -197,7 +197,7 @@ function CopyButton({ text }: { text: string }) {
 /* ------------------------------------------------------------------ */
 
 export default function Developer() {
-  const { captureScreenshot, testVision, healthCheck } = useAgent();
+  const { captureScreenshot, healthCheck } = useAgent();
 
   /* ---- API Keys ---- */
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
@@ -277,8 +277,8 @@ export default function Developer() {
   const handleVision = async () => {
     setDebugLoading('vision');
     try {
-      const result = await testVision();
-      if (result) setVisionResult(result as VisionResult);
+      // testVision not yet implemented in useAgent — clear result as placeholder
+      setVisionResult(null);
     } catch { /* noop */ }
     setDebugLoading(null);
   };

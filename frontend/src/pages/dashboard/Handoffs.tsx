@@ -100,7 +100,7 @@ function timeAgo(iso?: string | null): string {
 /* ------------------------------------------------------------------ */
 
 export default function Handoffs() {
-  const { getHandoffs, resolveHandoff, assignHandoff } = useAgent();
+  const { listEscalations, resolveEscalation, assignEscalation } = useAgent();
 
   const [cases, setCases] = useState<HandoffCase[]>([]);
   const [loading, setLoading] = useState(true);
@@ -113,7 +113,7 @@ export default function Handoffs() {
   const refresh = async () => {
     setLoading(true);
     try {
-      const items = await getHandoffs(filter === 'All' ? undefined : filter);
+      const items = await listEscalations(filter === 'All' ? undefined : filter);
       setCases(items || []);
       setError(null);
     } catch (e: any) {
@@ -134,7 +134,7 @@ export default function Handoffs() {
   const handleResolve = async (id: string) => {
     setActionLoading(id);
     try {
-      await resolveHandoff(id);
+      await resolveEscalation(id);
       await refresh();
     } catch (e: any) {
       setError(e?.message || 'Failed to resolve handoff');
@@ -145,7 +145,7 @@ export default function Handoffs() {
   const handleAssign = async (id: string) => {
     setActionLoading(id);
     try {
-      await assignHandoff(id, 'me');
+      await assignEscalation(id, 'me');
       await refresh();
     } catch (e: any) {
       setError(e?.message || 'Failed to assign handoff');

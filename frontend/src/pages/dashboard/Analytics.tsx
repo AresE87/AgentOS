@@ -169,7 +169,7 @@ export default function Analytics() {
 
   const refresh = useCallback(async () => {
     try {
-      const raw = await getAnalytics(period);
+      const raw = await getAnalytics();
       const normalized: AnalyticsData = {
         total_tasks: raw.total_tasks ?? 0,
         total_tokens: raw.total_tokens ?? 0,

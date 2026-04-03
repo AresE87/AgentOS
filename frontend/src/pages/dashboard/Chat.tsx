@@ -7,7 +7,6 @@ import {
   Square,
   CheckCircle,
   AlertCircle,
-  Clock,
   Copy,
   Check,
   ThumbsUp,
@@ -236,7 +235,6 @@ export default function Chat() {
     getTasks,
     killSwitch,
     resetKillSwitch,
-    getTaskSteps,
     submitFeedback,
   } = useAgent();
 
@@ -268,7 +266,8 @@ export default function Chat() {
   const activeTaskIdRef = useRef<string | null>(null);
 
   /* ---- Active conversation ---------------------------------------- */
-  const activeConv = useMemo(
+  /* activeConv kept as side-effect-free derivation for future use */
+  void useMemo(
     () => conversations.find((c) => c.id === activeConvId) ?? null,
     [conversations, activeConvId],
   );

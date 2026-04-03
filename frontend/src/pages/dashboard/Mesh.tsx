@@ -3,17 +3,12 @@ import { useState, useEffect, useCallback } from 'react';
 import { useAgent } from '../../hooks/useAgent';
 import {
   Network,
-  Monitor,
   RefreshCw,
   Send,
   Clock,
   Trash2,
   Zap,
   Eye,
-  Terminal,
-  Cpu,
-  HardDrive,
-  Wifi,
 } from 'lucide-react';
 
 /* ---------- types ---------- */
@@ -93,7 +88,7 @@ function logLabel(type: LogEntry['type']): string {
 
 /* ====================================================================== */
 export default function Mesh() {
-  const { getMeshNodes, sendMeshTask, getMeshCapabilities } = useAgent();
+  const { getMeshNodes, sendMeshTask } = useAgent();
 
   const [nodes, setNodes] = useState<MeshNode[]>([]);
   const [loading, setLoading] = useState(true);

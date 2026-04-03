@@ -5,7 +5,7 @@ import EmptyState from '../../components/EmptyState';
 export default function StepRecorder() {
   return (
     <EmptyState
-      icon={<BookOpen size={48} />}
+      icon={BookOpen}
       title="Recorder moved to Playbooks"
       description="The step recorder is now part of the Playbooks page. Go to Playbooks to record and manage your playbooks."
     />

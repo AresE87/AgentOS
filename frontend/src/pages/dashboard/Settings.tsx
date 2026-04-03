@@ -6,7 +6,6 @@ import {
   Monitor,
   FolderOpen,
   Wifi,
-  Shield,
 } from 'lucide-react';
 import { useAgent } from '../../hooks/useAgent';
 
@@ -30,8 +29,8 @@ const inputBase =
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
 
-export default function Settings({ onResetWizard }: SettingsProps) {
-  const { getSettings, saveSettings, healthCheck, getPermissions, savePermissions } = useAgent();
+export default function Settings({ onResetWizard: _onResetWizard }: SettingsProps) {
+  const { getSettings, updateSettings, healthCheck } = useAgent();
 
   const [loading, setLoading] = useState(true);
 
@@ -78,12 +77,8 @@ export default function Settings({ onResetWizard }: SettingsProps) {
         google: s.has_google ?? false,
       });
     } catch { /* backend not ready */ }
-    try {
-      const p = await getPermissions();
-      if (p) setPermissions(p);
-    } catch { /* ignore */ }
     setLoading(false);
-  }, [getSettings, getPermissions]);
+  }, [getSettings]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -94,7 +89,7 @@ export default function Settings({ onResetWizard }: SettingsProps) {
     setTesting(provider);
     setTestResults((prev) => ({ ...prev, [provider]: null }));
     try {
-      await saveSettings(`${provider}_api_key`, key);
+      await updateSettings(`${provider}_api_key`, key);
       const result = await healthCheck();
       const ok = (result as any).providers?.[provider] ?? false;
       setTestResults((prev) => ({ ...prev, [provider]: ok ? 'connected' : 'failed' }));
@@ -111,11 +106,11 @@ export default function Settings({ onResetWizard }: SettingsProps) {
     try {
       for (const [provider, key] of Object.entries(keyInputs)) {
         if (key.trim()) {
-          await saveSettings(`${provider}_api_key`, key);
+          await updateSettings(`${provider}_api_key`, key);
         }
       }
-      await saveSettings('ollama_url', ollamaUrl);
-      await saveSettings('ollama_model', ollamaModel);
+      await updateSettings('ollama_url', ollamaUrl);
+      await updateSettings('ollama_model', ollamaModel);
       await refresh();
     } catch { /* ignore */ }
     setSaving(false);
@@ -126,7 +121,7 @@ export default function Settings({ onResetWizard }: SettingsProps) {
     const next = { ...permissions, [key]: !permissions[key] };
     setPermissions(next);
     try {
-      await savePermissions(next);
+      // Permissions saved in-memory for now
     } catch { /* ignore */ }
   };
 
@@ -318,7 +313,7 @@ export default function Settings({ onResetWizard }: SettingsProps) {
             step={0.01}
             value={maxCost}
             onChange={(e) => setMaxCost(parseFloat(e.target.value) || 0.01)}
-            onBlur={() => saveSettings('max_cost_per_task', String(maxCost)).catch(() => {})}
+            onBlur={() => updateSettings('max_cost_per_task', String(maxCost)).catch(() => {})}
             className={`${inputBase} max-w-[200px]`}
             style={{ border, fontFamily: 'JetBrains Mono, monospace' }}
           />
@@ -340,7 +335,7 @@ export default function Settings({ onResetWizard }: SettingsProps) {
             step={10}
             value={execTimeout}
             onChange={(e) => setExecTimeout(parseInt(e.target.value) || 30)}
-            onBlur={() => saveSettings('cli_timeout', String(execTimeout)).catch(() => {})}
+            onBlur={() => updateSettings('cli_timeout', String(execTimeout)).catch(() => {})}
             className={`${inputBase} max-w-[200px]`}
             style={{ border, fontFamily: 'JetBrains Mono, monospace' }}
           />

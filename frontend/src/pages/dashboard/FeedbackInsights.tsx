@@ -1,6 +1,6 @@
 // AOS — Feedback Insights Dashboard
 import { useState, useEffect } from 'react';
-import { ThumbsUp, ThumbsDown, Star, TrendingUp, BarChart3, Filter } from 'lucide-react';
+import { ThumbsUp, ThumbsDown, Star, TrendingUp, BarChart3 } from 'lucide-react';
 import { useAgent } from '../../hooks/useAgent';
 
 interface FeedbackEntry {
@@ -13,7 +13,7 @@ interface FeedbackEntry {
 }
 
 export default function FeedbackInsights() {
-  const { getFeedbackHistory, getStats } = useAgent();
+  const { getRecentFeedback } = useAgent();
   const [feedback, setFeedback] = useState<FeedbackEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'positive' | 'negative'>('all');
@@ -21,7 +21,7 @@ export default function FeedbackInsights() {
   useEffect(() => {
     (async () => {
       try {
-        const result = await getFeedbackHistory?.();
+        const result = await getRecentFeedback?.();
         if (result?.entries) setFeedback(result.entries);
       } catch { /* no data yet */ }
       setLoading(false);

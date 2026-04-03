@@ -290,7 +290,7 @@ export default function Readiness() {
             <div className="space-y-2">
               {partners.length === 0 ? (
                 <EmptyState
-                  icon={<Building2 size={34} />}
+                  icon={Building2}
                   title="No partners yet"
                   description="Use the form to seed the partner registry and then certify integrations one by one."
                 />

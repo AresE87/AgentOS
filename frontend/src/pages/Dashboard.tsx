@@ -112,9 +112,9 @@ export default function Dashboard({ onResetWizard }: DashboardProps) {
         if (!status.providers || status.providers.length === 0) {
           setSetupIncomplete(true);
         }
-        if (status.state === 'working' || status.state === 'busy') {
+        if (status.state === 'running') {
           setAgentState('working');
-          setAgentTask(status.current_task || 'Processing...');
+          setAgentTask('Processing...');
         }
       })
       .catch(() => setSetupIncomplete(true));
