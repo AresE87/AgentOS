@@ -4,6 +4,7 @@ use tauri::Emitter;
 
 use super::types::*;
 use crate::tools::{ToolRegistry, ToolContext, check_tool_permission, PermissionDecision};
+use crate::tools::hooks::{HookRegistry, HookResult};
 use crate::brain::Gateway;
 use crate::config::Settings;
 
@@ -30,6 +31,38 @@ impl AgentRuntime {
         kill_switch: &Arc<AtomicBool>,
         event_emitter: Option<&tauri::AppHandle>,
     ) -> Result<AgentTurnResult, String> {
+        // Create hook registry with default hooks
+        let hook_registry = HookRegistry::with_defaults();
+
+        self.run_turn_with_hooks(
+            user_message,
+            system_prompt,
+            tools_json,
+            tool_registry,
+            tool_ctx,
+            gateway,
+            settings,
+            kill_switch,
+            event_emitter,
+            &hook_registry,
+        )
+        .await
+    }
+
+    /// Inner run_turn that accepts a hook registry — used by sub-agents too.
+    pub async fn run_turn_with_hooks(
+        &self,
+        user_message: &str,
+        system_prompt: &str,
+        tools_json: &[serde_json::Value],
+        tool_registry: &ToolRegistry,
+        tool_ctx: &ToolContext,
+        gateway: &Gateway,
+        settings: &Settings,
+        kill_switch: &Arc<AtomicBool>,
+        event_emitter: Option<&tauri::AppHandle>,
+        hook_registry: &HookRegistry,
+    ) -> Result<AgentTurnResult, String> {
         let mut messages: Vec<serde_json::Value> = vec![serde_json::json!({
             "role": "user",
             "content": user_message
@@ -44,6 +77,15 @@ impl AgentRuntime {
             // Check kill switch
             if kill_switch.load(Ordering::Relaxed) {
                 return Err("Task cancelled".into());
+            }
+
+            // ── Context compaction check ───────────────────────────────
+            if super::compaction::should_compact(&messages, 80_000) {
+                if let Ok(compacted) =
+                    super::compaction::compact_messages(&messages, 4, gateway, settings).await
+                {
+                    messages = compacted;
+                }
             }
 
             // Call LLM with tools
@@ -117,6 +159,33 @@ impl AgentRuntime {
                     .cloned()
                     .unwrap_or(serde_json::json!({}));
 
+                // ── Pre-hooks ──────────────────────────────────────────
+                let pre_result = hook_registry.run_pre_hooks(tool_name, &tool_input, tool_ctx);
+                let effective_input = match pre_result {
+                    HookResult::Continue => tool_input.clone(),
+                    HookResult::ModifyInput(modified) => modified,
+                    HookResult::Block(reason) => {
+                        let blocked_output = crate::tools::ToolOutput {
+                            content: format!("Blocked by safety hook: {}", reason),
+                            is_error: true,
+                        };
+                        tool_records.push(ToolCallRecord {
+                            tool_name: tool_name.to_string(),
+                            input_preview: tool_input.to_string().chars().take(200).collect(),
+                            output_preview: blocked_output.content.chars().take(200).collect(),
+                            success: false,
+                            duration_ms: 0,
+                        });
+                        tool_results.push(serde_json::json!({
+                            "type": "tool_result",
+                            "tool_use_id": tool_id,
+                            "content": blocked_output.content,
+                            "is_error": true,
+                        }));
+                        continue;
+                    }
+                };
+
                 // Emit tool_start event
                 if let Some(handle) = event_emitter {
                     let _ = handle.emit(
@@ -132,10 +201,10 @@ impl AgentRuntime {
 
                 // Execute via registry
                 let result = if let Some(tool) = tool_registry.get(tool_name) {
-                    let perm = check_tool_permission(tool, &tool_input, tool_ctx);
+                    let perm = check_tool_permission(tool, &effective_input, tool_ctx);
                     match perm {
                         PermissionDecision::Allowed => {
-                            match tool.execute(tool_input.clone(), tool_ctx).await {
+                            match tool.execute(effective_input.clone(), tool_ctx).await {
                                 Ok(output) => output,
                                 Err(e) => crate::tools::ToolOutput {
                                     content: format!("Error: {}", e),
@@ -149,7 +218,7 @@ impl AgentRuntime {
                         },
                         PermissionDecision::NeedsApproval(_reason) => {
                             // For now, auto-approve. Pattern 5 will add real approval flow.
-                            match tool.execute(tool_input.clone(), tool_ctx).await {
+                            match tool.execute(effective_input.clone(), tool_ctx).await {
                                 Ok(output) => output,
                                 Err(e) => crate::tools::ToolOutput {
                                     content: format!("Error: {}", e),
@@ -166,6 +235,52 @@ impl AgentRuntime {
                 };
 
                 let duration = start.elapsed().as_millis() as u64;
+
+                // ── Sub-agent detection ────────────────────────────────
+                let result = if result.content.starts_with("__SPAWN_AGENT__:") {
+                    // Parse: __SPAWN_AGENT__:name:max_iter:instructions
+                    let parts: Vec<&str> = result.content.splitn(4, ':').collect();
+                    if parts.len() == 4 {
+                        let agent_name = parts[1];
+                        let max_iter = parts[2].parse::<u32>().unwrap_or(10);
+                        let instructions = parts[3];
+
+                        // Box::pin the recursive sub-agent call to break the
+                        // infinitely-sized future cycle.
+                        match Box::pin(super::sub_agent::SubAgentManager::execute_sub_agent(
+                            agent_name,
+                            instructions,
+                            max_iter,
+                            tool_registry,
+                            gateway,
+                            settings,
+                            tool_ctx,
+                            0,
+                            event_emitter,
+                        ))
+                        .await
+                        {
+                            Ok(sub_result) => crate::tools::ToolOutput {
+                                content: format!(
+                                    "[Sub-agent '{}' completed in {} iterations]\n\n{}",
+                                    agent_name, sub_result.iterations, sub_result.text
+                                ),
+                                is_error: false,
+                            },
+                            Err(e) => crate::tools::ToolOutput {
+                                content: format!("Sub-agent '{}' failed: {}", agent_name, e),
+                                is_error: true,
+                            },
+                        }
+                    } else {
+                        result
+                    }
+                } else {
+                    result
+                };
+
+                // ── Post-hooks ─────────────────────────────────────────
+                hook_registry.run_post_hooks(tool_name, &effective_input, &result, tool_ctx);
 
                 tool_records.push(ToolCallRecord {
                     tool_name: tool_name.to_string(),

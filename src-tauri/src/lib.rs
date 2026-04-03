@@ -408,6 +408,8 @@ pub struct AppState {
     pub affiliate_program: Arc<tokio::sync::Mutex<economy::affiliate::AffiliateProgram>>,
     /// P1: Tool Registry for agentic loop
     pub tool_registry: Arc<tools::ToolRegistry>,
+    /// P4: Session persistence store (JSONL)
+    pub session_store: Arc<agent_loop::session::SessionStore>,
 }
 
 // ── R44: Cloud Mesh Relay commands ──────────────────────────────────
@@ -2010,6 +2012,32 @@ async fn cmd_save_auto_recording(
 fn cmd_list_tools(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let defs = state.tool_registry.definitions();
     serde_json::to_value(&defs).map_err(|e| e.to_string())
+}
+
+// ── P4: Session Persistence Commands ─────────────────────────
+
+#[tauri::command]
+fn cmd_list_sessions(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let sessions = state.session_store.list_sessions()?;
+    serde_json::to_value(&sessions).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn cmd_load_session(
+    session_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let messages = state.session_store.load_session(&session_id)?;
+    serde_json::to_value(&messages).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn cmd_delete_session(
+    session_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    state.session_store.delete_session(&session_id)?;
+    Ok(serde_json::json!({ "deleted": session_id }))
 }
 
 // ── P1: Agentic Tool Loop Command ────────────────────────────
@@ -10785,6 +10813,10 @@ pub fn run() {
                     tools::builtins::register_all(&mut registry);
                     Arc::new(registry)
                 },
+                // P4: Session persistence store
+                session_store: Arc::new(agent_loop::session::SessionStore::new(
+                    app_dir.join("sessions"),
+                )),
             });
 
             // ── R35: Deferred startup — plugin discovery in background ────
@@ -11910,6 +11942,10 @@ pub fn run() {
             cmd_agent_run,
             // P2: Tool Registry
             cmd_list_tools,
+            // P4: Session Persistence
+            cmd_list_sessions,
+            cmd_load_session,
+            cmd_delete_session,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");
