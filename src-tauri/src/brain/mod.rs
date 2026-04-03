@@ -1,7 +1,7 @@
 mod classifier;
 mod gateway;
 pub mod local_llm;
-mod providers;
+pub mod providers;
 mod router;
 mod types;
 

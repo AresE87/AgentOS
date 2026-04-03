@@ -76,6 +76,8 @@ pub mod webhooks;
 pub mod widget;
 pub mod widgets;
 pub mod workflows;
+pub mod tools;
+pub mod agent_loop;
 
 use base64::Engine as _;
 use std::path::PathBuf;
@@ -167,8 +169,8 @@ fn scrub_persisted_secrets(settings: &mut config::Settings) {
     settings.discord_bot_token.clear();
 }
 
-fn load_secret_from_vault(vault: &vault::SecureVault, key: &str) -> String {
-    vault.retrieve(key).ok().flatten().unwrap_or_default()
+fn load_secret_from_vault(vault: &vault::SecureVault, key: &str) -> Option<String> {
+    vault.retrieve(key).ok().flatten().filter(|s| !s.is_empty())
 }
 
 fn hydrate_settings_from_vault(
@@ -178,17 +180,19 @@ fn hydrate_settings_from_vault(
     if !vault.is_unlocked() {
         return Err("Vault locked".to_string());
     }
-    settings.anthropic_api_key = load_secret_from_vault(vault, "ANTHROPIC_API_KEY");
-    settings.openai_api_key = load_secret_from_vault(vault, "OPENAI_API_KEY");
-    settings.google_api_key = load_secret_from_vault(vault, "GOOGLE_API_KEY");
-    settings.telegram_bot_token = load_secret_from_vault(vault, "TELEGRAM_BOT_TOKEN");
-    settings.whatsapp_access_token = load_secret_from_vault(vault, "WHATSAPP_ACCESS_TOKEN");
-    settings.relay_auth_token = load_secret_from_vault(vault, "RELAY_AUTH_TOKEN");
-    settings.stripe_secret_key = load_secret_from_vault(vault, "STRIPE_SECRET_KEY");
-    settings.stripe_webhook_secret = load_secret_from_vault(vault, "STRIPE_WEBHOOK_SECRET");
-    settings.google_client_secret = load_secret_from_vault(vault, "GOOGLE_CLIENT_SECRET");
-    settings.google_refresh_token = load_secret_from_vault(vault, "GOOGLE_REFRESH_TOKEN");
-    settings.discord_bot_token = load_secret_from_vault(vault, "DISCORD_BOT_TOKEN");
+    // Only overwrite settings with vault values if vault actually has them.
+    // This preserves API keys from config.json when vault is empty (first run).
+    if let Some(v) = load_secret_from_vault(vault, "ANTHROPIC_API_KEY") { settings.anthropic_api_key = v; }
+    if let Some(v) = load_secret_from_vault(vault, "OPENAI_API_KEY") { settings.openai_api_key = v; }
+    if let Some(v) = load_secret_from_vault(vault, "GOOGLE_API_KEY") { settings.google_api_key = v; }
+    if let Some(v) = load_secret_from_vault(vault, "TELEGRAM_BOT_TOKEN") { settings.telegram_bot_token = v; }
+    if let Some(v) = load_secret_from_vault(vault, "WHATSAPP_ACCESS_TOKEN") { settings.whatsapp_access_token = v; }
+    if let Some(v) = load_secret_from_vault(vault, "RELAY_AUTH_TOKEN") { settings.relay_auth_token = v; }
+    if let Some(v) = load_secret_from_vault(vault, "STRIPE_SECRET_KEY") { settings.stripe_secret_key = v; }
+    if let Some(v) = load_secret_from_vault(vault, "STRIPE_WEBHOOK_SECRET") { settings.stripe_webhook_secret = v; }
+    if let Some(v) = load_secret_from_vault(vault, "GOOGLE_CLIENT_SECRET") { settings.google_client_secret = v; }
+    if let Some(v) = load_secret_from_vault(vault, "GOOGLE_REFRESH_TOKEN") { settings.google_refresh_token = v; }
+    if let Some(v) = load_secret_from_vault(vault, "DISCORD_BOT_TOKEN") { settings.discord_bot_token = v; }
     Ok(())
 }
 
@@ -402,6 +406,8 @@ pub struct AppState {
         Arc<tokio::sync::Mutex<economy::creator_analytics::CreatorAnalyticsEngine>>,
     /// R149: Affiliate Program
     pub affiliate_program: Arc<tokio::sync::Mutex<economy::affiliate::AffiliateProgram>>,
+    /// P1: Tool Registry for agentic loop
+    pub tool_registry: Arc<tools::ToolRegistry>,
 }
 
 // ── R44: Cloud Mesh Relay commands ──────────────────────────────────
@@ -1996,6 +2002,75 @@ async fn cmd_save_auto_recording(
         "path": path.to_string_lossy(),
         "steps": playbook.steps.len(),
     }))
+}
+
+// ── P2: Tool Registry IPC ────────────────────────────────────
+
+#[tauri::command]
+fn cmd_list_tools(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let defs = state.tool_registry.definitions();
+    serde_json::to_value(&defs).map_err(|e| e.to_string())
+}
+
+// ── P1: Agentic Tool Loop Command ────────────────────────────
+
+#[tauri::command]
+async fn cmd_agent_run(
+    message: String,
+    state: tauri::State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<serde_json::Value, String> {
+    let settings = { state.settings.lock().map_err(|e| e.to_string())?.clone() };
+    let gateway = state.gateway.lock().await;
+
+    let kill_switch = Arc::new(AtomicBool::new(false));
+    let runtime = agent_loop::AgentRuntime::new(agent_loop::AgentLoopConfig::default());
+
+    // Build tool definitions in Anthropic format
+    let tool_defs: Vec<serde_json::Value> = state
+        .tool_registry
+        .definitions()
+        .iter()
+        .map(|d| {
+            serde_json::json!({
+                "name": d.name,
+                "description": d.description,
+                "input_schema": d.input_schema,
+            })
+        })
+        .collect();
+
+    let ctx = tools::ToolContext {
+        agent_name: "AgentOS".to_string(),
+        task_id: uuid::Uuid::new_v4().to_string(),
+        db_path: state.db_path.clone(),
+        app_data_dir: state
+            .db_path
+            .parent()
+            .unwrap_or(std::path::Path::new("."))
+            .to_path_buf(),
+        kill_switch: kill_switch.clone(),
+    };
+
+    let system_prompt = "You are AgentOS, a desktop AI agent. You can use tools to help the user. \
+        When a task requires executing commands, reading files, or interacting with the screen, \
+        use the appropriate tool. Respond naturally for simple conversations.";
+
+    let result = runtime
+        .run_turn(
+            &message,
+            system_prompt,
+            &tool_defs,
+            &state.tool_registry,
+            &ctx,
+            &gateway,
+            &settings,
+            &kill_switch,
+            Some(&app),
+        )
+        .await?;
+
+    serde_json::to_value(&result).map_err(|e| e.to_string())
 }
 
 // ── R2: Vision E2E Test Commands ─────────────────────────────
@@ -10704,6 +10779,12 @@ pub fn run() {
                 affiliate_program: Arc::new(tokio::sync::Mutex::new(
                     economy::affiliate::AffiliateProgram::new(),
                 )),
+                // P1: Tool Registry — register all builtin tools
+                tool_registry: {
+                    let mut registry = tools::ToolRegistry::new();
+                    tools::builtins::register_all(&mut registry);
+                    Arc::new(registry)
+                },
             });
 
             // ── R35: Deferred startup — plugin discovery in background ────
@@ -11825,6 +11906,10 @@ pub fn run() {
             cmd_stop_auto_recording,
             cmd_get_auto_recording_status,
             cmd_save_auto_recording,
+            // P1: Agentic Tool Loop
+            cmd_agent_run,
+            // P2: Tool Registry
+            cmd_list_tools,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");

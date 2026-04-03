@@ -168,6 +168,161 @@ impl Providers {
         Ok((content, tokens_in, tokens_out))
     }
 
+    // ── Tool-use variants (for agentic loop) ──────────────────────
+
+    pub async fn call_anthropic_with_tools(
+        api_key: &str,
+        model: &str,
+        messages: &[serde_json::Value],
+        tools: &[serde_json::Value],
+        system_prompt: Option<&str>,
+        max_tokens: u32,
+    ) -> Result<serde_json::Value, String> {
+        let client = reqwest::Client::new();
+
+        let mut body = json!({
+            "model": model,
+            "max_tokens": max_tokens,
+            "messages": messages,
+        });
+
+        if !tools.is_empty() {
+            body["tools"] = serde_json::Value::Array(tools.to_vec());
+        }
+
+        if let Some(sys) = system_prompt {
+            body["system"] = serde_json::Value::String(sys.to_string());
+        }
+
+        let response = client
+            .post("https://api.anthropic.com/v1/messages")
+            .header("x-api-key", api_key)
+            .header("anthropic-version", "2023-06-01")
+            .header("content-type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("Anthropic API error: {}", e))?;
+
+        let status = response.status();
+        let response_json: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse response: {}", e))?;
+
+        if !status.is_success() {
+            return Err(format!(
+                "Anthropic API error {}: {}",
+                status, response_json
+            ));
+        }
+
+        Ok(response_json)
+    }
+
+    pub async fn call_openai_with_tools(
+        api_key: &str,
+        model: &str,
+        messages: &[serde_json::Value],
+        tools: &[serde_json::Value],
+        max_tokens: u32,
+    ) -> Result<serde_json::Value, String> {
+        let client = reqwest::Client::new();
+
+        // Convert Anthropic-style tool defs to OpenAI function-calling format
+        let openai_tools: Vec<serde_json::Value> = tools
+            .iter()
+            .map(|t| {
+                json!({
+                    "type": "function",
+                    "function": {
+                        "name": t.get("name").and_then(|v| v.as_str()).unwrap_or(""),
+                        "description": t.get("description").and_then(|v| v.as_str()).unwrap_or(""),
+                        "parameters": t.get("input_schema").cloned().unwrap_or(json!({})),
+                    }
+                })
+            })
+            .collect();
+
+        let mut body = json!({
+            "model": model,
+            "max_tokens": max_tokens,
+            "messages": messages,
+        });
+
+        if !openai_tools.is_empty() {
+            body["tools"] = serde_json::Value::Array(openai_tools);
+        }
+
+        let response = client
+            .post("https://api.openai.com/v1/chat/completions")
+            .header("Authorization", format!("Bearer {}", api_key))
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("OpenAI API error: {}", e))?;
+
+        let status = response.status();
+        let data: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse OpenAI response: {}", e))?;
+
+        if !status.is_success() {
+            return Err(format!("OpenAI API error {}: {}", status, data));
+        }
+
+        // Normalize OpenAI response to Anthropic-like format for the agent loop
+        let choice = &data["choices"][0];
+        let message = &choice["message"];
+        let finish_reason = choice["finish_reason"].as_str().unwrap_or("stop");
+
+        let mut content_blocks: Vec<serde_json::Value> = vec![];
+
+        // Add text content if present
+        if let Some(text) = message["content"].as_str() {
+            if !text.is_empty() {
+                content_blocks.push(json!({
+                    "type": "text",
+                    "text": text,
+                }));
+            }
+        }
+
+        // Add tool calls if present
+        if let Some(tool_calls) = message["tool_calls"].as_array() {
+            for tc in tool_calls {
+                let func = &tc["function"];
+                let input: serde_json::Value = func["arguments"]
+                    .as_str()
+                    .and_then(|s| serde_json::from_str(s).ok())
+                    .unwrap_or(json!({}));
+                content_blocks.push(json!({
+                    "type": "tool_use",
+                    "id": tc["id"].as_str().unwrap_or(""),
+                    "name": func["name"].as_str().unwrap_or(""),
+                    "input": input,
+                }));
+            }
+        }
+
+        let stop_reason = match finish_reason {
+            "tool_calls" => "tool_use",
+            "stop" => "end_turn",
+            other => other,
+        };
+
+        Ok(json!({
+            "content": content_blocks,
+            "stop_reason": stop_reason,
+            "usage": {
+                "input_tokens": data["usage"]["prompt_tokens"].as_u64().unwrap_or(0),
+                "output_tokens": data["usage"]["completion_tokens"].as_u64().unwrap_or(0),
+            }
+        }))
+    }
+
     // ── Vision (multimodal) variants ──────────────────────────────
 
     pub async fn call_anthropic_vision(

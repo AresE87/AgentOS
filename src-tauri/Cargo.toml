@@ -37,6 +37,7 @@ tauri-plugin-updater = "2"
 urlencoding = "2"
 tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
 futures-util = "0.3"
+async-trait = "0.1"
 
 [dev-dependencies]
 tempfile = "3"

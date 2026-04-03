@@ -388,6 +388,49 @@ impl Gateway {
         Err("All cheap LLM providers failed — no API keys configured.".to_string())
     }
 
+    /// Complete an LLM call with tool definitions (for agentic loop).
+    /// Returns raw JSON response in Anthropic-normalized format.
+    pub async fn complete_with_tools(
+        &self,
+        messages: &[serde_json::Value],
+        tools: &[serde_json::Value],
+        system_prompt: &str,
+        settings: &Settings,
+    ) -> Result<serde_json::Value, String> {
+        // Try Anthropic first, then OpenAI
+        if !settings.anthropic_api_key.is_empty() {
+            return Providers::call_anthropic_with_tools(
+                &settings.anthropic_api_key,
+                "claude-sonnet-4-20250514",
+                messages,
+                tools,
+                Some(system_prompt),
+                4096,
+            )
+            .await;
+        }
+
+        if !settings.openai_api_key.is_empty() {
+            // Build OpenAI-style messages (inject system prompt)
+            let mut oai_messages = vec![serde_json::json!({
+                "role": "system",
+                "content": system_prompt
+            })];
+            oai_messages.extend_from_slice(messages);
+
+            return Providers::call_openai_with_tools(
+                &settings.openai_api_key,
+                "gpt-4o",
+                &oai_messages,
+                tools,
+                4096,
+            )
+            .await;
+        }
+
+        Err("No LLM API key configured for tool-use calls".into())
+    }
+
     pub async fn health_check(&self, settings: &Settings) -> serde_json::Value {
         serde_json::json!({
             "anthropic": !settings.anthropic_api_key.is_empty(),
