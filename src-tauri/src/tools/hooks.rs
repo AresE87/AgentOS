@@ -109,21 +109,39 @@ pub struct SafetyHook;
 impl PreToolHook for SafetyHook {
     fn before_tool(&self, tool_name: &str, input: &serde_json::Value, _ctx: &ToolContext) -> HookResult {
         if tool_name == "bash" || tool_name == "execute_command" {
-            // Extract the command string from the input
-            let command = input
-                .get("command")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            if let Some(cmd) = input.get("command").and_then(|v| v.as_str()) {
+                // 6-layer bash validator (supersedes simple sandbox pattern check)
+                match crate::security::bash_validator::validate_command(cmd, false) {
+                    crate::security::bash_validator::ValidationResult::Block { reason } => {
+                        warn!(
+                            tool = tool_name,
+                            command_preview = &cmd[..cmd.len().min(80)],
+                            "safety hook blocked command: {}",
+                            reason
+                        );
+                        return HookResult::Block(reason);
+                    },
+                    crate::security::bash_validator::ValidationResult::Warn { message } => {
+                        warn!(
+                            tool = tool_name,
+                            "bash validator warning: {}",
+                            message
+                        );
+                    },
+                    crate::security::bash_validator::ValidationResult::Allow => {},
+                }
 
-            let sandbox = crate::security::sandbox::CommandSandbox::new();
-            if let Err(reason) = sandbox.validate_command(command) {
-                warn!(
-                    tool = tool_name,
-                    command_preview = &command[..command.len().min(80)],
-                    "safety hook blocked command: {}",
-                    reason
-                );
-                return HookResult::Block(reason);
+                // Also run legacy sandbox patterns for defense-in-depth
+                let sandbox = crate::security::sandbox::CommandSandbox::new();
+                if let Err(reason) = sandbox.validate_command(cmd) {
+                    warn!(
+                        tool = tool_name,
+                        command_preview = &cmd[..cmd.len().min(80)],
+                        "sandbox blocked command: {}",
+                        reason
+                    );
+                    return HookResult::Block(reason);
+                }
             }
         }
         HookResult::Continue

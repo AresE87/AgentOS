@@ -26,6 +26,18 @@ impl Tool for BashTool {
         let command = input.get("command").and_then(|v| v.as_str())
             .ok_or_else(|| ToolError("Missing 'command' parameter".into()))?;
 
+        // 6-layer bash validation
+        let validation = crate::security::bash_validator::validate_command(command, false);
+        match validation {
+            crate::security::bash_validator::ValidationResult::Block { reason } => {
+                return Ok(ToolOutput { content: format!("BLOCKED: {}", reason), is_error: true });
+            },
+            crate::security::bash_validator::ValidationResult::Warn { message } => {
+                tracing::warn!("Bash warning: {}", message);
+            },
+            crate::security::bash_validator::ValidationResult::Allow => {},
+        }
+
         let output = if cfg!(windows) {
             tokio::process::Command::new("powershell")
                 .args(&["-NoProfile", "-NonInteractive", "-Command", command])
