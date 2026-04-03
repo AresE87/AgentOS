@@ -1383,6 +1383,9 @@ export function useAgent() {
     const checkForUpdate = () => callInvoke<any>('check_for_update');
     const getCurrentVersion = () => callInvoke<{ version: string }>('get_current_version');
 
+    // P1: Agentic Tool Loop — explicit agent_run endpoint
+    const agentRun = (message: string) => callInvoke<any>('agent_run', { message });
+
     return {
         getStatus, getPlatformSupport, processMessage, getTasks, getPlaybooks, setActivePlaybook,
         getSettings, updateSettings, healthCheck, getActiveChain, getChainHistory,
@@ -1634,6 +1637,8 @@ export function useAgent() {
         affiliateCreate, affiliateEarnings, affiliateList, affiliateTrack,
         // C2: Auto-Update
         checkForUpdate, getCurrentVersion,
+        // P1: Agentic Tool Loop
+        agentRun,
     };
 }
 

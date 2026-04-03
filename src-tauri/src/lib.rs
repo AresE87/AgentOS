@@ -863,60 +863,194 @@ async fn cmd_process_message(
         }));
     }
 
-    // Regular chat path for non-PC tasks
-    let registry = agents::AgentRegistry::new();
+    // ── Agentic Tool Loop (primary path) ──────────────────────────
+    // Try the full agent loop with tool_use support first.
+    // Falls back to legacy single-shot LLM call if the tool-use API fails.
+    let start_time = std::time::Instant::now();
 
-    // Use async agent selection with LLM fallback for weak keyword matches
+    let agent_system_prompt = "\
+You are AgentOS, a desktop AI agent running on the user's PC.
+
+You have access to tools for:
+- Executing shell commands (bash)
+- Reading/writing/editing files (read_file, write_file, edit_file)
+- Searching files (search_files)
+- Capturing screenshots (screenshot)
+- Clicking and typing (click, type_text)
+- Browsing the web (web_browse, web_search)
+- Managing calendar events (calendar)
+- Sending emails (email)
+- Searching memory (memory_search)
+- Spawning sub-agents for complex tasks (spawn_agent)
+
+For simple questions, respond directly without using tools.
+For tasks that require action (running commands, reading files, etc.), use the appropriate tool.
+For complex multi-step tasks, use spawn_agent to delegate subtasks to specialized sub-agents.
+
+Always be helpful, precise, and use tools judiciously.";
+
+    let kill_switch = state.kill_switch.clone();
+    let runtime = agent_loop::AgentRuntime::new(agent_loop::AgentLoopConfig::default());
+
+    // Build tool definitions from the registry
+    let tool_defs: Vec<serde_json::Value> = state
+        .tool_registry
+        .definitions()
+        .iter()
+        .map(|d| {
+            serde_json::json!({
+                "name": d.name,
+                "description": d.description,
+                "input_schema": d.input_schema,
+            })
+        })
+        .collect();
+
+    let ctx = tools::ToolContext {
+        agent_name: "AgentOS".to_string(),
+        task_id: uuid::Uuid::new_v4().to_string(),
+        db_path: state.db_path.clone(),
+        app_data_dir: state
+            .db_path
+            .parent()
+            .unwrap_or(std::path::Path::new("."))
+            .to_path_buf(),
+        kill_switch: kill_switch.clone(),
+    };
+
     let gateway = state.gateway.lock().await;
-    let agent = registry.find_best_async(&text, &gateway, &settings).await;
-    let agent_name = agent.name.clone();
-    let agent_level = format!("{:?}", agent.level);
-    let system_prompt = agent.system_prompt.clone();
 
-    tracing::info!(agent = %agent_name, level = %agent_level, "Selected agent for task");
+    let agent_result = runtime
+        .run_turn(
+            &text,
+            agent_system_prompt,
+            &tool_defs,
+            &state.tool_registry,
+            &ctx,
+            &gateway,
+            &settings,
+            &kill_switch,
+            Some(&app_handle),
+        )
+        .await;
 
-    let response = gateway
-        .complete_with_system(&text, Some(&system_prompt), &settings)
-        .await
-        .map_err(|e| e.to_string())?;
-    drop(gateway);
+    match agent_result {
+        Ok(turn) => {
+            let duration_ms = start_time.elapsed().as_millis() as u64;
+            let total_tokens = turn.total_input_tokens + turn.total_output_tokens;
+            // Rough cost estimate: $3/MTok input + $15/MTok output (Claude Sonnet class)
+            let cost = (turn.total_input_tokens as f64 * 3.0
+                + turn.total_output_tokens as f64 * 15.0)
+                / 1_000_000.0;
 
-    // Store in DB and increment daily usage counters
-    {
-        let db = state.db.lock().map_err(|e| e.to_string())?;
-        db.insert_task(&text, &response)
-            .map_err(|e| e.to_string())?;
-        // C1: Persist daily usage for billing enforcement
-        let total_tokens = response.tokens_in + response.tokens_out;
-        let _ = db.increment_daily_usage(total_tokens as i64);
-    }
+            // Persist usage
+            {
+                let db = state.db.lock().map_err(|e| e.to_string())?;
+                let _ = db.increment_daily_usage(total_tokens as i64);
+            }
 
-    // R29: Audit log
-    {
-        let preview = if text.len() > 120 {
-            &text[..120]
-        } else {
-            &text
-        };
-        if let Ok(conn) = rusqlite::Connection::open(&state.db_path) {
-            let _ = enterprise::AuditLog::ensure_table(&conn);
-            let _ = enterprise::AuditLog::log(
-                &conn,
-                "task_executed",
-                serde_json::json!({ "text": preview }),
+            // R29: Audit log
+            {
+                let preview = if text.len() > 120 { &text[..120] } else { &text };
+                if let Ok(conn) = rusqlite::Connection::open(&state.db_path) {
+                    let _ = enterprise::AuditLog::ensure_table(&conn);
+                    let _ = enterprise::AuditLog::log(
+                        &conn,
+                        "task_executed",
+                        serde_json::json!({ "text": preview, "agent_loop": true }),
+                    );
+                }
+            }
+
+            let tool_calls: Vec<serde_json::Value> = turn
+                .tool_calls_made
+                .iter()
+                .map(|tc| {
+                    serde_json::json!({
+                        "name": tc.tool_name,
+                        "success": tc.success,
+                    })
+                })
+                .collect();
+
+            drop(gateway);
+
+            Ok(serde_json::json!({
+                "response": turn.text,
+                "agent": "AgentOS",
+                "model": "anthropic/claude-sonnet",
+                "cost": cost,
+                "duration_ms": duration_ms,
+                "input_tokens": turn.total_input_tokens,
+                "output_tokens": turn.total_output_tokens,
+                "tool_calls": tool_calls,
+                "iterations": turn.iterations,
+                "stop_reason": turn.stop_reason,
+                // Legacy compat fields
+                "task_id": ctx.task_id,
+                "status": "completed",
+                "output": turn.text,
+            }))
+        }
+        Err(agent_err) => {
+            // ── Fallback: legacy single-shot LLM call ──────────────────
+            tracing::warn!(
+                error = %agent_err,
+                "Agent loop failed, falling back to single-shot LLM"
             );
+
+            let registry = agents::AgentRegistry::new();
+            let agent = registry.find_best_async(&text, &gateway, &settings).await;
+            let agent_name = agent.name.clone();
+            let agent_level = format!("{:?}", agent.level);
+            let system_prompt = agent.system_prompt.clone();
+
+            tracing::info!(agent = %agent_name, level = %agent_level, "Fallback agent selected");
+
+            let response = gateway
+                .complete_with_system(&text, Some(&system_prompt), &settings)
+                .await
+                .map_err(|e| e.to_string())?;
+            drop(gateway);
+
+            // Store in DB and increment daily usage counters
+            {
+                let db = state.db.lock().map_err(|e| e.to_string())?;
+                db.insert_task(&text, &response)
+                    .map_err(|e| e.to_string())?;
+                let total_tokens = response.tokens_in + response.tokens_out;
+                let _ = db.increment_daily_usage(total_tokens as i64);
+            }
+
+            // R29: Audit log
+            {
+                let preview = if text.len() > 120 { &text[..120] } else { &text };
+                if let Ok(conn) = rusqlite::Connection::open(&state.db_path) {
+                    let _ = enterprise::AuditLog::ensure_table(&conn);
+                    let _ = enterprise::AuditLog::log(
+                        &conn,
+                        "task_executed",
+                        serde_json::json!({ "text": preview, "fallback": true }),
+                    );
+                }
+            }
+
+            Ok(serde_json::json!({
+                "response": response.content,
+                "agent": format!("{} ({})", agent_name, agent_level),
+                "model": response.model,
+                "cost": response.cost,
+                "duration_ms": response.duration_ms,
+                "input_tokens": response.tokens_in,
+                "output_tokens": response.tokens_out,
+                "tool_calls": [],
+                // Legacy compat fields
+                "task_id": response.task_id,
+                "status": "completed",
+                "output": response.content,
+            }))
         }
     }
-
-    Ok(serde_json::json!({
-        "task_id": response.task_id,
-        "status": "completed",
-        "output": response.content,
-        "model": response.model,
-        "cost": response.cost,
-        "duration_ms": response.duration_ms,
-        "agent": format!("{} ({})", agent_name, agent_level),
-    }))
 }
 
 /// Detect if a message is a PC action task that needs the pipeline engine
@@ -2080,9 +2214,26 @@ async fn cmd_agent_run(
         kill_switch: kill_switch.clone(),
     };
 
-    let system_prompt = "You are AgentOS, a desktop AI agent. You can use tools to help the user. \
-        When a task requires executing commands, reading files, or interacting with the screen, \
-        use the appropriate tool. Respond naturally for simple conversations.";
+    let system_prompt = "\
+You are AgentOS, a desktop AI agent running on the user's PC.
+
+You have access to tools for:
+- Executing shell commands (bash)
+- Reading/writing/editing files (read_file, write_file, edit_file)
+- Searching files (search_files)
+- Capturing screenshots (screenshot)
+- Clicking and typing (click, type_text)
+- Browsing the web (web_browse, web_search)
+- Managing calendar events (calendar)
+- Sending emails (email)
+- Searching memory (memory_search)
+- Spawning sub-agents for complex tasks (spawn_agent)
+
+For simple questions, respond directly without using tools.
+For tasks that require action (running commands, reading files, etc.), use the appropriate tool.
+For complex multi-step tasks, use spawn_agent to delegate subtasks to specialized sub-agents.
+
+Always be helpful, precise, and use tools judiciously.";
 
     let result = runtime
         .run_turn(
