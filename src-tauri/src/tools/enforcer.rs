@@ -122,4 +122,60 @@ mod tests {
             "/home/user/project"
         ));
     }
+
+    // ── H1: Additional targeted tests ────────────────────────────
+
+    #[test]
+    fn blocks_windows_system() {
+        assert!(matches!(
+            check_file_write("C:\\Windows\\test.txt", "C:\\Users\\test"),
+            EnforcementResult::Denied { .. }
+        ));
+    }
+
+    #[test]
+    fn allows_workspace_write() {
+        assert!(matches!(
+            check_file_write("C:/Users/test/project/file.txt", "C:/Users/test/project"),
+            EnforcementResult::Allowed
+        ));
+    }
+
+    #[test]
+    fn blocks_etc() {
+        assert!(matches!(
+            check_file_write("/etc/passwd", "/home/user"),
+            EnforcementResult::Denied { .. }
+        ));
+    }
+
+    #[test]
+    fn blocks_program_files() {
+        assert!(matches!(
+            check_file_write("C:\\Program Files\\app\\config.ini", "C:\\Users\\me\\project"),
+            EnforcementResult::Denied { .. }
+        ));
+    }
+
+    #[test]
+    fn blocks_program_files_x86() {
+        assert!(matches!(
+            check_file_write("C:\\Program Files (x86)\\app\\config.ini", "C:\\Users\\me\\project"),
+            EnforcementResult::Denied { .. }
+        ));
+    }
+
+    #[test]
+    fn blocks_unix_boot() {
+        assert!(matches!(
+            check_file_write("/boot/grub/grub.cfg", "/home/user"),
+            EnforcementResult::Denied { .. }
+        ));
+    }
+
+    #[test]
+    fn normalize_handles_mixed_slashes() {
+        assert_eq!(normalize_path("C:\\Users\\me/docs"), "C:/Users/me/docs");
+        assert_eq!(normalize_path("/home/user/"), "/home/user");
+    }
 }

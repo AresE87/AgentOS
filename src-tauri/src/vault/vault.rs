@@ -316,4 +316,50 @@ mod tests {
             Some("sk-test-12345".to_string())
         );
     }
+
+    // ── H1: Additional roundtrip test ────────────────────────────
+
+    #[test]
+    fn encrypt_decrypt_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut vault = SecureVault::new(dir.path());
+        vault.create("roundtrip-pw").unwrap();
+
+        // Store multiple keys
+        vault.store("KEY_A", "value-alpha").unwrap();
+        vault.store("KEY_B", "value-bravo").unwrap();
+        vault.lock();
+
+        // Re-open and verify all values survive roundtrip
+        let mut vault2 = SecureVault::new(dir.path());
+        vault2.unlock("roundtrip-pw").unwrap();
+        assert_eq!(vault2.retrieve("KEY_A").unwrap(), Some("value-alpha".to_string()));
+        assert_eq!(vault2.retrieve("KEY_B").unwrap(), Some("value-bravo".to_string()));
+    }
+
+    // ── H3: Verify encrypted data is not plaintext ───────────────
+
+    #[test]
+    fn encrypted_data_is_not_plaintext() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut vault = SecureVault::new(dir.path());
+        vault.create("secret-pw").unwrap();
+
+        let secret_value = "super-secret-api-key-12345";
+        vault.store("MY_SECRET", secret_value).unwrap();
+
+        // Read raw file bytes and verify the secret is NOT present as plaintext
+        let raw = std::fs::read(dir.path().join("vault.enc")).unwrap();
+        let raw_str = String::from_utf8_lossy(&raw);
+        assert!(
+            !raw_str.contains(secret_value),
+            "Vault file should not contain plaintext secret"
+        );
+        assert!(
+            !raw_str.contains("MY_SECRET"),
+            "Vault file should not contain plaintext key name"
+        );
+        // File must be bigger than just the salt+nonce (44 bytes minimum)
+        assert!(raw.len() > SALT_LEN + NONCE_LEN);
+    }
 }

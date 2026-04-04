@@ -117,4 +117,37 @@ mod tests {
         let data = r#"{"type":"message_delta","delta":{"stop_reason":"end_turn"}}"#;
         assert!(parse_anthropic_sse_event(data).is_none());
     }
+
+    // ── H1: Additional SSE parser tests ──────────────────────────
+
+    #[test]
+    fn parses_text_delta_hello() {
+        let data = r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hello"}}"#;
+        let result = parse_anthropic_sse_event(data);
+        assert!(result.is_some());
+        let delta = result.unwrap();
+        assert_eq!(delta.text.unwrap(), "hello");
+        assert_eq!(delta.delta_type, "text_delta");
+    }
+
+    #[test]
+    fn rejects_invalid_json() {
+        let data = "not valid json at all";
+        assert!(parse_anthropic_sse_event(data).is_none());
+    }
+
+    #[test]
+    fn rejects_missing_type_field() {
+        let data = r#"{"delta":{"type":"text_delta","text":"hello"}}"#;
+        assert!(parse_anthropic_sse_event(data).is_none());
+    }
+
+    #[test]
+    fn parses_tool_use_with_id_and_name() {
+        let data = r#"{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_abc","name":"read_file","input":{}}}"#;
+        let delta = parse_anthropic_sse_event(data).unwrap();
+        assert_eq!(delta.delta_type, "tool_use_start");
+        assert_eq!(delta.tool_name.as_deref(), Some("read_file"));
+        assert_eq!(delta.tool_id.as_deref(), Some("toolu_abc"));
+    }
 }
