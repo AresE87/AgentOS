@@ -1,5 +1,34 @@
 # Changelog
 
+## [11.0.0] - 2026-04-04 -- Agent Teams as a Service
+
+### Added
+- T11-1: Teams Engine backend (`src-tauri/src/teams_engine/`)
+  - `templates.rs`: 5 pre-configured team templates — Marketing, Sales, Support, Content, Finance
+  - Each template includes 5 specialized agents with roles, tools, cron schedules, Spanish descriptions
+  - `TeamTemplate`, `AgentConfig`, `SetupStep`, `TeamConfig` structs with full serde support
+  - `all_templates()` and `get_template(id)` lookups
+  - `runner.rs`: `TeamRunner` with activate, deactivate, get_status, list_active, run_cycle
+  - `TeamStatus` struct tracking agents_running, tasks_completed/failed, total_cost, last_run
+- T11-2: Multi-step Setup Wizard in Teams page
+  - Dynamic field rendering based on template setup_steps (text, select, OAuth, toggle)
+  - Step progress bar, Anterior/Siguiente navigation, Activar Equipo confirmation
+- T11-3: Active Teams Dashboard
+  - Status cards with agent count, tasks completed/failed, cost, last run timestamp
+  - Expandable agent detail view showing each agent's specialist, level, schedule, description
+  - "Ejecutar ahora" manual cycle trigger, "Desactivar" team lifecycle control
+  - Team Gallery with category-colored borders, hover lift/glow, 5 template cards
+- 7 IPC commands: `cmd_get_team_templates`, `cmd_get_team_template`, `cmd_activate_team`,
+  `cmd_deactivate_team`, `cmd_get_team_status`, `cmd_list_active_teams`, `cmd_run_team_cycle`
+- `active_teams` field in AppState for in-memory team state management
+- Teams tab in Dashboard sidebar with Users icon
+- Mock data for all 7 team commands in `mocks/tauri.ts`
+
+### Changed
+- Version bump to 11.0.0 across Cargo.toml, frontend package.json
+- `lib.rs`: added `teams_engine` module, `active_teams` to AppState, 7 new IPC handler registrations
+- `Dashboard.tsx`: added Teams tab, import, route, and Tab type
+
 ## [10.0.0] - 2026-04-04 -- Production Ready
 
 ### Added
