@@ -849,6 +849,20 @@ Always be helpful, precise, and use tools judiciously.";
                 let _ = db.increment_daily_usage(total_tokens as i64);
             }
 
+            // Memory post-capture: save fallback exchange for future reuse
+            {
+                if let Ok(conn) = rusqlite::Connection::open(&state.db_path) {
+                    memory::MemoryStore::remember_exchange(
+                        &conn,
+                        &text,
+                        &response.content,
+                        &[],
+                        "conversation",
+                    )
+                    .ok();
+                }
+            }
+
             // R29: Audit log
             {
                 let preview = if text.len() > 120 {
@@ -4349,6 +4363,27 @@ async fn cmd_memory_reindex(
         "indexed": success,
         "failed": failed
     }))
+}
+
+// ── Enhanced Memory: usage stats + pruning commands ─────────────────
+
+#[tauri::command]
+async fn cmd_get_memory_usage(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    memory::MemoryStore::memory_usage(db.conn())
+}
+
+#[tauri::command]
+async fn cmd_prune_memory(
+    max_memories: u32,
+    min_importance: f64,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let deleted = memory::MemoryStore::prune(db.conn(), max_memories, min_importance)?;
+    Ok(serde_json::json!({ "ok": true, "deleted": deleted }))
 }
 
 // ── C2 RAG: Semantic search and indexing commands ─────────────────
@@ -8929,6 +8964,8 @@ pub fn run() {
             cmd_memory_forget_all,
             cmd_memory_stats,
             cmd_memory_reindex,
+            cmd_get_memory_usage,
+            cmd_prune_memory,
             // R56: Smart Notifications commands
             cmd_get_notifications,
             cmd_mark_notification_read,

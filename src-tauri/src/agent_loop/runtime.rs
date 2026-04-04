@@ -110,6 +110,37 @@ impl AgentRuntime {
         session_id: Option<&str>,
         coordinator_scope: Option<(&str, &str)>,
     ) -> Result<AgentTurnResult, String> {
+        // ── Memory pre-injection: search local memory for similar past tasks ──
+        let memory_context = {
+            if let Ok(conn) = rusqlite::Connection::open(&tool_ctx.db_path) {
+                crate::memory::MemoryStore::find_similar_tasks(&conn, user_message, 3)
+                    .unwrap_or_default()
+            } else {
+                vec![]
+            }
+        };
+
+        // If we found relevant memories, enrich the system prompt so the LLM
+        // has prior context and can answer with fewer tokens / iterations.
+        let enriched_system = if !memory_context.is_empty() {
+            tracing::info!(
+                "Injecting {} local memories as context for this turn",
+                memory_context.len()
+            );
+            format!(
+                "{}\n\n## Memoria local (tareas similares anteriores):\n{}",
+                system_prompt,
+                memory_context
+                    .iter()
+                    .enumerate()
+                    .map(|(i, m)| format!("{}. {}", i + 1, m))
+                    .collect::<Vec<_>>()
+                    .join("\n\n")
+            )
+        } else {
+            system_prompt.to_string()
+        };
+
         let user_msg = serde_json::json!({
             "role": "user",
             "content": user_message
@@ -142,9 +173,9 @@ impl AgentRuntime {
                 }
             }
 
-            // Call LLM with tools
+            // Call LLM with tools (using memory-enriched system prompt)
             let response = gateway
-                .complete_with_tools(&messages, tools_json, system_prompt, settings)
+                .complete_with_tools(&messages, tools_json, &enriched_system, settings)
                 .await?;
 
             // Extract usage
@@ -255,6 +286,23 @@ impl AgentRuntime {
             // If no tool calls, we're done
             if tool_uses.is_empty() || stop_reason == "end_turn" {
                 final_text = text_parts.join("\n");
+
+                // ── Memory post-capture: save this exchange for future reuse ──
+                if !final_text.is_empty() {
+                    if let Ok(conn) = rusqlite::Connection::open(&tool_ctx.db_path) {
+                        let tools_used: Vec<String> =
+                            tool_records.iter().map(|t| t.tool_name.clone()).collect();
+                        crate::memory::MemoryStore::remember_exchange(
+                            &conn,
+                            user_message,
+                            &final_text,
+                            &tools_used,
+                            "conversation",
+                        )
+                        .ok();
+                    }
+                }
+
                 return Ok(AgentTurnResult {
                     text: final_text,
                     tool_calls_made: tool_records,
@@ -462,6 +510,22 @@ impl AgentRuntime {
                         "total_tokens": total_input + total_output,
                     }),
                 );
+            }
+        }
+
+        // ── Memory post-capture: save exchange even on max_iterations ──
+        if !final_text.is_empty() {
+            if let Ok(conn) = rusqlite::Connection::open(&tool_ctx.db_path) {
+                let tools_used: Vec<String> =
+                    tool_records.iter().map(|t| t.tool_name.clone()).collect();
+                crate::memory::MemoryStore::remember_exchange(
+                    &conn,
+                    user_message,
+                    &final_text,
+                    &tools_used,
+                    "conversation",
+                )
+                .ok();
             }
         }
 

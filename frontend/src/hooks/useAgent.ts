@@ -451,6 +451,10 @@ export function useAgent() {
         callInvoke<any>('memory_stats');
     const memoryReindex = () =>
         callInvoke<any>('memory_reindex');
+    const getMemoryUsage = () =>
+        callInvoke<any>('get_memory_usage');
+    const pruneMemory = (maxMemories: number, minImportance: number) =>
+        callInvoke<any>('prune_memory', { max_memories: maxMemories, min_importance: minImportance });
 
     // R56: Smart Notifications
     const getNotifications = () => callInvoke<any>('get_notifications');
@@ -1552,7 +1556,7 @@ export function useAgent() {
         // R53: Natural Language Triggers
         parseNLTrigger, createTriggerFromNL, listAllTriggers,
         // R54: Agent Memory (RAG Local)
-        memoryStore, memorySearch, memoryList, memoryDelete, memoryForgetAll, memoryStats, memoryReindex,
+        memoryStore, memorySearch, memoryList, memoryDelete, memoryForgetAll, memoryStats, memoryReindex, getMemoryUsage, pruneMemory,
         // R56: Smart Notifications
         getNotifications, markNotificationRead, markAllNotificationsRead, runMonitorCheck,
         // R55: File Understanding

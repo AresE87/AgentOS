@@ -367,6 +367,136 @@ impl MemoryStore {
         }
     }
 
+    /// Save a conversation exchange as memory for future reuse.
+    /// This enables the "auto-remember" feature: agents store task results
+    /// so similar future queries can be answered from local memory first.
+    pub fn remember_exchange(
+        conn: &Connection,
+        task_input: &str,
+        task_output: &str,
+        tools_used: &[String],
+        category: &str,
+    ) -> Result<(), String> {
+        Self::ensure_table(conn)?;
+        let id = uuid::Uuid::new_v4().to_string();
+        let now = chrono::Utc::now().to_rfc3339();
+        let content = format!(
+            "Tarea: {}\nRespuesta: {}\nHerramientas: {}",
+            task_input,
+            &task_output[..task_output.len().min(2000)],
+            tools_used.join(", ")
+        );
+        conn.execute(
+            "INSERT INTO agent_memories (id, content, category, importance, access_count, created_at) VALUES (?1, ?2, ?3, 0.7, 0, ?4)",
+            rusqlite::params![id, content, category, now],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    /// Search for similar past tasks to inject as context (reduces tokens needed from LLM).
+    /// Uses keyword-based search with the first 5 words of the query joined by wildcards.
+    pub fn find_similar_tasks(
+        conn: &Connection,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<String>, String> {
+        Self::ensure_table(conn)?;
+        let keywords: Vec<&str> = query.split_whitespace().take(5).collect();
+        if keywords.is_empty() {
+            return Ok(vec![]);
+        }
+        let pattern = format!("%{}%", keywords.join("%"));
+        let mut stmt = conn
+            .prepare(
+                "SELECT content FROM agent_memories WHERE content LIKE ?1 ORDER BY importance DESC, access_count DESC LIMIT ?2",
+            )
+            .map_err(|e| e.to_string())?;
+
+        let results: Vec<String> = stmt
+            .query_map(rusqlite::params![pattern, limit as i64], |row| {
+                row.get::<_, String>(0)
+            })
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        // Update access counts for retrieved memories
+        let now = chrono::Utc::now().to_rfc3339();
+        for content in &results {
+            conn.execute(
+                "UPDATE agent_memories SET access_count = access_count + 1, last_accessed = ?1 WHERE content = ?2",
+                rusqlite::params![now, content],
+            )
+            .ok();
+        }
+
+        Ok(results)
+    }
+
+    /// Get memory usage statistics including estimated token savings.
+    pub fn memory_usage(conn: &Connection) -> Result<serde_json::Value, String> {
+        Self::ensure_table(conn)?;
+        let total: i64 = conn
+            .query_row("SELECT COUNT(*) FROM agent_memories", [], |r| r.get(0))
+            .unwrap_or(0);
+        let with_embeddings: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM agent_memories WHERE embedding IS NOT NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        let categories: Vec<(String, i64)> = {
+            let mut stmt = conn
+                .prepare("SELECT category, COUNT(*) FROM agent_memories GROUP BY category")
+                .map_err(|e| e.to_string())?;
+            let rows: Vec<(String, i64)> = stmt
+                .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))
+                .map_err(|e| e.to_string())?
+                .filter_map(|r| r.ok())
+                .collect();
+            rows
+        };
+        let total_access_count: i64 = conn
+            .query_row(
+                "SELECT COALESCE(SUM(access_count), 0) FROM agent_memories",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        Ok(serde_json::json!({
+            "total_memories": total,
+            "with_embeddings": with_embeddings,
+            "categories": categories.into_iter().map(|(k, v)| serde_json::json!({"name": k, "count": v})).collect::<Vec<_>>(),
+            "total_accesses": total_access_count,
+            "estimated_tokens_saved": total_access_count * 200,
+        }))
+    }
+
+    /// Prune old, low-importance memories to keep DB lean.
+    /// Removes memories with importance below `min_importance`, ordered by
+    /// least accessed first, until the total count is at or below `max_memories`.
+    pub fn prune(conn: &Connection, max_memories: u32, min_importance: f64) -> Result<u32, String> {
+        Self::ensure_table(conn)?;
+        let total: i64 = conn
+            .query_row("SELECT COUNT(*) FROM agent_memories", [], |r| r.get(0))
+            .unwrap_or(0);
+        if total <= max_memories as i64 {
+            return Ok(0);
+        }
+
+        let to_delete = total - max_memories as i64;
+        let deleted = conn
+            .execute(
+                "DELETE FROM agent_memories WHERE id IN (SELECT id FROM agent_memories WHERE importance < ?1 ORDER BY access_count ASC, created_at ASC LIMIT ?2)",
+                rusqlite::params![min_importance, to_delete],
+            )
+            .map_err(|e| e.to_string())? as u32;
+
+        Ok(deleted)
+    }
+
     pub fn delete(conn: &Connection, id: &str) -> Result<(), String> {
         conn.execute(
             "DELETE FROM agent_memories WHERE id = ?1",

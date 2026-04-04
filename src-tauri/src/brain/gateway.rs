@@ -561,6 +561,50 @@ impl Gateway {
             .await
     }
 
+    /// Memory-aware smart routing: checks local memory BEFORE calling any LLM.
+    /// If a very similar query was answered before (>80% word overlap), returns
+    /// the cached response directly — zero API cost, ~1ms latency.
+    pub async fn complete_smart_with_memory(
+        &self,
+        prompt: &str,
+        system_prompt: &str,
+        tier: &str,
+        settings: &Settings,
+        container_ollama_port: Option<u16>,
+        db_path: &std::path::Path,
+    ) -> Result<LLMResponse, String> {
+        // 1. Check if we have a cached response for a very similar query
+        if let Ok(conn) = rusqlite::Connection::open(db_path) {
+            if let Ok(similar) =
+                crate::memory::MemoryStore::find_similar_tasks(&conn, prompt, 1)
+            {
+                if let Some(cached) = similar.first() {
+                    let overlap = word_overlap(prompt, cached);
+                    if overlap > 0.8 {
+                        info!(
+                            overlap = format!("{:.0}%", overlap * 100.0),
+                            "Memory cache hit, skipping LLM call"
+                        );
+                        return Ok(LLMResponse {
+                            task_id: Uuid::new_v4().to_string(),
+                            content: cached.clone(),
+                            model: "memory-cache".into(),
+                            provider: "local".into(),
+                            tokens_in: 0,
+                            tokens_out: 0,
+                            cost: 0.0, // FREE — from local memory
+                            duration_ms: 1,
+                        });
+                    }
+                }
+            }
+        }
+
+        // 2. Normal routing (local -> cloud)
+        self.complete_smart(prompt, system_prompt, tier, settings, container_ollama_port)
+            .await
+    }
+
     /// Try local Ollama first (when enabled), then fall back to cloud.
     /// Uses `complete_with_system` for the cloud path.
     pub async fn complete_with_local_fallback(
@@ -604,4 +648,17 @@ impl Gateway {
         self.complete_with_system(user_text, system_prompt, settings)
             .await
     }
+}
+
+/// Compute word overlap ratio between two strings.
+/// Returns 0.0-1.0 representing the fraction of shared words relative
+/// to the larger set. Used by memory-aware routing to detect near-duplicate queries.
+fn word_overlap(a: &str, b: &str) -> f64 {
+    let words_a: std::collections::HashSet<&str> = a.split_whitespace().collect();
+    let words_b: std::collections::HashSet<&str> = b.split_whitespace().collect();
+    if words_a.is_empty() || words_b.is_empty() {
+        return 0.0;
+    }
+    let intersection = words_a.intersection(&words_b).count();
+    intersection as f64 / words_a.len().max(words_b.len()) as f64
 }
