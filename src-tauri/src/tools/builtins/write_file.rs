@@ -23,11 +23,20 @@ impl Tool for WriteFileTool {
 
     fn permission_level(&self) -> PermissionLevel { PermissionLevel::Write }
 
-    async fn execute(&self, input: serde_json::Value, _ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
+    async fn execute(&self, input: serde_json::Value, ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
         let path = input.get("path").and_then(|v| v.as_str())
             .ok_or_else(|| ToolError("Missing 'path' parameter".into()))?;
         let content = input.get("content").and_then(|v| v.as_str())
             .ok_or_else(|| ToolError("Missing 'content' parameter".into()))?;
+
+        // Workspace boundary enforcement
+        let enforcement = crate::tools::enforcer::check_file_write(
+            path,
+            &ctx.app_data_dir.to_string_lossy(),
+        );
+        if let crate::tools::enforcer::EnforcementResult::Denied { reason } = enforcement {
+            return Ok(ToolOutput { content: format!("BLOCKED: {}", reason), is_error: true });
+        }
 
         // Ensure parent directory exists
         if let Some(parent) = std::path::Path::new(path).parent() {
