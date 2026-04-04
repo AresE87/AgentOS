@@ -1,4 +1,4 @@
-import { Play, Pause, Square, Sparkles, SlidersHorizontal } from 'lucide-react';
+import { Activity, Clock3, DollarSign, Layers, Pause, Play, SlidersHorizontal, Sparkles, Square, TrendingUp } from 'lucide-react';
 import type {
   AutonomyLevel,
   CommandView,
@@ -36,13 +36,55 @@ const autonomies: Array<{ id: AutonomyLevel; label: string }> = [
 function kpiValue(mission: Mission | null) {
   const total = mission ? Object.keys(mission.dag.nodes).length : 0;
   const completed = countCompletedNodes(mission);
+  const progressNum = total ? Math.round((completed / total) * 100) : 0;
   return {
     status: mission?.status ?? 'Idle',
     agents: total,
-    progress: total ? `${Math.round((completed / total) * 100)}%` : '0%',
+    progress: `${progressNum}%`,
+    progressNum,
     cost: formatCurrency(mission?.total_cost ?? 0),
     time: formatDuration(mission?.total_elapsed_ms ?? 0),
   };
+}
+
+/* Mini circular progress ring */
+function CircularProgress({ percent, size = 28 }: { percent: number; size?: number }) {
+  const strokeWidth = 2.5;
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference - (percent / 100) * circumference;
+
+  return (
+    <svg width={size} height={size} className="circular-progress">
+      {/* Background ring */}
+      <circle
+        cx={size / 2}
+        cy={size / 2}
+        r={radius}
+        fill="none"
+        stroke="rgba(0,229,229,0.08)"
+        strokeWidth={strokeWidth}
+      />
+      {/* Progress ring */}
+      <circle
+        cx={size / 2}
+        cy={size / 2}
+        r={radius}
+        fill="none"
+        stroke="url(#progress-gradient)"
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeDasharray={circumference}
+        strokeDashoffset={offset}
+      />
+      <defs>
+        <linearGradient id="progress-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stopColor="#F6C27C" />
+          <stop offset="100%" stopColor="#00E5E5" />
+        </linearGradient>
+      </defs>
+    </svg>
+  );
 }
 
 export function TopBar({
@@ -65,6 +107,7 @@ export function TopBar({
     !runDisabledReason;
   const canPause = !!mission && mission.status === 'Running';
   const canCancel = !!mission && !['Completed', 'Cancelled'].includes(mission.status);
+  const isRunning = metrics.status === 'Running';
 
   return (
     <div className="rounded-[28px] border border-[rgba(92,212,202,0.12)] bg-[linear-gradient(180deg,rgba(14,18,24,0.96),rgba(9,12,18,0.94))] px-6 py-5 shadow-[0_24px_80px_rgba(0,0,0,0.38)]">
@@ -90,10 +133,10 @@ export function TopBar({
                 key={option}
                 type="button"
                 onClick={() => onModeChange(option)}
-                className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${
+                className={`rounded-full px-3 py-1.5 text-xs font-medium transition-all duration-200 ${
                   mode === option
-                    ? 'border border-[rgba(255,190,112,0.24)] bg-[rgba(255,190,112,0.10)] text-[#F6C27C]'
-                    : 'text-[#8EA69F] hover:text-[#E4EDE8]'
+                    ? 'border border-[rgba(255,190,112,0.24)] bg-[rgba(255,190,112,0.10)] text-[#F6C27C] shadow-[0_0_12px_rgba(255,190,112,0.12)]'
+                    : 'text-[#8EA69F] hover:text-[#E4EDE8] hover:bg-[rgba(255,255,255,0.03)]'
                 }`}
               >
                 {option}
@@ -155,10 +198,10 @@ export function TopBar({
             key={item.id}
             type="button"
             onClick={() => onViewChange(item.id)}
-            className={`rounded-full px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.22em] transition ${
+            className={`rounded-full px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.22em] transition-all duration-200 ${
               view === item.id
-                ? 'bg-[rgba(92,212,202,0.10)] text-[#9FDED5]'
-                : 'text-[#6E857D] hover:text-[#E4EDE8]'
+                ? 'bg-[rgba(92,212,202,0.12)] text-[#9FDED5] shadow-[0_0_10px_rgba(92,212,202,0.08)]'
+                : 'text-[#6E857D] hover:text-[#E4EDE8] hover:bg-[rgba(255,255,255,0.02)]'
             }`}
           >
             {item.label}
@@ -166,24 +209,64 @@ export function TopBar({
         ))}
       </div>
 
+      {/* Gradient divider */}
+      <div className="mb-4 h-px bg-[linear-gradient(90deg,transparent,rgba(92,212,202,0.15),rgba(255,186,104,0.10),transparent)]" />
+
       <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-5">
-        {[
-          { label: 'Status', value: metrics.status },
-          { label: 'Agents', value: `${metrics.agents} nodes` },
-          { label: 'Progress', value: metrics.progress },
-          { label: 'Cost', value: metrics.cost },
-          { label: 'Time', value: metrics.time },
-        ].map((metric) => (
-          <div
-            key={metric.label}
-            className="rounded-[22px] border border-[rgba(92,212,202,0.10)] bg-[rgba(8,11,16,0.88)] px-4 py-3"
-          >
-            <div className="mb-1 text-[10px] font-mono uppercase tracking-[0.24em] text-[#8A9E97]">
-              {metric.label}
-            </div>
-            <div className="text-lg font-semibold text-[#F4EEE5]">{metric.value}</div>
+        {/* Status KPI */}
+        <div
+          className={`rounded-[22px] border border-[rgba(92,212,202,0.10)] bg-[rgba(8,11,16,0.88)] px-4 py-3 ${isRunning ? 'animate-pulse-ring' : ''}`}
+        >
+          <div className="mb-1 flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.24em] text-[#8A9E97]">
+            <Activity size={10} />
+            Status
           </div>
-        ))}
+          <div className="flex items-center gap-2">
+            {isRunning && (
+              <span className="inline-block h-2 w-2 rounded-full bg-[#00E5E5]" style={{ animation: 'breathe 2s ease-in-out infinite' }} />
+            )}
+            <span className="text-lg font-semibold text-[#F4EEE5]">{metrics.status}</span>
+          </div>
+        </div>
+
+        {/* Agents KPI */}
+        <div className="rounded-[22px] border border-[rgba(92,212,202,0.10)] bg-[rgba(8,11,16,0.88)] px-4 py-3">
+          <div className="mb-1 flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.24em] text-[#8A9E97]">
+            <Layers size={10} />
+            Agents
+          </div>
+          <div className="text-lg font-semibold text-[#F4EEE5]">{metrics.agents} nodes</div>
+        </div>
+
+        {/* Progress KPI with circular indicator */}
+        <div className="rounded-[22px] border border-[rgba(92,212,202,0.10)] bg-[rgba(8,11,16,0.88)] px-4 py-3">
+          <div className="mb-1 flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.24em] text-[#8A9E97]">
+            <TrendingUp size={10} />
+            Progress
+          </div>
+          <div className="flex items-center gap-2.5">
+            <CircularProgress percent={metrics.progressNum} />
+            <span className="text-lg font-semibold text-[#F4EEE5]">{metrics.progress}</span>
+          </div>
+        </div>
+
+        {/* Cost KPI */}
+        <div className="rounded-[22px] border border-[rgba(92,212,202,0.10)] bg-[rgba(8,11,16,0.88)] px-4 py-3">
+          <div className="mb-1 flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.24em] text-[#8A9E97]">
+            <DollarSign size={10} />
+            Cost
+          </div>
+          <div className="text-lg font-semibold text-[#F4EEE5]">{metrics.cost}</div>
+        </div>
+
+        {/* Time KPI */}
+        <div className="rounded-[22px] border border-[rgba(92,212,202,0.10)] bg-[rgba(8,11,16,0.88)] px-4 py-3">
+          <div className="mb-1 flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.24em] text-[#8A9E97]">
+            <Clock3 size={10} />
+            Time
+          </div>
+          <div className="text-lg font-semibold text-[#F4EEE5]">{metrics.time}</div>
+        </div>
       </div>
     </div>
   );

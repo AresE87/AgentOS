@@ -21,7 +21,7 @@ export function MissionTemplates({ onLaunchTemplate }: MissionTemplatesProps) {
               setSelected(template);
               setContext('');
             }}
-            className="rounded-[26px] border border-[rgba(92,212,202,0.10)] bg-[linear-gradient(180deg,rgba(13,17,23,0.94),rgba(8,11,16,0.92))] p-5 text-left transition hover:translate-y-[-2px] hover:border-[rgba(255,186,104,0.16)]"
+            className="animate-card-enter rounded-[26px] border border-[rgba(92,212,202,0.10)] bg-[linear-gradient(180deg,rgba(13,17,23,0.94),rgba(8,11,16,0.92))] p-5 text-left transition-all duration-250 hover:translate-y-[-2px] hover:border-[rgba(255,186,104,0.20)] hover:shadow-[0_8px_32px_rgba(0,0,0,0.28),0_0_16px_rgba(255,186,104,0.06)]"
           >
             <div className="mb-2 flex items-center justify-between">
               <div className="font-['Sora'] text-base font-semibold text-[#F4EEE5]">{template.title}</div>
@@ -36,7 +36,7 @@ export function MissionTemplates({ onLaunchTemplate }: MissionTemplatesProps) {
 
       {selected && (
         <div className="absolute inset-0 z-40 flex items-center justify-center bg-[rgba(5,8,12,0.78)] backdrop-blur-sm">
-          <div className="w-[min(560px,92vw)] rounded-[32px] border border-[rgba(92,212,202,0.16)] bg-[linear-gradient(180deg,rgba(13,17,23,0.98),rgba(8,11,16,0.96))] p-6 shadow-[0_30px_100px_rgba(0,0,0,0.5)]">
+          <div className="animate-card-enter w-[min(560px,92vw)] rounded-[32px] border border-[rgba(92,212,202,0.16)] bg-[linear-gradient(180deg,rgba(13,17,23,0.98),rgba(8,11,16,0.96))] p-6 shadow-[0_30px_100px_rgba(0,0,0,0.5)]">
             <div className="mb-4 flex items-start justify-between gap-3">
               <div>
                 <div className="text-[10px] font-mono uppercase tracking-[0.24em] text-[#9A8A74]">
@@ -48,7 +48,7 @@ export function MissionTemplates({ onLaunchTemplate }: MissionTemplatesProps) {
               <button
                 type="button"
                 onClick={() => setSelected(null)}
-                className="rounded-full border border-[rgba(0,229,229,0.08)] p-2 text-[#89A6C0]"
+                className="rounded-full border border-[rgba(0,229,229,0.08)] p-2 text-[#89A6C0] transition hover:border-[rgba(0,229,229,0.18)] hover:bg-[rgba(0,229,229,0.04)]"
               >
                 <X size={14} />
               </button>
@@ -63,7 +63,7 @@ export function MissionTemplates({ onLaunchTemplate }: MissionTemplatesProps) {
                 onChange={(event) => setContext(event.target.value)}
                 placeholder={selected.promptPlaceholder}
                 rows={4}
-                className="rounded-[24px] border border-[rgba(92,212,202,0.10)] bg-[rgba(8,11,16,0.88)] px-4 py-3 text-sm leading-6 text-[#F4EEE5] outline-none"
+                className="rounded-[24px] border border-[rgba(92,212,202,0.10)] bg-[rgba(8,11,16,0.88)] px-4 py-3 text-sm leading-6 text-[#F4EEE5] outline-none transition-all duration-300 focus:border-[rgba(255,186,104,0.24)] focus:shadow-[0_0_16px_rgba(255,186,104,0.06)]"
               />
             </label>
 
@@ -75,7 +75,7 @@ export function MissionTemplates({ onLaunchTemplate }: MissionTemplatesProps) {
                   onLaunchTemplate(selected.id, context.trim());
                   setSelected(null);
                 }}
-                className="inline-flex items-center gap-2 rounded-full border border-[rgba(255,186,104,0.24)] bg-[rgba(255,186,104,0.12)] px-4 py-2 text-xs font-semibold text-[#F6C27C] disabled:cursor-not-allowed disabled:opacity-45"
+                className="inline-flex items-center gap-2 rounded-full border border-[rgba(255,186,104,0.24)] bg-[rgba(255,186,104,0.12)] px-4 py-2 text-xs font-semibold text-[#F6C27C] transition-all duration-200 hover:shadow-[0_0_16px_rgba(255,186,104,0.12)] disabled:cursor-not-allowed disabled:opacity-45"
               >
                 <ArrowRight size={12} />
                 Create mission

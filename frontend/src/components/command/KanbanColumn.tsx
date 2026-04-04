@@ -1,5 +1,6 @@
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { useDroppable } from '@dnd-kit/core';
+import { AlertCircle, CheckCircle2, Clock3, Loader2, Search } from 'lucide-react';
 import type { CoordinatorMode, DAGNode } from './model';
 import TaskCard from './TaskCard';
 
@@ -13,6 +14,18 @@ interface KanbanColumnProps {
   onOpen: (nodeId: string) => void;
 }
 
+/* Icon for each column */
+function columnIcon(columnId: string, size: number) {
+  switch (columnId) {
+    case 'queued': return <Clock3 size={size} />;
+    case 'running': return <Loader2 size={size} />;
+    case 'review': return <Search size={size} />;
+    case 'done': return <CheckCircle2 size={size} />;
+    case 'failed': return <AlertCircle size={size} />;
+    default: return <Clock3 size={size} />;
+  }
+}
+
 export function KanbanColumn({
   columnId,
   label,
@@ -23,18 +36,39 @@ export function KanbanColumn({
   onOpen,
 }: KanbanColumnProps) {
   const droppable = useDroppable({ id: `column:${columnId}` });
+  const hasCards = nodes.length > 0;
 
   return (
     <div
       ref={droppable.setNodeRef}
-      className="flex min-h-0 flex-col rounded-[24px] border border-[rgba(0,229,229,0.08)] bg-[#0B1017]/90 p-3"
+      className={`animate-slide-column flex min-h-0 flex-col rounded-[24px] border bg-[#0B1017]/90 p-3 transition-shadow duration-300 ${
+        droppable.isOver
+          ? 'border-[rgba(0,229,229,0.18)] shadow-[0_0_20px_rgba(0,229,229,0.08)]'
+          : 'border-[rgba(0,229,229,0.08)]'
+      }`}
     >
+      {/* Colored top border strip */}
+      <div
+        className="mb-3 h-[2px] rounded-full"
+        style={{ background: `linear-gradient(90deg, ${color}, transparent)` }}
+      />
+
+      {/* Column header with icon and count badge */}
       <div className="mb-3 flex items-center gap-2 px-1">
-        <div className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
+        <div style={{ color }} className="shrink-0">
+          {columnIcon(columnId, 13)}
+        </div>
         <div className="text-[10px] font-mono uppercase tracking-[0.24em] text-[#6E869D]">
           {label}
         </div>
-        <div className="ml-auto rounded-full bg-[rgba(255,255,255,0.04)] px-2 py-1 text-[10px] text-[#9CB1C4]">
+        <div
+          className="ml-auto rounded-full px-2 py-1 text-[10px] font-semibold"
+          style={{
+            color: hasCards ? color : '#5E6E7D',
+            backgroundColor: hasCards ? `${color}12` : 'rgba(255,255,255,0.04)',
+            border: hasCards ? `1px solid ${color}22` : '1px solid transparent',
+          }}
+        >
           {nodes.length}
         </div>
       </div>
@@ -54,6 +88,15 @@ export function KanbanColumn({
               />
             );
           })}
+
+          {/* Ghost card placeholder when column is empty */}
+          {nodes.length === 0 && (
+            <div className="ghost-card flex items-center justify-center rounded-[20px] bg-[rgba(0,229,229,0.02)] p-6">
+              <span className="text-[11px] font-mono text-[#3D4F5F]">
+                {mode === 'Commander' ? 'Drag tasks here' : 'No tasks'}
+              </span>
+            </div>
+          )}
         </div>
       </SortableContext>
     </div>
