@@ -54,6 +54,7 @@ pub struct ToolCallRecord {
 pub struct AgentLoopConfig {
     pub max_iterations: u32,
     pub max_tokens_per_turn: u32,
+    pub compact_threshold_tokens: usize,
 }
 
 impl Default for AgentLoopConfig {
@@ -61,6 +62,7 @@ impl Default for AgentLoopConfig {
         Self {
             max_iterations: 25,
             max_tokens_per_turn: 4096,
+            compact_threshold_tokens: 80_000,
         }
     }
 }

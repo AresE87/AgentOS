@@ -3,13 +3,14 @@ use crate::config::Settings;
 use tracing::info;
 
 /// Check if messages need compaction (over threshold tokens).
-/// Uses rough estimate of 4 chars per token.
+/// Uses ~3 chars per token as a conservative estimate (JSON has structural
+/// overhead that inflates raw character counts).
 pub fn should_compact(messages: &[serde_json::Value], threshold_tokens: usize) -> bool {
     let total_chars: usize = messages
         .iter()
         .map(|m| serde_json::to_string(m).unwrap_or_default().len())
         .sum();
-    let estimated_tokens = total_chars / 4;
+    let estimated_tokens = total_chars / 3;
     estimated_tokens > threshold_tokens
 }
 
@@ -46,15 +47,27 @@ pub async fn compact_messages(
     let response = gateway
         .complete_cheap(&summary_prompt, settings)
         .await
-        .unwrap_or_else(|_| crate::brain::LLMResponse {
-            task_id: String::new(),
-            content: "Previous conversation context was compacted.".to_string(),
-            model: String::new(),
-            provider: String::new(),
-            tokens_in: 0,
-            tokens_out: 0,
-            cost: 0.0,
-            duration_ms: 0,
+        .unwrap_or_else(|_| {
+            // Fallback: if LLM summarization fails, use simple truncation of old messages
+            let truncated_context = to_summarize
+                .iter()
+                .take(3)
+                .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
+                .collect::<Vec<_>>()
+                .join("\n")
+                .chars()
+                .take(500)
+                .collect::<String>();
+            crate::brain::LLMResponse {
+                task_id: String::new(),
+                content: format!("[Compacted context] {}", truncated_context),
+                model: "fallback".to_string(),
+                provider: "local".to_string(),
+                tokens_in: 0,
+                tokens_out: 0,
+                cost: 0.0,
+                duration_ms: 0,
+            }
         });
 
     info!(
