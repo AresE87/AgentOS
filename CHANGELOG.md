@@ -1,5 +1,26 @@
 # Changelog
 
+## [8.0.0] - 2026-04-04 -- Marketing Autonomo
+
+### Added
+- M8-3: Marketing Command Center frontend dashboard with 4 tabs:
+  - Overview: KPI cards (followers, engagement, posts, mentions), platform status grid, activity feed
+  - Content: AI content generator modal (topic, platforms, tone), weekly plan builder
+  - Menciones: unified inbox with AI-suggested replies, classification filters, reply/edit/ignore
+  - Campanas: campaign CRUD, timeline, metrics dashboard
+- M8-3: Marketing hooks in useAgent.ts (generateContent, generateWeeklyPlan, processMentions,
+  getCalendar, schedulePost, createCampaign, getCampaign, listCampaigns)
+- M8-3: Marketing tab in Dashboard sidebar with Megaphone icon
+- M8-5: Self-Promotion Mode with auto-generate promotional content about AgentOS
+  - `self_promotion.rs`: product context, 8 promotion topics, weekly promo generation
+  - `cmd_generate_promo_content` IPC command
+  - "self_promotion" coordinator mission template (4-agent DAG: Content Writer, SEO Specialist,
+    Social Media Manager, Community Manager)
+  - Auto-Promocion toggle in Marketing Overview tab with frequency and platform selectors
+
+### Changed
+- Version bump to 8.0.0 across Cargo.toml, frontend, and mobile packages
+
 ## [7.0.0] - 2026-04-04 -- Docker Sandbox Workers, Local AI, Distributed Swarm
 
 ### Added
