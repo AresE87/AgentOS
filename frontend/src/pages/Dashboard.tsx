@@ -15,6 +15,7 @@ import {
   Clock,
   ThumbsUp,
   HandHelping,
+  Megaphone,
   Search,
   Plus,
   X,
@@ -31,6 +32,7 @@ import Developer from './dashboard/Developer';
 import ScheduledTasks from './dashboard/ScheduledTasks';
 import FeedbackInsights from './dashboard/FeedbackInsights';
 import Handoffs from './dashboard/Handoffs';
+import Marketing from './dashboard/Marketing';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -45,6 +47,7 @@ type Tab =
   | 'analytics'
   | 'developer'
   | 'triggers'
+  | 'marketing'
   | 'settings'
   | 'feedback'
   | 'handoffs';
@@ -66,6 +69,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'analytics', label: 'Analytics', icon: BarChart3, section: 'main', shortcut: '6' },
   { id: 'developer', label: 'Developer', icon: Code2, section: 'main', shortcut: '7' },
   { id: 'triggers', label: 'Triggers', icon: Clock, section: 'main', shortcut: '8' },
+  { id: 'marketing', label: 'Marketing', icon: Megaphone, section: 'main' },
   { id: 'settings', label: 'Settings', icon: Settings, section: 'main', shortcut: '9' },
   { id: 'feedback', label: 'Feedback', icon: ThumbsUp, section: 'more' },
   { id: 'handoffs', label: 'Handoffs', icon: HandHelping, section: 'more' },
@@ -80,6 +84,7 @@ const TAB_LABELS: Record<Tab, string> = {
   analytics: 'Analytics',
   developer: 'Developer Tools',
   triggers: 'Scheduled Tasks',
+  marketing: 'Marketing',
   settings: 'Settings',
   feedback: 'Feedback & Insights',
   handoffs: 'Escalation Handoffs',
@@ -428,6 +433,7 @@ export default function Dashboard({ onResetWizard }: DashboardProps) {
           {activeTab === 'analytics' && <Analytics />}
           {activeTab === 'developer' && <Developer />}
           {activeTab === 'triggers' && <ScheduledTasks />}
+          {activeTab === 'marketing' && <Marketing />}
           {activeTab === 'settings' && <SettingsPg onResetWizard={onResetWizard} />}
           {activeTab === 'feedback' && <FeedbackInsights />}
           {activeTab === 'handoffs' && <Handoffs />}

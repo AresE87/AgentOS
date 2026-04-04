@@ -1406,6 +1406,23 @@ export function useAgent() {
     const socialSearch = (platform: string, query: string, limit?: number) =>
         callInvoke<{ results: any[] }>('social_search', { platform, query, limit: limit || null });
 
+    // M8-3: Marketing Dashboard hooks
+    const generateContent = (topic: string, platforms: string[], tone: string) =>
+        callInvoke<any>('generate_content', { topic, platforms, tone });
+    const generateWeeklyPlan = (topics: string[], platforms: string[], postsPerWeek: number) =>
+        callInvoke<any>('generate_weekly_plan', { topics, platforms, posts_per_week: postsPerWeek });
+    const processMentions = (brandVoice: string) =>
+        callInvoke<any>('process_mentions', { brand_voice: brandVoice });
+    const getCalendar = (startDate: string) => callInvoke<any>('get_calendar', { start_date: startDate });
+    const schedulePost = (post: any) => callInvoke<any>('schedule_post', { post });
+    const createCampaign = (name: string, description: string, platforms: string[]) =>
+        callInvoke<any>('create_campaign', { name, description, platforms });
+    const getCampaign = (id: string) => callInvoke<any>('get_campaign', { id });
+    const listCampaigns = () => callInvoke<any>('list_campaigns');
+
+    // M8-5: Self-Promotion Mode
+    const generatePromoContent = () => callInvoke<any>('generate_promo_content');
+
     return {
         getStatus, getPlatformSupport, processMessage, getTasks, getPlaybooks, setActivePlaybook,
         getSettings, updateSettings, healthCheck, getActiveChain, getChainHistory,
@@ -1662,6 +1679,11 @@ export function useAgent() {
         // M8-1: Social Media Connectors
         socialConnectPlatform, socialDisconnectPlatform, socialListPlatforms,
         socialPost, socialReply, socialGetMentions, socialGetEngagement, socialSearch,
+        // M8-3: Marketing Dashboard
+        generateContent, generateWeeklyPlan, processMentions, getCalendar, schedulePost,
+        createCampaign, getCampaign, listCampaigns,
+        // M8-5: Self-Promotion Mode
+        generatePromoContent,
     };
 }
 
