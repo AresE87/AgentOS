@@ -235,8 +235,7 @@ pub struct AppState {
     pub database_manager: Arc<tokio::sync::Mutex<integrations::DatabaseManager>>,
     /// R66: API Orchestrator — registry for external API connections
     pub api_registry: Arc<tokio::sync::Mutex<integrations::APIRegistry>>,
-    /// R70: Department quota manager
-    pub quota_manager: Arc<enterprise::QuotaManager>,
+    // R70: quota_manager removed in F2 cleanup — enterprise roadmap
     /// R78: CLI Power Mode — smart terminal
     pub smart_terminal: Arc<tokio::sync::Mutex<terminal::SmartTerminal>>,
     /// R79: Extension API V2 — plugin UI, scoped storage
@@ -343,6 +342,11 @@ async fn cmd_process_message(
     app_handle: tauri::AppHandle,
     text: String,
 ) -> Result<serde_json::Value, String> {
+    // ── H3: Input length cap — reject excessively large messages ──
+    if text.len() > 100_000 {
+        return Err("Message too long (max 100KB)".into());
+    }
+
     // ── R36: Security — sanitize input & rate-limit ──────────────
     let text = security::sanitizer::sanitize_input(&text, 10_000);
     if let Some(threat) = security::sanitizer::detect_injection(&text) {
@@ -2905,22 +2909,7 @@ async fn cmd_add_org_member(
     Ok(serde_json::to_value(&member).map_err(|e| e.to_string())?)
 }
 
-#[tauri::command]
-async fn cmd_get_sso_auth_url(
-    provider: String,
-    client_id: String,
-    issuer_url: String,
-    _state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
-    let config = enterprise::sso::SSOConfig {
-        provider,
-        client_id,
-        issuer_url,
-        redirect_uri: "agentos://sso/callback".to_string(),
-    };
-    let url = enterprise::sso::SSOProvider::get_auth_url(&config);
-    Ok(serde_json::json!({ "url": url }))
-}
+// SSO auth command removed in F2 cleanup — enterprise roadmap
 
 // ── R26: Platform abstraction commands ──────────────────────────
 
@@ -5450,63 +5439,7 @@ async fn cmd_team_share_resource(
     serde_json::to_value(&resource).map_err(|e| e.to_string())
 }
 
-// ── R70: v1.2 Enterprise — Department Quotas ──────────────────────────
-
-#[tauri::command]
-async fn cmd_set_department_quota(
-    quota: serde_json::Value,
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
-    let dq: enterprise::quotas::DepartmentQuota =
-        serde_json::from_value(quota).map_err(|e| e.to_string())?;
-    state.quota_manager.set_quota(dq)?;
-    Ok(serde_json::json!({ "ok": true }))
-}
-
-#[tauri::command]
-async fn cmd_get_department_quota(
-    department: String,
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
-    let q = state.quota_manager.get_quota(&department)?;
-    match q {
-        Some(quota) => serde_json::to_value(&quota).map_err(|e| e.to_string()),
-        None => Ok(serde_json::Value::Null),
-    }
-}
-
-#[tauri::command]
-async fn cmd_list_department_quotas(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
-    let quotas = state.quota_manager.list_quotas()?;
-    Ok(serde_json::json!({ "quotas": quotas }))
-}
-
-#[tauri::command]
-async fn cmd_check_quota(
-    department: String,
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
-    match state.quota_manager.check_quota(&department) {
-        Ok(()) => Ok(serde_json::json!({ "allowed": true })),
-        Err(reason) => Ok(serde_json::json!({ "allowed": false, "reason": reason })),
-    }
-}
-
-// ── R70: v1.2 Enterprise — SCIM Provisioning ─────────────────────────
-
-#[tauri::command]
-async fn cmd_scim_list_users() -> Result<serde_json::Value, String> {
-    let users = enterprise::SCIMProvider::list_users();
-    serde_json::to_value(&users).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-async fn cmd_scim_sync() -> Result<serde_json::Value, String> {
-    let result = enterprise::SCIMProvider::sync();
-    Ok(result)
-}
+// Department quotas, SCIM provisioning commands removed in F2 cleanup — enterprise roadmap
 
 // ── R71: Visual Workflow Builder commands ────────────────────────────
 
@@ -6929,7 +6862,7 @@ pub fn run() {
                     integrations::DatabaseManager::new(),
                 )),
                 api_registry: Arc::new(tokio::sync::Mutex::new(integrations::APIRegistry::new())),
-                quota_manager: Arc::new(enterprise::QuotaManager::new()),
+                // quota_manager removed in F2 cleanup — enterprise roadmap
                 smart_terminal: Arc::new(tokio::sync::Mutex::new(terminal::SmartTerminal::new())),
                 extension_api_v2: Arc::new(tokio::sync::Mutex::new(plugins::ExtensionAPIv2::new(
                     app_dir.join("plugin_storage.db"),
@@ -7438,7 +7371,7 @@ pub fn run() {
             cmd_set_current_org,
             cmd_list_org_members,
             cmd_add_org_member,
-            cmd_get_sso_auth_url,
+            // cmd_get_sso_auth_url removed in F2 cleanup — enterprise roadmap
             // R32: WhatsApp commands
             cmd_whatsapp_setup,
             cmd_whatsapp_test,
@@ -7622,13 +7555,7 @@ pub fn run() {
             cmd_team_remove_member,
             cmd_team_update_role,
             cmd_team_share_resource,
-            // R70: v1.2 Enterprise — Department Quotas & SCIM
-            cmd_set_department_quota,
-            cmd_get_department_quota,
-            cmd_list_department_quotas,
-            cmd_check_quota,
-            cmd_scim_list_users,
-            cmd_scim_sync,
+            // R70: Department quotas & SCIM removed in F2 cleanup — enterprise roadmap
             // R71: Visual Workflow Builder commands
             cmd_workflow_list,
             cmd_workflow_get,
