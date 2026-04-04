@@ -15,6 +15,7 @@ impl MissionTemplates {
             "due_diligence" => due_diligence(context),
             "email_campaign" => email_campaign(context),
             "design_sprint" => design_sprint(context),
+            "self_promotion" => self_promotion(context),
             _ => return None,
         };
         Some(dag)
@@ -337,6 +338,84 @@ fn design_sprint(context: &str) -> TaskDAG {
     dag.add_edge(edge("research", "design", EdgeType::DataFlow));
     dag.add_edge(edge("design", "build", EdgeType::DataFlow));
     dag.add_edge(edge("build", "qa", EdgeType::Dependency));
+    dag
+}
+
+fn self_promotion(context: &str) -> TaskDAG {
+    let mut dag = TaskDAG::new();
+    dag.add_node(node(
+        "content_writer",
+        "Generate promotional posts",
+        &format!(
+            "Generate 9 promotional social media posts (3 per platform per week) about AgentOS. \
+             Context: {}. Cover capabilities like desktop automation, multi-agent coordination, \
+             local AI, marketplace, and Docker sandbox. Vary tone across platforms.",
+            context
+        ),
+        assignment(
+            AgentLevel::Specialist,
+            "content_marketer",
+            "Content Writer",
+        ),
+        &["web_search", "read_file", "write_file"],
+        90.0,
+        120.0,
+    ));
+    dag.add_node(node(
+        "seo_specialist",
+        "Optimize posts for SEO",
+        &format!(
+            "Optimize each of the 9 promotional posts for search and discoverability. \
+             Add relevant hashtags, keywords, and adjust formatting per platform. Context: {}",
+            context
+        ),
+        assignment(
+            AgentLevel::Specialist,
+            "seo_specialist",
+            "SEO Specialist",
+        ),
+        &["read_file", "write_file", "web_search"],
+        420.0,
+        60.0,
+    ));
+    dag.add_node(node(
+        "social_manager",
+        "Schedule and publish posts",
+        &format!(
+            "Schedule all optimized posts across Twitter, LinkedIn, and Reddit. \
+             Use optimal posting times per platform. Context: {}",
+            context
+        ),
+        assignment(
+            AgentLevel::Specialist,
+            "social_media_manager",
+            "Social Media Manager",
+        ),
+        &["read_file", "write_file"],
+        420.0,
+        240.0,
+    ));
+    dag.add_node(node(
+        "community_manager",
+        "Monitor responses and reply",
+        &format!(
+            "Monitor all published posts for replies, mentions, and engagement. \
+             Reply to questions and comments maintaining professional brand voice. Context: {}",
+            context
+        ),
+        assignment(
+            AgentLevel::Senior,
+            "community_manager",
+            "Community Manager",
+        ),
+        &["web_search", "read_file", "write_file"],
+        770.0,
+        150.0,
+    ));
+    dag.add_edge(edge("content_writer", "seo_specialist", EdgeType::DataFlow));
+    dag.add_edge(edge("content_writer", "social_manager", EdgeType::DataFlow));
+    dag.add_edge(edge("seo_specialist", "social_manager", EdgeType::DataFlow));
+    dag.add_edge(edge("social_manager", "community_manager", EdgeType::Dependency));
     dag
 }
 

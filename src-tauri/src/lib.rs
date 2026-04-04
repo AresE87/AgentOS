@@ -7200,6 +7200,22 @@ async fn cmd_list_campaigns(
     Ok(mgr.to_json())
 }
 
+// ── M8-5: Self-Promotion Mode ──────────────────────────────────────────
+
+#[tauri::command]
+async fn cmd_generate_promo_content(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let gateway = state.gateway.lock().await;
+    let settings = state.settings.lock().map_err(|e| e.to_string())?.clone();
+    let posts = marketing::SelfPromotion::generate_promo_week(&gateway, &settings).await?;
+    let summary = marketing::SelfPromotion::promo_summary();
+    Ok(serde_json::json!({
+        "posts": serde_json::to_value(&posts).map_err(|e| e.to_string())?,
+        "summary": summary,
+    }))
+}
+
 // ── M8-1: Social Media Connectors — IPC commands ─────────────────────────
 
 #[tauri::command]
@@ -8397,6 +8413,8 @@ pub fn run() {
             cmd_create_campaign,
             cmd_get_campaign,
             cmd_list_campaigns,
+            // M8-5: Self-Promotion Mode
+            cmd_generate_promo_content,
             // M8-1: Social Media Connectors commands
             cmd_social_connect_platform,
             cmd_social_disconnect_platform,
