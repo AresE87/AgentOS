@@ -13,6 +13,7 @@ import {
   ThumbsDown,
   Eye,
   Sparkles,
+  RotateCcw,
 } from 'lucide-react';
 import { useAgent } from '../../hooks/useAgent';
 
@@ -40,6 +41,7 @@ interface Message {
   latency?: number;
   feedback?: 'up' | 'down' | null;
   taskId?: string;
+  isError?: boolean;
 }
 
 interface Conversation {
@@ -301,6 +303,7 @@ export default function Chat() {
     let unStep: (() => void) | null = null;
     let unComplete: (() => void) | null = null;
     let unToken: (() => void) | null = null;
+    let unError: (() => void) | null = null;
 
     async function subscribe() {
       try {
@@ -383,6 +386,20 @@ export default function Chat() {
           };
           setMessages((m) => [...m, doneMsg]);
         });
+        // E2: Agent error events — show inline with retry
+        unError = await listen<any>('agent:error', (event) => {
+          const p = event.payload;
+          const errorMsg: Message = {
+            id: `err-${Date.now()}`,
+            role: 'agent',
+            content: p.message || 'An unexpected error occurred.',
+            timestamp: new Date().toISOString(),
+            isError: true,
+          };
+          setMessages((m) => [...m, errorMsg]);
+          setTyping(false);
+          setTaskRunning(false);
+        });
       } catch {
         // Tauri not available in dev browser
       }
@@ -394,6 +411,7 @@ export default function Chat() {
       unStep?.();
       unComplete?.();
       unToken?.();
+      unError?.();
     };
   }, []);
 
@@ -622,8 +640,9 @@ export default function Chat() {
         const errorMsg: Message = {
           id: `err-${Date.now()}`,
           role: 'agent',
-          content: `Something went wrong: ${err.message ?? 'unknown error'}`,
+          content: typeof err === 'string' ? err : (err.message ?? 'Something went wrong. Please try again.'),
           timestamp: new Date().toISOString(),
+          isError: true,
         };
         setMessages((m) => [...m, errorMsg]);
         setTaskRunning(false);
@@ -772,6 +791,7 @@ export default function Chat() {
           {/* ---- Messages ---- */}
           {messages.map((msg) => {
             const isUser = msg.role === 'user';
+            const isErr = !isUser && msg.isError;
             return (
               <div key={msg.id} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
                 <div
@@ -783,6 +803,12 @@ export default function Chat() {
                           border: '1px solid rgba(0,229,229,0.15)',
                           borderBottomRightRadius: 4,
                         }
+                      : isErr
+                      ? {
+                          background: 'rgba(231,76,60,0.06)',
+                          border: `1px solid rgba(231,76,60,0.35)`,
+                          borderBottomLeftRadius: 4,
+                        }
                       : {
                           background: T.bgSurface,
                           border: `1px solid ${T.bgElevated}`,
@@ -790,8 +816,16 @@ export default function Chat() {
                         }
                   }
                 >
+                  {/* Error icon for error messages */}
+                  {isErr && (
+                    <div className="flex items-center gap-2 mb-2">
+                      <AlertCircle size={14} style={{ color: T.red }} />
+                      <span className="text-xs font-medium" style={{ color: T.red }}>Error</span>
+                    </div>
+                  )}
+
                   {/* Content with code blocks */}
-                  <div className="text-sm leading-relaxed" style={{ color: T.textPrimary }}>
+                  <div className="text-sm leading-relaxed" style={{ color: isErr ? T.textSecondary : T.textPrimary }}>
                     {parseBlocks(msg.content).map((block, i) =>
                       block.type === 'code' ? (
                         <CodeBlockInline key={i} code={block.content} lang={block.lang || 'text'} />
@@ -803,8 +837,33 @@ export default function Chat() {
                     )}
                   </div>
 
+                  {/* E2: Retry button for error messages */}
+                  {isErr && (
+                    <button
+                      onClick={() => {
+                        // Find the last user message before this error
+                        const idx = messages.indexOf(msg);
+                        for (let i = idx - 1; i >= 0; i--) {
+                          if (messages[i].role === 'user') {
+                            handleSend(messages[i].content);
+                            break;
+                          }
+                        }
+                      }}
+                      className="flex items-center gap-1.5 mt-2.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-150"
+                      style={{
+                        color: T.cyan,
+                        background: 'rgba(0,229,229,0.08)',
+                        border: '1px solid rgba(0,229,229,0.15)',
+                      }}
+                    >
+                      <RotateCcw size={12} />
+                      Retry
+                    </button>
+                  )}
+
                   {/* Agent message footer */}
-                  {!isUser && (msg.model || msg.cost !== undefined || msg.latency !== undefined) && (
+                  {!isUser && !isErr && (msg.model || msg.cost !== undefined || msg.latency !== undefined) && (
                     <div
                       className="flex items-center gap-3 mt-2.5 pt-2"
                       style={{ borderTop: `1px solid ${T.bgElevated}` }}

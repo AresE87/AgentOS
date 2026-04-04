@@ -302,6 +302,41 @@ async fn cmd_get_status(state: tauri::State<'_, AppState>) -> Result<serde_json:
     Ok(result)
 }
 
+// ── E2: User-friendly error messages ────────────────────────────
+fn user_friendly_error(error: &str) -> String {
+    let e = error.to_lowercase();
+    if e.contains("api key") || e.contains("api_key") || e.contains("x-api-key") {
+        return "No API key configured. Go to Settings and add your Anthropic or OpenAI key.".into();
+    }
+    if e.contains("rate limit") || e.contains("429") {
+        return "Rate limit reached. Please wait a moment and try again.".into();
+    }
+    if e.contains("timeout") || e.contains("timed out") {
+        return "Request timed out. The AI service may be slow. Try again.".into();
+    }
+    if e.contains("connection") || e.contains("connect") || e.contains("network") {
+        return "Cannot connect to AI service. Check your internet connection.".into();
+    }
+    if e.contains("no llm api key") || e.contains("no api key") {
+        return "No AI provider configured. Go to Settings > API Keys to add one.".into();
+    }
+    if e.contains("max retries") {
+        return "AI service temporarily unavailable. Retried 3 times. Please try again later."
+            .into();
+    }
+    if e.contains("401") || e.contains("unauthorized") {
+        return "API key is invalid or expired. Check your key in Settings.".into();
+    }
+    if e.contains("insufficient") || e.contains("quota") || e.contains("billing") {
+        return "API quota exceeded or billing issue. Check your AI provider account.".into();
+    }
+    // Don't expose raw errors to users
+    format!(
+        "Something went wrong: {}",
+        &error[..error.len().min(200)]
+    )
+}
+
 #[tauri::command]
 async fn cmd_process_message(
     state: tauri::State<'_, AppState>,
@@ -314,7 +349,7 @@ async fn cmd_process_message(
         tracing::warn!("Injection attempt detected: {}", threat);
         // Don't block — just log. The sandbox will catch dangerous commands.
     }
-    state.rate_limiter.check("default").await?;
+    state.rate_limiter.check("default").await.map_err(|e| user_friendly_error(&e))?;
 
     let settings = {
         let s = state.settings.lock().map_err(|e| e.to_string())?;
@@ -393,7 +428,7 @@ async fn cmd_process_message(
         // Decompose
         let subtasks = pipeline::engine::decompose_task(&text, &settings)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| user_friendly_error(&e.to_string()))?;
 
         // C1: Count this task dispatch in daily_usage
         {
@@ -425,6 +460,11 @@ async fn cmd_process_message(
                 }
                 Err(e) => {
                     tracing::warn!(chain_id = %cid, error = %e, "Chain failed");
+                    let friendly = user_friendly_error(&e);
+                    let _ = app_handle.emit(
+                        "agent:error",
+                        serde_json::json!({"message": &friendly, "task_id": &cid}),
+                    );
                 }
             }
         });
@@ -498,10 +538,15 @@ async fn cmd_process_message(
                         "anthropic/sonnet",
                         &e,
                     );
+                    let friendly = user_friendly_error(&e);
+                    let _ = app_handle.emit(
+                        "agent:error",
+                        serde_json::json!({"message": &friendly, "task_id": &tid}),
+                    );
                     let _ = app_handle.emit(
                         "agent:task_completed",
                         serde_json::json!({
-                            "task_id": tid, "success": false, "error": e,
+                            "task_id": tid, "success": false, "error": friendly,
                         }),
                     );
                 }
@@ -669,7 +714,7 @@ Always be helpful, precise, and use tools judiciously.";
             let response = gateway
                 .complete_with_system(&text, Some(&system_prompt), &settings)
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| user_friendly_error(&e.to_string()))?;
             drop(gateway);
 
             // Store in DB and increment daily usage counters
@@ -1627,7 +1672,15 @@ Always be helpful, precise, and use tools judiciously.";
             Some(state.session_store.as_ref()),
             Some(&task_id),
         )
-        .await?;
+        .await
+        .map_err(|e| {
+            let friendly = user_friendly_error(&e);
+            let _ = app.emit(
+                "agent:error",
+                serde_json::json!({"message": &friendly}),
+            );
+            friendly
+        })?;
 
     serde_json::to_value(&result).map_err(|e| e.to_string())
 }
