@@ -136,6 +136,30 @@ pub struct Settings {
     #[serde(default = "default_local_model")]
     pub local_model: String,
 
+    // M8-1: Social Media Connectors
+    #[serde(default)]
+    pub twitter_bearer_token: String,
+    #[serde(default)]
+    pub twitter_api_key: String,
+    #[serde(default)]
+    pub twitter_api_secret: String,
+    #[serde(default)]
+    pub twitter_access_token: String,
+    #[serde(default)]
+    pub twitter_access_secret: String,
+    #[serde(default)]
+    pub linkedin_access_token: String,
+    #[serde(default)]
+    pub linkedin_person_urn: String,
+    #[serde(default)]
+    pub reddit_access_token: String,
+    #[serde(default)]
+    pub reddit_username: String,
+    #[serde(default)]
+    pub hackernews_username: String,
+    #[serde(default)]
+    pub hackernews_password: String,
+
     #[serde(skip)]
     config_path: PathBuf,
 }
@@ -413,6 +437,40 @@ impl Settings {
             "training_telemetry_url" => {
                 self.training_telemetry_url = value.to_string();
             }
+            // M8-1: Social Media Connectors
+            "twitter_bearer_token" => {
+                self.twitter_bearer_token = value.to_string();
+            }
+            "twitter_api_key" => {
+                self.twitter_api_key = value.to_string();
+            }
+            "twitter_api_secret" => {
+                self.twitter_api_secret = value.to_string();
+            }
+            "twitter_access_token" => {
+                self.twitter_access_token = value.to_string();
+            }
+            "twitter_access_secret" => {
+                self.twitter_access_secret = value.to_string();
+            }
+            "linkedin_access_token" => {
+                self.linkedin_access_token = value.to_string();
+            }
+            "linkedin_person_urn" => {
+                self.linkedin_person_urn = value.to_string();
+            }
+            "reddit_access_token" => {
+                self.reddit_access_token = value.to_string();
+            }
+            "reddit_username" => {
+                self.reddit_username = value.to_string();
+            }
+            "hackernews_username" => {
+                self.hackernews_username = value.to_string();
+            }
+            "hackernews_password" => {
+                self.hackernews_password = value.to_string();
+            }
             _ => {}
         }
     }
@@ -479,6 +537,14 @@ impl Settings {
             "google_gmail_enabled": self.google_gmail_enabled,
             "has_discord": !self.discord_bot_token.is_empty(),
             "discord_enabled": self.discord_enabled,
+            // M8-1: Social Media Connectors
+            "has_twitter": !self.twitter_bearer_token.is_empty(),
+            "has_linkedin": !self.linkedin_access_token.is_empty() && !self.linkedin_person_urn.is_empty(),
+            "has_reddit": !self.reddit_access_token.is_empty() && !self.reddit_username.is_empty(),
+            "has_hackernews": !self.hackernews_username.is_empty(),
+            "linkedin_person_urn": self.linkedin_person_urn,
+            "reddit_username": self.reddit_username,
+            "hackernews_username": self.hackernews_username,
         })
     }
 }
@@ -647,6 +713,18 @@ impl Default for Settings {
             use_local_llm: false,
             local_llm_url: default_local_llm_url(),
             local_model: default_local_model(),
+            // M8-1: Social Media Connectors
+            twitter_bearer_token: String::new(),
+            twitter_api_key: String::new(),
+            twitter_api_secret: String::new(),
+            twitter_access_token: String::new(),
+            twitter_access_secret: String::new(),
+            linkedin_access_token: String::new(),
+            linkedin_person_urn: String::new(),
+            reddit_access_token: String::new(),
+            reddit_username: String::new(),
+            hackernews_username: String::new(),
+            hackernews_password: String::new(),
             config_path: PathBuf::new(),
         }
     }

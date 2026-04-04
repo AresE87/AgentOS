@@ -1386,6 +1386,26 @@ export function useAgent() {
     // P1: Agentic Tool Loop — explicit agent_run endpoint
     const agentRun = (message: string) => callInvoke<any>('agent_run', { message });
 
+    // M8-1: Social Media Connectors
+    const socialConnectPlatform = (platform: string, credentials: Record<string, string>) =>
+        callInvoke<{ ok: boolean; platform: string; connected: boolean }>('social_connect_platform', { platform, credentials });
+    const socialDisconnectPlatform = (platform: string) =>
+        callInvoke<{ ok: boolean; platform: string }>('social_disconnect_platform', { platform });
+    const socialListPlatforms = () =>
+        callInvoke<{ platforms: string[] }>('social_list_platforms');
+    const socialPost = (content: string, platforms: string[], mediaUrl?: string, tags?: string[]) =>
+        callInvoke<{ results: Array<{ platform: string; ok: boolean; id?: string; url?: string; error?: string }> }>(
+            'social_post', { content, platforms, media_url: mediaUrl || null, tags: tags || [] });
+    const socialReply = (platform: string, postId: string, content: string) =>
+        callInvoke<{ ok: boolean; id: string; url: string; platform: string; posted_at: string }>(
+            'social_reply', { platform, post_id: postId, content });
+    const socialGetMentions = (sinceHours?: number) =>
+        callInvoke<{ mentions: any[] }>('social_get_mentions', { since_hours: sinceHours || null });
+    const socialGetEngagement = (periodDays?: number) =>
+        callInvoke<{ metrics: any[] }>('social_get_engagement', { period_days: periodDays || null });
+    const socialSearch = (platform: string, query: string, limit?: number) =>
+        callInvoke<{ results: any[] }>('social_search', { platform, query, limit: limit || null });
+
     return {
         getStatus, getPlatformSupport, processMessage, getTasks, getPlaybooks, setActivePlaybook,
         getSettings, updateSettings, healthCheck, getActiveChain, getChainHistory,
@@ -1639,6 +1659,9 @@ export function useAgent() {
         checkForUpdate, getCurrentVersion,
         // P1: Agentic Tool Loop
         agentRun,
+        // M8-1: Social Media Connectors
+        socialConnectPlatform, socialDisconnectPlatform, socialListPlatforms,
+        socialPost, socialReply, socialGetMentions, socialGetEngagement, socialSearch,
     };
 }
 

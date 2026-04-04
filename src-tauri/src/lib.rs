@@ -28,6 +28,7 @@ pub mod hands;
 pub mod health;
 pub mod integrations;
 pub mod knowledge;
+pub mod marketing;
 pub mod marketplace;
 pub mod memory;
 pub mod metrics;
@@ -42,6 +43,7 @@ mod playbooks;
 pub mod plugins;
 pub mod sandbox;
 pub mod security;
+pub mod social;
 pub mod teams;
 pub mod templates;
 pub mod terminal;
@@ -121,6 +123,14 @@ fn is_secret_setting_key(key: &str) -> bool {
             | "google_client_secret"
             | "google_refresh_token"
             | "discord_bot_token"
+            | "twitter_bearer_token"
+            | "twitter_api_key"
+            | "twitter_api_secret"
+            | "twitter_access_token"
+            | "twitter_access_secret"
+            | "linkedin_access_token"
+            | "reddit_access_token"
+            | "hackernews_password"
     )
 }
 
@@ -137,6 +147,14 @@ fn secret_setting_to_vault_key(key: &str) -> Option<&'static str> {
         "google_client_secret" => Some("GOOGLE_CLIENT_SECRET"),
         "google_refresh_token" => Some("GOOGLE_REFRESH_TOKEN"),
         "discord_bot_token" => Some("DISCORD_BOT_TOKEN"),
+        "twitter_bearer_token" => Some("TWITTER_BEARER_TOKEN"),
+        "twitter_api_key" => Some("TWITTER_API_KEY"),
+        "twitter_api_secret" => Some("TWITTER_API_SECRET"),
+        "twitter_access_token" => Some("TWITTER_ACCESS_TOKEN"),
+        "twitter_access_secret" => Some("TWITTER_ACCESS_SECRET"),
+        "linkedin_access_token" => Some("LINKEDIN_ACCESS_TOKEN"),
+        "reddit_access_token" => Some("REDDIT_ACCESS_TOKEN"),
+        "hackernews_password" => Some("HACKERNEWS_PASSWORD"),
         _ => None,
     }
 }
@@ -153,6 +171,14 @@ fn scrub_persisted_secrets(settings: &mut config::Settings) {
     settings.google_client_secret.clear();
     settings.google_refresh_token.clear();
     settings.discord_bot_token.clear();
+    settings.twitter_bearer_token.clear();
+    settings.twitter_api_key.clear();
+    settings.twitter_api_secret.clear();
+    settings.twitter_access_token.clear();
+    settings.twitter_access_secret.clear();
+    settings.linkedin_access_token.clear();
+    settings.reddit_access_token.clear();
+    settings.hackernews_password.clear();
 }
 
 fn load_secret_from_vault(vault: &vault::SecureVault, key: &str) -> Option<String> {
@@ -200,6 +226,31 @@ fn hydrate_settings_from_vault(
     }
     if let Some(v) = load_secret_from_vault(vault, "DISCORD_BOT_TOKEN") {
         settings.discord_bot_token = v;
+    }
+    // M8-1: Social Media Connectors
+    if let Some(v) = load_secret_from_vault(vault, "TWITTER_BEARER_TOKEN") {
+        settings.twitter_bearer_token = v;
+    }
+    if let Some(v) = load_secret_from_vault(vault, "TWITTER_API_KEY") {
+        settings.twitter_api_key = v;
+    }
+    if let Some(v) = load_secret_from_vault(vault, "TWITTER_API_SECRET") {
+        settings.twitter_api_secret = v;
+    }
+    if let Some(v) = load_secret_from_vault(vault, "TWITTER_ACCESS_TOKEN") {
+        settings.twitter_access_token = v;
+    }
+    if let Some(v) = load_secret_from_vault(vault, "TWITTER_ACCESS_SECRET") {
+        settings.twitter_access_secret = v;
+    }
+    if let Some(v) = load_secret_from_vault(vault, "LINKEDIN_ACCESS_TOKEN") {
+        settings.linkedin_access_token = v;
+    }
+    if let Some(v) = load_secret_from_vault(vault, "REDDIT_ACCESS_TOKEN") {
+        settings.reddit_access_token = v;
+    }
+    if let Some(v) = load_secret_from_vault(vault, "HACKERNEWS_PASSWORD") {
+        settings.hackernews_password = v;
     }
     Ok(())
 }
@@ -296,6 +347,12 @@ pub struct AppState {
     pub session_store: Arc<agent_loop::session::SessionStore>,
     /// Coordinator runtime for multi-agent missions
     pub coordinator_runtime: Arc<coordinator::runtime::CoordinatorRuntime>,
+    /// M8-1: Social Media Connectors — SocialManager
+    pub social_manager: Arc<tokio::sync::Mutex<social::SocialManager>>,
+    /// M8-2: Editorial Calendar for scheduled social posts
+    pub editorial_calendar: Arc<tokio::sync::Mutex<marketing::EditorialCalendar>>,
+    /// M8-2: Campaign Manager for marketing campaigns
+    pub campaign_manager: Arc<tokio::sync::Mutex<marketing::CampaignManager>>,
 }
 
 #[tauri::command]
@@ -6979,6 +7036,331 @@ async fn cmd_install_update(path: String) -> Result<serde_json::Value, String> {
     }))
 }
 
+// ─── M8-2: Marketing IPC Commands ───────────────────────────────────────────
+
+#[tauri::command]
+async fn cmd_generate_content(
+    state: tauri::State<'_, AppState>,
+    topic: String,
+    platforms: Vec<String>,
+    tone: String,
+) -> Result<serde_json::Value, String> {
+    let gateway = state.gateway.lock().await;
+    let settings = state.settings.lock().map_err(|e| e.to_string())?.clone();
+    let results =
+        marketing::ContentGenerator::generate(&topic, &platforms, &tone, &gateway, &settings)
+            .await?;
+    serde_json::to_value(&results).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_generate_weekly_plan(
+    state: tauri::State<'_, AppState>,
+    topics: Vec<String>,
+    platforms: Vec<String>,
+    posts_per_week: u32,
+) -> Result<serde_json::Value, String> {
+    let gateway = state.gateway.lock().await;
+    let settings = state.settings.lock().map_err(|e| e.to_string())?.clone();
+    let posts = marketing::ContentGenerator::generate_weekly_plan(
+        &topics,
+        &platforms,
+        posts_per_week,
+        &gateway,
+        &settings,
+    )
+    .await?;
+    serde_json::to_value(&posts).map_err(|e| e.to_string())
+}
+
+fn load_unclassified_mentions(
+    db_path: &std::path::Path,
+) -> Result<Vec<marketing::Mention>, String> {
+    let conn = rusqlite::Connection::open(db_path).map_err(|e| e.to_string())?;
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS social_mentions (
+            id TEXT PRIMARY KEY,
+            platform TEXT NOT NULL,
+            author TEXT NOT NULL,
+            content TEXT NOT NULL,
+            url TEXT,
+            classification TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        );",
+    )
+    .map_err(|e| e.to_string())?;
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, platform, author, content, url, created_at FROM social_mentions \
+             WHERE classification IS NULL ORDER BY created_at DESC LIMIT 20",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let mentions: Vec<marketing::Mention> = stmt
+        .query_map([], |row| {
+            Ok(marketing::Mention {
+                id: row.get(0)?,
+                platform: row.get(1)?,
+                author: row.get(2)?,
+                content: row.get(3)?,
+                url: row.get(4)?,
+                timestamp: row.get::<_, String>(5).unwrap_or_default(),
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(mentions)
+}
+
+#[tauri::command]
+async fn cmd_process_mentions(
+    state: tauri::State<'_, AppState>,
+    brand_voice: String,
+) -> Result<serde_json::Value, String> {
+    // Collect mentions from DB in a helper so rusqlite types are dropped
+    // before any .await (rusqlite types are not Send).
+    let mentions = load_unclassified_mentions(&state.db_path)?;
+
+    let gateway = state.gateway.lock().await;
+    let settings = state.settings.lock().map_err(|e| e.to_string())?.clone();
+    let responses =
+        marketing::EngagementManager::process_mentions(&mentions, &brand_voice, &gateway, &settings)
+            .await?;
+
+    serde_json::to_value(&responses).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_get_calendar(
+    state: tauri::State<'_, AppState>,
+    start_date: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let cal = state.editorial_calendar.lock().await;
+    if let Some(start) = start_date {
+        let posts = cal.get_week(&start);
+        serde_json::to_value(&posts).map_err(|e| e.to_string())
+    } else {
+        Ok(cal.to_json())
+    }
+}
+
+#[tauri::command]
+async fn cmd_schedule_post(
+    state: tauri::State<'_, AppState>,
+    platform: String,
+    content: String,
+    scheduled_for: String,
+    tags: Vec<String>,
+) -> Result<serde_json::Value, String> {
+    let post = marketing::ScheduledPost {
+        id: uuid::Uuid::new_v4().to_string(),
+        platform,
+        content,
+        scheduled_for,
+        status: "scheduled".to_string(),
+        tags,
+    };
+    let mut cal = state.editorial_calendar.lock().await;
+    cal.add_post(post.clone());
+    serde_json::to_value(&post).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_create_campaign(
+    state: tauri::State<'_, AppState>,
+    name: String,
+    description: String,
+    platforms: Vec<String>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.campaign_manager.lock().await;
+    let campaign = mgr.create(&name, &description, platforms);
+    serde_json::to_value(&campaign).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_get_campaign(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.campaign_manager.lock().await;
+    match mgr.get(&id) {
+        Some(campaign) => serde_json::to_value(campaign).map_err(|e| e.to_string()),
+        None => Err(format!("Campaign not found: {}", id)),
+    }
+}
+
+#[tauri::command]
+async fn cmd_list_campaigns(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.campaign_manager.lock().await;
+    Ok(mgr.to_json())
+}
+
+// ── M8-1: Social Media Connectors — IPC commands ─────────────────────────
+
+#[tauri::command]
+async fn cmd_social_connect_platform(
+    platform: String,
+    credentials: serde_json::Value,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let connector: Box<dyn social::SocialPlatform> = match platform.as_str() {
+        "twitter" => {
+            let bearer = credentials["bearer_token"].as_str().unwrap_or("");
+            let api_key = credentials["api_key"].as_str().unwrap_or("");
+            let api_secret = credentials["api_secret"].as_str().unwrap_or("");
+            let access_token = credentials["access_token"].as_str().unwrap_or("");
+            let access_secret = credentials["access_secret"].as_str().unwrap_or("");
+            Box::new(social::twitter::TwitterConnector::new(
+                bearer,
+                api_key,
+                api_secret,
+                access_token,
+                access_secret,
+            ))
+        }
+        "linkedin" => {
+            let token = credentials["access_token"].as_str().unwrap_or("");
+            let urn = credentials["person_urn"].as_str().unwrap_or("");
+            Box::new(social::linkedin::LinkedInConnector::new(token, urn))
+        }
+        "reddit" => {
+            let token = credentials["access_token"].as_str().unwrap_or("");
+            let username = credentials["username"].as_str().unwrap_or("");
+            Box::new(social::reddit::RedditConnector::new(token, username))
+        }
+        "hackernews" => {
+            let username = credentials["username"].as_str().unwrap_or("");
+            let password = credentials["password"].as_str().unwrap_or("");
+            Box::new(social::hackernews::HackerNewsConnector::new(username, password))
+        }
+        _ => return Err(format!("Unknown platform: {platform}")),
+    };
+
+    let connected = connector.is_connected();
+    let mut mgr = state.social_manager.lock().await;
+    mgr.add_platform(connector);
+
+    Ok(serde_json::json!({
+        "ok": true,
+        "platform": platform,
+        "connected": connected,
+    }))
+}
+
+#[tauri::command]
+async fn cmd_social_disconnect_platform(
+    platform: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.social_manager.lock().await;
+    mgr.remove_platform(&platform);
+    Ok(serde_json::json!({ "ok": true, "platform": platform }))
+}
+
+#[tauri::command]
+async fn cmd_social_list_platforms(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.social_manager.lock().await;
+    let connected = mgr.list_connected();
+    Ok(serde_json::json!({ "platforms": connected }))
+}
+
+#[tauri::command]
+async fn cmd_social_post(
+    content: String,
+    platforms: Vec<String>,
+    media_url: Option<String>,
+    tags: Vec<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let post = social::traits::SocialPost {
+        content,
+        media_url,
+        reply_to: None,
+        tags,
+    };
+    let mgr = state.social_manager.lock().await;
+    let results = mgr.post_to_all(&post, &platforms).await;
+    let entries: Vec<serde_json::Value> = results
+        .into_iter()
+        .map(|(name, r)| match r {
+            Ok(pr) => serde_json::json!({
+                "platform": name,
+                "ok": true,
+                "id": pr.id,
+                "url": pr.url,
+                "posted_at": pr.posted_at,
+            }),
+            Err(e) => serde_json::json!({
+                "platform": name,
+                "ok": false,
+                "error": e,
+            }),
+        })
+        .collect();
+    Ok(serde_json::json!({ "results": entries }))
+}
+
+#[tauri::command]
+async fn cmd_social_reply(
+    platform: String,
+    post_id: String,
+    content: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.social_manager.lock().await;
+    let p = mgr.get(&platform).ok_or(format!("Platform '{platform}' not connected"))?;
+    let result = p.reply(&post_id, &content).await?;
+    Ok(serde_json::json!({
+        "ok": true,
+        "id": result.id,
+        "url": result.url,
+        "platform": result.platform,
+        "posted_at": result.posted_at,
+    }))
+}
+
+#[tauri::command]
+async fn cmd_social_get_mentions(
+    since_hours: Option<u32>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let hours = since_hours.unwrap_or(24);
+    let mgr = state.social_manager.lock().await;
+    let mentions = mgr.get_all_mentions(hours).await;
+    Ok(serde_json::json!({ "mentions": mentions }))
+}
+
+#[tauri::command]
+async fn cmd_social_get_engagement(
+    period_days: Option<u32>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let days = period_days.unwrap_or(30);
+    let mgr = state.social_manager.lock().await;
+    let metrics = mgr.get_total_engagement(days).await;
+    Ok(serde_json::json!({ "metrics": metrics }))
+}
+
+#[tauri::command]
+async fn cmd_social_search(
+    platform: String,
+    query: String,
+    limit: Option<u32>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mgr = state.social_manager.lock().await;
+    let p = mgr.get(&platform).ok_or(format!("Platform '{platform}' not connected"))?;
+    let results = p.search(&query, limit.unwrap_or(20)).await?;
+    Ok(serde_json::json!({ "results": results }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -7189,6 +7571,17 @@ pub fn run() {
                 // P4: Session persistence store
                 session_store,
                 coordinator_runtime,
+                // M8-1: Social Media Connectors
+                social_manager: Arc::new(tokio::sync::Mutex::new(
+                    social::SocialManager::new(),
+                )),
+                // M8-2: Marketing — editorial calendar & campaign manager
+                editorial_calendar: Arc::new(tokio::sync::Mutex::new(
+                    marketing::EditorialCalendar::new(),
+                )),
+                campaign_manager: Arc::new(tokio::sync::Mutex::new(
+                    marketing::CampaignManager::new(),
+                )),
             });
 
             // ── R35: Deferred startup — plugin discovery in background ────
@@ -7995,6 +8388,24 @@ pub fn run() {
             cmd_get_mission_history,
             cmd_get_available_specialists,
             cmd_get_available_tools,
+            // M8-2: Marketing commands
+            cmd_generate_content,
+            cmd_generate_weekly_plan,
+            cmd_process_mentions,
+            cmd_get_calendar,
+            cmd_schedule_post,
+            cmd_create_campaign,
+            cmd_get_campaign,
+            cmd_list_campaigns,
+            // M8-1: Social Media Connectors commands
+            cmd_social_connect_platform,
+            cmd_social_disconnect_platform,
+            cmd_social_list_platforms,
+            cmd_social_post,
+            cmd_social_reply,
+            cmd_social_get_mentions,
+            cmd_social_get_engagement,
+            cmd_social_search,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");
