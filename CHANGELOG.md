@@ -1,5 +1,23 @@
 # Changelog
 
+## [7.0.0] - 2026-04-04 -- Docker Sandbox Workers, Local AI, Distributed Swarm
+
+### Added
+- S4: Mesh Remote Workers -- deploy, exec, stop worker containers on any LAN node
+  - `remote_worker.rs` coordinator module with RemoteWorkerManager
+  - Worker host API routes: POST /workers/deploy, POST /workers/:id/exec, DELETE /workers/:id, GET /workers/:id/status, GET /workers/status
+  - IPC commands: cmd_deploy_remote_worker, cmd_list_mesh_nodes_with_docker
+  - Frontend hooks: deployRemoteWorker, listMeshNodesWithDocker
+- S6: All-in-One Installer -- single-script setup for Docker Desktop + Ollama + worker image + AI models
+  - `installer/setup_docker.ps1` PowerShell script (idempotent)
+  - Downloads and installs Docker Desktop and Ollama if missing
+  - Builds agentos-worker:latest image from Dockerfile
+  - Pulls phi3:mini and llama3.2:1b local models
+
+### Changed
+- Version bump to 7.0.0 across Cargo.toml, frontend, and mobile packages
+- API server now exposes mesh worker endpoints for cross-node orchestration
+
 ## [5.0.0] - 2026-04-03 -- Zero Gaps Release
 
 ### Added
