@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
-// B12-2: Inter-Team Orchestration — Cross-team event bus
+// B12-2: Inter-Team Orchestration -- Cross-team event bus
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,6 +24,17 @@ pub struct OrchestrationRule {
     pub target_action: String,
     pub description: String,
     pub active: bool,
+}
+
+/// A triggered action produced by process_pending: the original event plus a
+/// human-readable task description that can be fed to the agent loop.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TriggeredAction {
+    pub event: CrossTeamEvent,
+    pub rule_id: String,
+    pub target_team: String,
+    pub target_action: String,
+    pub task_description: String,
 }
 
 pub struct CrossTeamOrchestrator {
@@ -105,8 +116,9 @@ impl CrossTeamOrchestrator {
         self.events.push(event);
     }
 
-    /// Process pending events: match against rules and return those that triggered actions
-    pub fn process_pending(&mut self) -> Vec<CrossTeamEvent> {
+    /// Process pending events: match against rules and return triggered actions
+    /// with task descriptions that can be fed directly into the agent loop.
+    pub fn process_pending(&mut self) -> Vec<TriggeredAction> {
         let mut triggered = Vec::new();
         for event in &mut self.events {
             if event.processed {
@@ -117,11 +129,25 @@ impl CrossTeamOrchestrator {
                     continue;
                 }
                 if rule.trigger_team == event.from_team && rule.trigger_event == event.event_type {
-                    event.processed = true;
-                    triggered.push(event.clone());
+                    let task_description = format!(
+                        "[Auto-trigger] {} -> {}: {}\nRegla: {}\nEvento original: {:?}",
+                        rule.trigger_team,
+                        rule.target_team,
+                        rule.target_action,
+                        rule.description,
+                        event.payload
+                    );
+                    triggered.push(TriggeredAction {
+                        event: event.clone(),
+                        rule_id: rule.id.clone(),
+                        target_team: rule.target_team.clone(),
+                        target_action: rule.target_action.clone(),
+                        task_description,
+                    });
                     break;
                 }
             }
+            event.processed = true;
         }
         triggered
     }
@@ -165,6 +191,48 @@ mod tests {
         });
         let triggered = o.process_pending();
         assert_eq!(triggered.len(), 1);
-        assert!(triggered[0].processed);
+        assert!(triggered[0].event.processed);
+        assert_eq!(triggered[0].target_team, "sales");
+        assert_eq!(triggered[0].target_action, "create_sales_task");
+        assert!(triggered[0].task_description.contains("Auto-trigger"));
+    }
+
+    #[test]
+    fn inactive_rule_does_not_trigger() {
+        let mut o = CrossTeamOrchestrator::new();
+        // Deactivate all rules
+        for rule in o.rules.iter_mut() {
+            rule.active = false;
+        }
+        o.fire_event(CrossTeamEvent {
+            id: "evt2".into(),
+            from_team: "marketing".into(),
+            to_team: "sales".into(),
+            event_type: "lead_generated".into(),
+            payload: serde_json::json!({}),
+            created_at: "2026-04-04T00:00:00Z".into(),
+            processed: false,
+        });
+        let triggered = o.process_pending();
+        assert_eq!(triggered.len(), 0);
+    }
+
+    #[test]
+    fn already_processed_events_skipped() {
+        let mut o = CrossTeamOrchestrator::new();
+        o.fire_event(CrossTeamEvent {
+            id: "evt3".into(),
+            from_team: "marketing".into(),
+            to_team: "sales".into(),
+            event_type: "lead_generated".into(),
+            payload: serde_json::json!({}),
+            created_at: "2026-04-04T00:00:00Z".into(),
+            processed: false,
+        });
+        let first = o.process_pending();
+        assert_eq!(first.len(), 1);
+        // Processing again should yield nothing
+        let second = o.process_pending();
+        assert_eq!(second.len(), 0);
     }
 }

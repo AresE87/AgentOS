@@ -7219,8 +7219,10 @@ async fn cmd_create_campaign(
     description: String,
     platforms: Vec<String>,
 ) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let conn = db.conn();
     let mut mgr = state.campaign_manager.lock().await;
-    let campaign = mgr.create(&name, &description, platforms);
+    let campaign = mgr.create_and_save(&name, &description, platforms, conn)?;
     serde_json::to_value(&campaign).map_err(|e| e.to_string())
 }
 
@@ -7331,11 +7333,8 @@ async fn cmd_activate_team(
         active: true,
         created_at: chrono::Utc::now().to_rfc3339(),
     };
-    let status = teams_engine::runner::TeamRunner::activate(&team_config)?;
     let mut teams = state.active_teams.lock().await;
-    // Replace if already exists
-    teams.retain(|(c, _)| c.template_id != template_id);
-    teams.push((team_config, status.clone()));
+    let status = teams_engine::runner::TeamRunner::activate(&team_config, &mut teams)?;
     serde_json::to_value(&status).map_err(|e| e.to_string())
 }
 
@@ -7344,10 +7343,9 @@ async fn cmd_deactivate_team(
     template_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    teams_engine::runner::TeamRunner::deactivate(&template_id)?;
     let mut teams = state.active_teams.lock().await;
-    teams.retain(|(c, _)| c.template_id != template_id);
-    Ok(serde_json::json!({ "ok": true }))
+    let status = teams_engine::runner::TeamRunner::deactivate(&template_id, &mut teams)?;
+    serde_json::to_value(&status).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -7374,6 +7372,7 @@ async fn cmd_list_active_teams(
 async fn cmd_run_team_cycle(
     template_id: String,
     state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<serde_json::Value, String> {
     let config = {
         let teams = state.active_teams.lock().await;
@@ -7385,14 +7384,22 @@ async fn cmd_run_team_cycle(
     };
     let gateway = state.gateway.lock().await;
     let settings = state.settings.lock().map_err(|e| e.to_string())?.clone();
-    let result =
-        teams_engine::runner::TeamRunner::run_cycle(&config, &gateway, &settings).await?;
+    let result = teams_engine::runner::TeamRunner::run_cycle(
+        &config,
+        &gateway,
+        &settings,
+        &state.tool_registry,
+        &state.db_path,
+        &state.kill_switch,
+        Some(&app_handle),
+    )
+    .await?;
     // Update last_run timestamp + increment tasks_completed
     {
         let mut teams = state.active_teams.lock().await;
         if let Some((_, status)) = teams.iter_mut().find(|(c, _)| c.template_id == template_id) {
             status.last_run = Some(chrono::Utc::now().to_rfc3339());
-            status.tasks_completed += result["agents_executed"].as_u64().unwrap_or(0);
+            status.tasks_completed += result["iterations"].as_u64().unwrap_or(1);
         }
     }
     Ok(result)
@@ -7444,12 +7451,35 @@ async fn cmd_get_cross_team_events(
 async fn cmd_fire_cross_team_event(
     event: serde_json::Value,
     state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<serde_json::Value, String> {
     let parsed: business::CrossTeamEvent =
         serde_json::from_value(event).map_err(|e| format!("Invalid event: {}", e))?;
     let mut orchestrator = state.cross_team_orchestrator.lock().await;
     orchestrator.fire_event(parsed);
     let triggered = orchestrator.process_pending();
+
+    // Emit frontend events and log each triggered action
+    for action in &triggered {
+        tracing::info!(
+            rule_id = %action.rule_id,
+            target_team = %action.target_team,
+            target_action = %action.target_action,
+            "Cross-team orchestration triggered"
+        );
+        let _ = app_handle.emit(
+            "orchestration:triggered",
+            serde_json::json!({
+                "rule_id": action.rule_id,
+                "from_team": action.event.from_team,
+                "target_team": action.target_team,
+                "target_action": action.target_action,
+                "task_description": action.task_description,
+                "event_id": action.event.id,
+            }),
+        );
+    }
+
     serde_json::to_value(&triggered).map_err(|e| e.to_string())
 }
 
@@ -8112,6 +8142,12 @@ pub fn run() {
                 .load_from_db(db.conn())
                 .expect("failed to load offline queue");
 
+            // Hydrate campaign manager from SQLite before db moves into AppState
+            let mut campaign_manager_init = marketing::CampaignManager::new();
+            if let Err(e) = campaign_manager_init.load_from_db(db.conn()) {
+                tracing::warn!("Could not load campaigns from DB: {}", e);
+            }
+
             let screenshots_dir = app_dir.join("screenshots");
             std::fs::create_dir_all(&screenshots_dir).ok();
 
@@ -8306,7 +8342,7 @@ pub fn run() {
                     marketing::EditorialCalendar::new(),
                 )),
                 campaign_manager: Arc::new(tokio::sync::Mutex::new(
-                    marketing::CampaignManager::new(),
+                    campaign_manager_init,
                 )),
                 // E9-1: Training Studio recorder
                 training_recorder: Arc::new(tokio::sync::Mutex::new(

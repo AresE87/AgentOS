@@ -124,9 +124,11 @@ export default function Teams() {
   const [wizardStep, setWizardStep] = useState(0);
   const [wizardValues, setWizardValues] = useState<Record<string, string>>({});
   const [view, setView] = useState<'gallery' | 'wizard' | 'dashboard'>('gallery');
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [expandedTeam, setExpandedTeam] = useState<string | null>(null);
   const [runningCycle, setRunningCycle] = useState<string | null>(null);
+  const [cycleResult, setCycleResult] = useState<string | null>(null);
 
   // ── Data loading ─────────────────────────────────────────────────────
   const loadTemplates = useCallback(async () => {
@@ -152,8 +154,11 @@ export default function Teams() {
   }, [view]);
 
   useEffect(() => {
-    loadTemplates();
-    loadActiveTeams();
+    setLoading(true);
+    setError(null);
+    Promise.all([loadTemplates(), loadActiveTeams()])
+      .catch(() => setError('Error cargando datos de equipos'))
+      .finally(() => setLoading(false));
   }, [loadTemplates, loadActiveTeams]);
 
   // ── Wizard handlers ──────────────────────────────────────────────────
@@ -197,13 +202,18 @@ export default function Teams() {
 
   const handleRunCycle = async (templateId: string) => {
     setRunningCycle(templateId);
+    setCycleResult(null);
     try {
-      await runTeamCycle(templateId);
+      const result = await runTeamCycle(templateId);
+      const agentsRan = result?.agents_executed ?? 0;
+      setCycleResult(`Ciclo completado: ${agentsRan} agentes ejecutados`);
       await loadActiveTeams();
     } catch (err) {
       console.error('Error running cycle:', err);
+      setCycleResult('Error al ejecutar el ciclo');
     } finally {
       setRunningCycle(null);
+      setTimeout(() => setCycleResult(null), 5000);
     }
   };
 
@@ -719,6 +729,30 @@ export default function Teams() {
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {activeTeams.length === 0 && (
+          <div style={{
+            textAlign: 'center', padding: 60,
+            background: C.bgSurface, borderRadius: 14,
+            border: `1px solid ${C.border}`,
+          }}>
+            <Users size={40} style={{ color: C.textMuted, marginBottom: 12 }} />
+            <div style={{ color: C.textPrimary, fontSize: 16, fontWeight: 600, marginBottom: 6 }}>
+              Sin equipos activos
+            </div>
+            <div style={{ color: C.textMuted, fontSize: 13, marginBottom: 20 }}>
+              Selecciona un template para empezar.
+            </div>
+            <button
+              onClick={() => setView('gallery')}
+              style={{
+                background: C.cyan, color: '#000', border: 'none', borderRadius: 10,
+                padding: '10px 24px', fontSize: 14, fontWeight: 700, cursor: 'pointer',
+              }}
+            >
+              Ver Templates
+            </button>
+          </div>
+        )}
         {activeTeams.map((team) => {
           const template = templates.find((t) => t.id === team.template_id);
           const catColor = template
@@ -1043,9 +1077,45 @@ export default function Teams() {
       {/* Spin animation for loading states */}
       <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
 
-      {view === 'gallery' && renderGallery()}
-      {view === 'wizard' && renderWizard()}
-      {view === 'dashboard' && renderDashboard()}
+      {/* Cycle result toast */}
+      {cycleResult && (
+        <div style={{
+          position: 'fixed', top: 20, right: 20, zIndex: 1000,
+          background: cycleResult.includes('Error') ? C.error : C.success,
+          color: '#fff', padding: '12px 24px', borderRadius: 10,
+          fontSize: 13, fontWeight: 600, boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+        }}>
+          {cycleResult}
+        </div>
+      )}
+
+      {/* Loading state */}
+      {loading && (
+        <div style={{ textAlign: 'center', color: C.textMuted, padding: 80, fontSize: 14 }}>
+          <RefreshCw size={24} style={{ animation: 'spin 1s linear infinite', marginBottom: 12 }} />
+          <div>Cargando equipos...</div>
+        </div>
+      )}
+
+      {/* Error state */}
+      {!loading && error && (
+        <div style={{ textAlign: 'center', color: C.error, padding: 60, fontSize: 14 }}>
+          <p>{error}</p>
+          <button
+            onClick={() => { setError(null); loadTemplates(); loadActiveTeams(); }}
+            style={{
+              background: `${C.error}18`, color: C.error, border: `1px solid ${C.error}44`,
+              borderRadius: 8, padding: '8px 20px', fontSize: 13, cursor: 'pointer', marginTop: 8,
+            }}
+          >
+            Reintentar
+          </button>
+        </div>
+      )}
+
+      {!loading && !error && view === 'gallery' && renderGallery()}
+      {!loading && !error && view === 'wizard' && renderWizard()}
+      {!loading && !error && view === 'dashboard' && renderDashboard()}
     </div>
   );
 }

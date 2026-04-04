@@ -5,5 +5,5 @@ pub mod revenue;
 
 pub use automations::BusinessAutomations;
 pub use dashboard::{BusinessDashboard, BusinessOverview, MarketplaceMetrics, TeamMetrics};
-pub use orchestration::{CrossTeamEvent, CrossTeamOrchestrator, OrchestrationRule};
+pub use orchestration::{CrossTeamEvent, CrossTeamOrchestrator, OrchestrationRule, TriggeredAction};
 pub use revenue::{RevenueAnalytics, RevenueReport};

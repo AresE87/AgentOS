@@ -279,7 +279,33 @@ export default function Business() {
         </div>
       )}
 
-      {!loading && tab === 'overview' && (
+      {!loading && tab === 'overview' && overview && overview.total_revenue === 0 &&
+        (overview.marketing?.tasks_completed || 0) === 0 &&
+        (overview.sales?.tasks_completed || 0) === 0 &&
+        (overview.support?.tasks_completed || 0) === 0 &&
+        (overview.content?.tasks_completed || 0) === 0 &&
+        (overview.finance?.tasks_completed || 0) === 0 && (
+        <div style={{
+          textAlign: 'center', padding: 80,
+          background: C.bgSurface, borderRadius: 14,
+          border: `1px solid ${C.border}`,
+        }}>
+          <Building2 size={48} style={{ color: C.textMuted, marginBottom: 16 }} />
+          <div style={{ color: C.textPrimary, fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
+            Sin datos de negocio aun
+          </div>
+          <div style={{ color: C.textMuted, fontSize: 14, maxWidth: 400, margin: '0 auto' }}>
+            Activa un equipo desde la pagina Teams para empezar a generar datos.
+          </div>
+        </div>
+      )}
+
+      {!loading && tab === 'overview' && !(overview && overview.total_revenue === 0 &&
+        (overview.marketing?.tasks_completed || 0) === 0 &&
+        (overview.sales?.tasks_completed || 0) === 0 &&
+        (overview.support?.tasks_completed || 0) === 0 &&
+        (overview.content?.tasks_completed || 0) === 0 &&
+        (overview.finance?.tasks_completed || 0) === 0) && (
         <>
           {/* 6 KPI Cards */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12, marginBottom: 24 }}>
