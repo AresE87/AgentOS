@@ -48,13 +48,8 @@ pub fn check_health(
     #[cfg(not(target_os = "windows"))]
     features.insert("vision_capture".to_string(), FeatureStatus::Unavailable("Windows only".into()));
 
-    // Check mesh
-    let mesh_nodes = crate::mesh::discovery::get_discovered_nodes();
-    features.insert("mesh".to_string(), if mesh_nodes.is_empty() {
-        FeatureStatus::Degraded("No nodes discovered".into())
-    } else {
-        FeatureStatus::Working
-    });
+    // Mesh module removed in F1 cleanup
+    features.insert("mesh".to_string(), FeatureStatus::Unavailable("Removed in v5.0.0".into()));
 
     // Check vault
     let vault_path = db_path.parent().unwrap_or(db_path).join("vault.enc");
