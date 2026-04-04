@@ -4,6 +4,7 @@ pub mod local_llm;
 pub mod prompt_cache;
 pub mod providers;
 mod router;
+pub mod stream;
 mod types;
 
 pub use classifier::{classify, classify_smart, TaskClassification, TaskTier, TaskType};

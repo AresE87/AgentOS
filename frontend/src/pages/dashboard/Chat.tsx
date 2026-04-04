@@ -245,6 +245,7 @@ export default function Chat() {
   const [input, setInput] = useState('');
   const [typing, setTyping] = useState(false);
   const [forcePC, setForcePC] = useState(false);
+  const [streamingText, setStreamingText] = useState('');
 
   // Vision mode state
   const [taskRunning, setTaskRunning] = useState(false);
@@ -299,10 +300,19 @@ export default function Chat() {
     let unVision: (() => void) | null = null;
     let unStep: (() => void) | null = null;
     let unComplete: (() => void) | null = null;
+    let unToken: (() => void) | null = null;
 
     async function subscribe() {
       try {
         const { listen } = await import('@tauri-apps/api/event');
+
+        // Streaming token events from agent loop
+        unToken = await listen<any>('agent:token', (event) => {
+          const p = event.payload;
+          if (p.delta_type === 'text_delta' && p.text) {
+            setStreamingText((prev) => prev + p.text);
+          }
+        });
 
         // Vision step screenshot stream
         unVision = await listen<any>('agent:vision_step', (event) => {
@@ -383,6 +393,7 @@ export default function Chat() {
       unVision?.();
       unStep?.();
       unComplete?.();
+      unToken?.();
     };
   }, []);
 
@@ -391,7 +402,7 @@ export default function Chat() {
     if (scrollRef.current) {
       scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
     }
-  }, [messages, typing]);
+  }, [messages, typing, streamingText]);
 
   /* ---- Auto-scroll timeline --------------------------------------- */
   useEffect(() => {
@@ -494,6 +505,7 @@ export default function Chat() {
       setMessages((m) => [...m, userMsg]);
       setInput('');
       setTyping(true);
+      setStreamingText('');
 
       // Reset textarea height
       if (inputRef.current) {
@@ -592,6 +604,7 @@ export default function Chat() {
         } else {
           // ---------- CHAT MODE ----------
           const result = await processMessage(msg);
+          setStreamingText('');
           const agentMsg: Message = {
             id: result.task_id || `agent-${Date.now()}`,
             role: 'agent',
@@ -871,8 +884,31 @@ export default function Chat() {
             );
           })}
 
-          {/* Typing indicator */}
-          {typing && !taskRunning && <TypingIndicator />}
+          {/* Streaming text / typing indicator */}
+          {typing && !taskRunning && (
+            streamingText ? (
+              <div className="flex justify-start">
+                <div
+                  className="rounded-lg rounded-bl-none px-4 py-3 border max-w-[85%]"
+                  style={{ background: T.bgSurface, borderColor: 'rgba(0,229,229,0.08)' }}
+                >
+                  <p className="text-sm whitespace-pre-wrap" style={{ color: T.textSecondary }}>
+                    {streamingText}
+                    <span
+                      className="inline-block w-1.5 h-4 ml-0.5 rounded-sm"
+                      style={{
+                        background: T.cyan,
+                        animation: 'pulse 1s ease-in-out infinite',
+                        verticalAlign: 'text-bottom',
+                      }}
+                    />
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <TypingIndicator />
+            )
+          )}
         </div>
       </div>
 

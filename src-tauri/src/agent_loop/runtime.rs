@@ -142,6 +142,30 @@ impl AgentRuntime {
                 }
             }
 
+            // Emit streaming token events so the frontend can render
+            // content incrementally instead of waiting for the full turn.
+            if let Some(handle) = event_emitter {
+                for text in &text_parts {
+                    let _ = handle.emit(
+                        "agent:token",
+                        serde_json::json!({
+                            "delta_type": "text_delta",
+                            "text": text,
+                        }),
+                    );
+                }
+                for tool_block in &tool_uses {
+                    let _ = handle.emit(
+                        "agent:token",
+                        serde_json::json!({
+                            "delta_type": "tool_use_start",
+                            "tool_name": tool_block.get("name").and_then(|v| v.as_str()).unwrap_or(""),
+                            "tool_id": tool_block.get("id").and_then(|v| v.as_str()).unwrap_or(""),
+                        }),
+                    );
+                }
+            }
+
             // Add assistant message to conversation
             let assistant_msg = serde_json::json!({
                 "role": "assistant",

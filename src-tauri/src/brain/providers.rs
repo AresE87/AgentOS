@@ -2,6 +2,7 @@ use reqwest::Client;
 use serde_json::json;
 use tracing::info;
 
+use super::stream::{self, ContentDelta};
 use super::types::Message;
 
 pub struct Providers {
@@ -277,6 +278,197 @@ impl Providers {
         }
 
         Err(format!("Anthropic API: max retries exhausted: {}", last_error))
+    }
+
+    /// Streaming variant of call_anthropic_with_tools.
+    /// Calls the Anthropic API with `"stream": true`, parses SSE events,
+    /// invokes `event_callback` for each content delta, and returns the
+    /// fully-assembled response in the same format as the non-streaming call.
+    pub async fn call_anthropic_with_tools_streaming<F>(
+        api_key: &str,
+        model: &str,
+        messages: &[serde_json::Value],
+        tools: &[serde_json::Value],
+        system_prompt: Option<&str>,
+        max_tokens: u32,
+        event_callback: F,
+    ) -> Result<serde_json::Value, String>
+    where
+        F: Fn(ContentDelta) + Send,
+    {
+        let client = Client::new();
+
+        let mut body = json!({
+            "model": model,
+            "max_tokens": max_tokens,
+            "messages": messages,
+            "stream": true,
+        });
+
+        if !tools.is_empty() {
+            body["tools"] = serde_json::Value::Array(tools.to_vec());
+        }
+        if let Some(sys) = system_prompt {
+            body["system"] = json!([{
+                "type": "text",
+                "text": sys,
+                "cache_control": {"type": "ephemeral"}
+            }]);
+        }
+
+        let max_retries = 3u32;
+        let mut last_error = String::new();
+        let mut response = None;
+
+        for attempt in 0..=max_retries {
+            let resp = client
+                .post("https://api.anthropic.com/v1/messages")
+                .header("x-api-key", api_key)
+                .header("anthropic-version", "2023-06-01")
+                .header("anthropic-beta", "prompt-caching-2024-07-31")
+                .header("content-type", "application/json")
+                .json(&body)
+                .send()
+                .await;
+
+            match resp {
+                Ok(r) if r.status().is_success() => {
+                    response = Some(r);
+                    break;
+                }
+                Ok(r) if is_retryable_status(r.status()) && attempt < max_retries => {
+                    last_error = format!("HTTP {}", r.status());
+                    let backoff = std::time::Duration::from_millis(200 * 2u64.pow(attempt));
+                    tokio::time::sleep(backoff.min(std::time::Duration::from_secs(2))).await;
+                    continue;
+                }
+                Ok(r) => {
+                    let status = r.status();
+                    let err_json: serde_json::Value = r
+                        .json()
+                        .await
+                        .map_err(|e| format!("Failed to parse error response: {}", e))?;
+                    return Err(format!("Anthropic API error {}: {}", status, err_json));
+                }
+                Err(e) if attempt < max_retries && (e.is_connect() || e.is_timeout()) => {
+                    last_error = e.to_string();
+                    let backoff = std::time::Duration::from_millis(200 * 2u64.pow(attempt));
+                    tokio::time::sleep(backoff.min(std::time::Duration::from_secs(2))).await;
+                    continue;
+                }
+                Err(e) => return Err(format!("Anthropic API error: {}", e)),
+            }
+        }
+
+        let resp = response.ok_or(format!(
+            "Anthropic API: max retries exhausted: {}",
+            last_error
+        ))?;
+
+        // Read the full body then parse SSE lines.
+        // (A true streaming read with `resp.chunk()` is possible but adds
+        //  lifetime complexity; this pragmatic approach still fires callbacks
+        //  for each parsed event.)
+        let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
+        let text = String::from_utf8_lossy(&bytes);
+
+        let mut full_content: Vec<serde_json::Value> = vec![];
+        let mut current_text = String::new();
+        let mut current_tool_json = String::new();
+        let mut current_tool_id = String::new();
+        let mut current_tool_name = String::new();
+        let mut in_tool_use = false;
+        let mut usage = json!({});
+        let mut stop_reason = String::new();
+
+        for line in text.lines() {
+            if !line.starts_with("data: ") {
+                continue;
+            }
+            let data = &line[6..];
+            if data == "[DONE]" {
+                break;
+            }
+
+            // Fire callback for recognized deltas
+            if let Some(delta) = stream::parse_anthropic_sse_event(data) {
+                event_callback(delta.clone());
+
+                match delta.delta_type.as_str() {
+                    "text_delta" => {
+                        if let Some(t) = &delta.text {
+                            current_text.push_str(t);
+                        }
+                    }
+                    "tool_use_start" => {
+                        // Flush pending text block
+                        if !current_text.is_empty() {
+                            full_content
+                                .push(json!({"type": "text", "text": current_text.clone()}));
+                            current_text.clear();
+                        }
+                        in_tool_use = true;
+                        current_tool_id = delta.tool_id.unwrap_or_default();
+                        current_tool_name = delta.tool_name.unwrap_or_default();
+                        current_tool_json.clear();
+                    }
+                    "tool_use_delta" => {
+                        if let Some(j) = &delta.tool_input_json {
+                            current_tool_json.push_str(j);
+                        }
+                    }
+                    "content_block_stop" => {
+                        if in_tool_use {
+                            let input: serde_json::Value =
+                                serde_json::from_str(&current_tool_json).unwrap_or(json!({}));
+                            full_content.push(json!({
+                                "type": "tool_use",
+                                "id": current_tool_id,
+                                "name": current_tool_name,
+                                "input": input,
+                            }));
+                            in_tool_use = false;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            // Also check for message-level events (usage, stop_reason)
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
+                match parsed.get("type").and_then(|t| t.as_str()) {
+                    Some("message_delta") => {
+                        if let Some(d) = parsed.get("delta") {
+                            if let Some(sr) = d.get("stop_reason").and_then(|s| s.as_str()) {
+                                stop_reason = sr.to_string();
+                            }
+                        }
+                        if let Some(u) = parsed.get("usage") {
+                            usage = u.clone();
+                        }
+                    }
+                    Some("message_start") => {
+                        if let Some(msg) = parsed.get("message") {
+                            if let Some(u) = msg.get("usage") {
+                                usage = u.clone();
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // Flush any remaining text
+        if !current_text.is_empty() {
+            full_content.push(json!({"type": "text", "text": current_text}));
+        }
+
+        Ok(json!({
+            "content": full_content,
+            "stop_reason": stop_reason,
+            "usage": usage,
+        }))
     }
 
     pub async fn call_openai_with_tools(
