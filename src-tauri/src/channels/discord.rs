@@ -213,13 +213,15 @@ pub async fn run_bot_loop(token: &str, settings: &crate::config::Settings) {
     }
 
     // Step 2: Connect to Gateway WebSocket with reconnect loop
+    // J2: Exponential backoff on reconnection
     let gateway = crate::brain::Gateway::new(settings);
     let registry = crate::agents::AgentRegistry::new();
+    let mut consecutive_failures: u32 = 0;
+    const MAX_BACKOFF_SECS: u64 = 120;
+    const MAX_CONSECUTIVE_FAILURES: u32 = 15;
 
     loop {
         if !DISCORD_RUNNING.load(Ordering::Relaxed) {
-            // We haven't set it yet on first iteration, but subsequent
-            // iterations check if we were told to stop
             if bot_name().is_some() {
                 info!("Discord bot stopped by user");
                 break;
@@ -229,8 +231,37 @@ pub async fn run_bot_loop(token: &str, settings: &crate::config::Settings) {
         match connect_gateway(token, settings, &gateway, &registry, &bot).await {
             Ok(()) => {
                 info!("Discord gateway connection closed cleanly");
+                consecutive_failures = 0;
             }
             Err(e) => {
+                consecutive_failures += 1;
+                let error_str = e.to_string();
+
+                // J2: Detect invalid token — Discord returns 4004 (Authentication failed)
+                // or HTTP 401 on REST, or opcode 9 with d=false (non-resumable)
+                if error_str.contains("4004")
+                    || error_str.contains("Authentication failed")
+                    || error_str.contains("401")
+                    || error_str.contains("Unauthorized")
+                {
+                    warn!(
+                        "Discord bot token is invalid — stopping reconnection. Error: {}",
+                        error_str
+                    );
+                    DISCORD_RUNNING.store(false, Ordering::Relaxed);
+                    break;
+                }
+
+                // J2: Stop after too many consecutive failures
+                if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
+                    warn!(
+                        "Discord gateway: {} consecutive failures — stopping. Last error: {}",
+                        consecutive_failures, error_str
+                    );
+                    DISCORD_RUNNING.store(false, Ordering::Relaxed);
+                    break;
+                }
+
                 warn!(error = %e, "Discord gateway connection error");
             }
         }
@@ -239,9 +270,14 @@ pub async fn run_bot_loop(token: &str, settings: &crate::config::Settings) {
             break;
         }
 
-        // Reconnect delay
-        info!("Reconnecting to Discord gateway in 5 seconds...");
-        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        // J2: Exponential backoff: 5s, 10s, 20s, ... capped at MAX_BACKOFF_SECS
+        let backoff = (5u64 * 2u64.saturating_pow(consecutive_failures.saturating_sub(1)))
+            .min(MAX_BACKOFF_SECS);
+        info!(
+            "Reconnecting to Discord gateway in {}s (attempt {}/{})...",
+            backoff, consecutive_failures, MAX_CONSECUTIVE_FAILURES
+        );
+        tokio::time::sleep(std::time::Duration::from_secs(backoff)).await;
     }
 
     stop();

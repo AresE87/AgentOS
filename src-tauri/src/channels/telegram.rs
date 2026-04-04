@@ -161,7 +161,14 @@ pub struct TelegramMessage {
     pub from: String,
 }
 
+/// J2: Maximum consecutive errors before stopping (prevents infinite retry on permanent errors)
+const MAX_CONSECUTIVE_ERRORS: u32 = 20;
+
+/// J2: Maximum backoff delay in seconds
+const MAX_BACKOFF_SECS: u64 = 120;
+
 /// Run the Telegram bot polling loop — processes messages via LLM
+/// J2: Now includes exponential backoff on errors and invalid token detection
 pub async fn run_bot_loop(token: &str, settings: &crate::config::Settings) {
     let mut bot = TelegramBot::new(token);
 
@@ -172,17 +179,19 @@ pub async fn run_bot_loop(token: &str, settings: &crate::config::Settings) {
             TELEGRAM_RUNNING.store(true, Ordering::Relaxed);
         }
         Err(e) => {
-            warn!(error = %e, "Telegram bot failed to connect");
+            warn!(error = %e, "Telegram bot token is invalid or network unavailable — not retrying");
             return;
         }
     }
 
     let gateway = crate::brain::Gateway::new(settings);
     let registry = crate::agents::AgentRegistry::new();
+    let mut consecutive_errors: u32 = 0;
 
     loop {
         match bot.get_updates().await {
             Ok(messages) => {
+                consecutive_errors = 0; // Reset on success
                 for msg in messages {
                     info!(
                         chat_id = msg.chat_id,
@@ -268,11 +277,43 @@ pub async fn run_bot_loop(token: &str, settings: &crate::config::Settings) {
                 }
             }
             Err(e) => {
-                warn!("Telegram polling error: {}", e);
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                consecutive_errors += 1;
+                let error_str = e.to_string();
+
+                // J2: Detect invalid token (401/403 from Telegram API)
+                if error_str.contains("401") || error_str.contains("Unauthorized") || error_str.contains("403") {
+                    warn!("Telegram bot token appears invalid — stopping polling. Error: {}", error_str);
+                    TELEGRAM_RUNNING.store(false, Ordering::Relaxed);
+                    break;
+                }
+
+                // J2: Stop after too many consecutive errors (permanent failure)
+                if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                    warn!(
+                        "Telegram polling: {} consecutive errors — stopping. Last error: {}",
+                        consecutive_errors, error_str
+                    );
+                    TELEGRAM_RUNNING.store(false, Ordering::Relaxed);
+                    break;
+                }
+
+                // J2: Exponential backoff: 5s, 10s, 20s, 40s, ... capped at MAX_BACKOFF_SECS
+                let backoff = (5u64 * 2u64.saturating_pow(consecutive_errors.saturating_sub(1)))
+                    .min(MAX_BACKOFF_SECS);
+                warn!(
+                    "Telegram polling error (attempt {}/{}): {} — retrying in {}s",
+                    consecutive_errors, MAX_CONSECUTIVE_ERRORS, error_str, backoff
+                );
+                tokio::time::sleep(std::time::Duration::from_secs(backoff)).await;
             }
         }
     }
+
+    TELEGRAM_RUNNING.store(false, Ordering::Relaxed);
+    if let Ok(mut g) = BOT_USERNAME.lock() {
+        *g = None;
+    }
+    info!("Telegram bot loop exited");
 }
 
 /// Split message at word boundaries to respect Telegram's char limit

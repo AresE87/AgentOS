@@ -4838,7 +4838,7 @@ async fn cmd_calendar_list_events(
     let to_dt = chrono::NaiveDateTime::parse_from_str(&to, "%Y-%m-%dT%H:%M:%S")
         .or_else(|_| chrono::NaiveDateTime::parse_from_str(&to, "%Y-%m-%d %H:%M:%S"))
         .map_err(|e| format!("Invalid 'to' datetime: {}", e))?;
-    let mgr = state.calendar_manager.lock().await;
+    let mut mgr = state.calendar_manager.lock().await;
     let events = mgr.list_events_async(from_dt, to_dt).await?;
     Ok(serde_json::json!({ "events": events }))
 }
@@ -4949,16 +4949,28 @@ async fn cmd_calendar_refresh_token(
     }))
 }
 
-/// C3: Check Google Calendar auth status
+/// C3/J1: Check Google Calendar auth status with detailed provider/scope info
 #[tauri::command]
 async fn cmd_calendar_auth_status(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let mgr = state.calendar_manager.lock().await;
-    Ok(serde_json::json!({
-        "authenticated": mgr.google_authenticated(),
-        "has_refresh_token": mgr.google.get_refresh_token().is_some(),
-    }))
+    Ok(mgr.auth_status_detailed())
+}
+
+/// J1: Disconnect Google Calendar — clear all tokens
+#[tauri::command]
+async fn cmd_calendar_disconnect(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.calendar_manager.lock().await;
+    mgr.disconnect_google();
+    // Also clear the persisted refresh token
+    if let Ok(mut settings) = state.settings.lock() {
+        settings.set("google_refresh_token", "");
+        let _ = settings.save();
+    }
+    Ok(serde_json::json!({ "ok": true, "message": "Google Calendar disconnected" }))
 }
 
 // ── R64: Email Integration commands (C4: dual-mode Gmail API + in-memory) ──
@@ -5104,7 +5116,7 @@ async fn cmd_gmail_refresh_token(
     }))
 }
 
-/// C4: Check Gmail auth status
+/// C4/J1: Check Gmail auth status with provider/scope info
 #[tauri::command]
 async fn cmd_gmail_auth_status(
     state: tauri::State<'_, AppState>,
@@ -5113,8 +5125,26 @@ async fn cmd_gmail_auth_status(
     Ok(serde_json::json!({
         "gmail_enabled": mgr.gmail_active(),
         "authenticated": mgr.gmail.is_authenticated(),
+        "provider": "google",
         "has_refresh_token": mgr.gmail.get_refresh_token().is_some(),
+        "scopes": if mgr.gmail.is_authenticated() { vec!["gmail.readonly", "gmail.send", "gmail.modify"] } else { vec![] },
     }))
+}
+
+/// J1: Disconnect Gmail — clear all tokens
+#[tauri::command]
+async fn cmd_gmail_disconnect(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut mgr = state.email_manager.lock().await;
+    mgr.gmail.disconnect();
+    mgr.set_gmail_enabled(false);
+    // Clear persisted token
+    if let Ok(mut settings) = state.settings.lock() {
+        settings.set("google_gmail_enabled", "false");
+        let _ = settings.save();
+    }
+    Ok(serde_json::json!({ "ok": true, "message": "Gmail disconnected" }))
 }
 
 // ── R65: Database Connector commands ─────────────────────────────────
@@ -6708,6 +6738,36 @@ async fn cmd_get_current_version() -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({ "version": env!("CARGO_PKG_VERSION") }))
 }
 
+/// G1: Download the latest update installer from GitHub Releases
+#[tauri::command]
+async fn cmd_download_update() -> Result<serde_json::Value, String> {
+    // First find the asset URL
+    let asset_url = updater::UpdateChecker::find_asset_url(AGENTOS_GITHUB_REPO)
+        .await?
+        .ok_or_else(|| "No installer asset found in the latest release".to_string())?;
+
+    // Download to a temp directory
+    let dest = std::env::temp_dir().join("agentos-updates");
+    let file_path = updater::UpdateChecker::download_update(&asset_url, &dest).await?;
+
+    Ok(serde_json::json!({
+        "ok": true,
+        "path": file_path.to_string_lossy(),
+        "asset_url": asset_url,
+    }))
+}
+
+/// G1: Launch the downloaded installer to apply the update
+#[tauri::command]
+async fn cmd_install_update(path: String) -> Result<serde_json::Value, String> {
+    let installer_path = std::path::PathBuf::from(&path);
+    updater::UpdateChecker::install_update(&installer_path)?;
+    Ok(serde_json::json!({
+        "ok": true,
+        "message": "Installer launched. The application will restart after the update completes.",
+    }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -7246,6 +7306,7 @@ pub fn run() {
                                 "latest_version": info.latest_version,
                                 "release_notes": info.release_notes,
                                 "download_url": info.download_url,
+                                "asset_url": info.asset_url,
                             }),
                         );
                     }
@@ -7509,6 +7570,7 @@ pub fn run() {
             cmd_calendar_exchange_code,
             cmd_calendar_refresh_token,
             cmd_calendar_auth_status,
+            cmd_calendar_disconnect,
             // R64: Email Integration commands
             cmd_email_list,
             cmd_email_get,
@@ -7522,6 +7584,7 @@ pub fn run() {
             cmd_gmail_exchange_code,
             cmd_gmail_refresh_token,
             cmd_gmail_auth_status,
+            cmd_gmail_disconnect,
             // R65: Database Connector commands
             cmd_db_add,
             cmd_db_remove,
@@ -7662,9 +7725,11 @@ pub fn run() {
             cmd_index_content,
             // D7: Health check
             cmd_health_check,
-            // C2: Auto-Update commands
+            // C2/G1: Auto-Update commands
             cmd_check_for_update,
             cmd_get_current_version,
+            cmd_download_update,
+            cmd_install_update,
             // P1: Agentic Tool Loop
             cmd_agent_run,
             // P2: Tool Registry

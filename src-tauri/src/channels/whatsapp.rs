@@ -223,7 +223,8 @@ impl WhatsAppChannel {
         messages
     }
 
-    /// Test connection by checking if the API responds for this phone number
+    /// Test connection by checking if the API responds for this phone number.
+    /// J2: Returns detailed error for invalid credentials instead of just false.
     pub async fn test_connection(&self) -> Result<bool, String> {
         let url = format!(
             "https://graph.facebook.com/v19.0/{}",
@@ -235,9 +236,50 @@ impl WhatsAppChannel {
             .bearer_auth(&self.config.access_token)
             .send()
             .await
-            .map_err(|e| format!("WhatsApp test failed: {}", e))?;
-        Ok(res.status().is_success())
+            .map_err(|e| format!("WhatsApp connection test failed: {}", e))?;
+
+        let status = res.status();
+        if status.is_success() {
+            return Ok(true);
+        }
+
+        // J2: Parse error response for clear messaging
+        let body = res.text().await.unwrap_or_default();
+        if status.as_u16() == 401 || status.as_u16() == 403 {
+            return Err(format!(
+                "WhatsApp credentials invalid (HTTP {}): access token is expired or incorrect. {}",
+                status.as_u16(),
+                body
+            ));
+        }
+        if status.as_u16() == 400 {
+            return Err(format!(
+                "WhatsApp phone_number_id '{}' is invalid or not found: {}",
+                self.config.phone_number_id, body
+            ));
+        }
+
+        Err(format!("WhatsApp API returned HTTP {}: {}", status.as_u16(), body))
     }
+}
+
+/// J2: Smart truncation for messages that exceed the limit.
+/// Adds a "..." indicator and preserves word boundaries.
+pub fn truncate_message(text: &str, max_len: usize) -> String {
+    if text.len() <= max_len {
+        return text.to_string();
+    }
+    let suffix = "...";
+    let target = max_len.saturating_sub(suffix.len());
+    if target == 0 {
+        return suffix.to_string();
+    }
+    // Find a word boundary before target
+    let truncated = &text[..target];
+    let break_at = truncated
+        .rfind(|c: char| c.is_whitespace())
+        .unwrap_or(target);
+    format!("{}{}", &text[..break_at], suffix)
 }
 
 /// Split a long message at word boundaries
@@ -307,6 +349,25 @@ mod tests {
         };
         let result = WhatsAppChannel::verify_webhook(&query, "my_token");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn truncate_short_message_unchanged() {
+        assert_eq!(truncate_message("hello", 100), "hello");
+    }
+
+    #[test]
+    fn truncate_long_message_with_ellipsis() {
+        let result = truncate_message("The quick brown fox jumps over the lazy dog", 20);
+        assert!(result.len() <= 20);
+        assert!(result.ends_with("..."));
+    }
+
+    #[test]
+    fn truncate_preserves_word_boundary() {
+        let result = truncate_message("hello world goodbye", 15);
+        assert!(result.ends_with("..."));
+        assert!(!result.contains("goodby")); // Should not cut mid-word
     }
 
     #[test]
