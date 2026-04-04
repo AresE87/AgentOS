@@ -464,3 +464,117 @@ body {
 .edge-glow-completed {
     filter: drop-shadow(0 0 3px rgba(46,204,113,0.3));
 }
+
+/* ── Creator Studio Animations ── */
+
+/* Recording pulse background — ON AIR studio feel */
+@keyframes recording-bg {
+    0%, 100% { background-color: rgba(231, 76, 60, 0.02); }
+    50% { background-color: rgba(231, 76, 60, 0.06); }
+}
+.recording-active {
+    animation: recording-bg 2s ease-in-out infinite;
+}
+
+/* Recording border glow */
+@keyframes recording-border-glow {
+    0%, 100% { border-color: rgba(231, 76, 60, 0.12); }
+    50% { border-color: rgba(231, 76, 60, 0.35); }
+}
+
+/* Revenue counter pop */
+@keyframes revenue-pop {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+    100% { transform: scale(1); }
+}
+.animate-revenue-pop { animation: revenue-pop 0.4s ease-out; }
+
+/* Star rating */
+.star-filled { color: #F59E0B; }
+.star-empty { color: #2A3441; }
+
+/* Category gradient top borders */
+.cat-finance { border-top: 2px solid #2ECC71; }
+.cat-marketing { border-top: 2px solid #378ADD; }
+.cat-legal { border-top: 2px solid #F39C12; }
+.cat-dev { border-top: 2px solid #5865F2; }
+.cat-data { border-top: 2px solid #00E5E5; }
+.cat-ops { border-top: 2px solid #E74C3C; }
+.cat-custom { border-top: 2px solid #6B7280; }
+
+/* Training card hover */
+.training-card {
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.training-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.3), 0 0 15px rgba(0,229,229,0.08);
+}
+
+/* Detail drawer slide from right */
+@keyframes drawer-slide-in {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+.animate-drawer-in { animation: drawer-slide-in 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+
+/* Example card entrance */
+@keyframes example-card-enter {
+    0% { opacity: 0; transform: translateX(-20px) scale(0.96); }
+    100% { opacity: 1; transform: translateX(0) scale(1); }
+}
+.animate-example-enter { animation: example-card-enter 0.35s cubic-bezier(0.34, 1.56, 0.64, 1); }
+
+/* Recording timer tick */
+@keyframes timer-tick {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+/* Category chip hover */
+.category-chip {
+    transition: all 0.15s ease-out;
+}
+.category-chip:hover {
+    transform: scale(1.05);
+}
+.category-chip-active {
+    box-shadow: 0 0 8px rgba(0,229,229,0.3);
+}
+
+/* Search bar glow on focus */
+.search-bar-studio:focus-within {
+    box-shadow: 0 0 12px rgba(0,229,229,0.15), 0 0 4px rgba(0,229,229,0.1);
+    border-color: rgba(0,229,229,0.3);
+}
+
+/* Payout button pulse */
+@keyframes payout-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(46,204,113,0.4); }
+    50% { box-shadow: 0 0 16px 4px rgba(46,204,113,0.15); }
+}
+.payout-btn:hover {
+    animation: payout-pulse 1.5s ease-in-out infinite;
+}
+
+/* Medal colors for top trainings */
+.medal-1 { color: #FFD700; text-shadow: 0 0 4px rgba(255,215,0,0.3); }
+.medal-2 { color: #C0C0C0; text-shadow: 0 0 4px rgba(192,192,192,0.3); }
+.medal-3 { color: #CD7F32; text-shadow: 0 0 4px rgba(205,127,50,0.3); }
+
+/* Quality check modal */
+@keyframes quality-check-in {
+    0% { opacity: 0; transform: scale(0.9); }
+    100% { opacity: 1; transform: scale(1); }
+}
+.quality-modal { animation: quality-check-in 0.25s ease-out; }
+
+/* Stop button pulse */
+@keyframes stop-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(231,76,60,0.4); }
+    50% { box-shadow: 0 0 20px 6px rgba(231,76,60,0.2); }
+}
+.stop-btn-pulse {
+    animation: stop-pulse 1.5s ease-in-out infinite;
+}
