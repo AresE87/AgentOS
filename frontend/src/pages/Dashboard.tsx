@@ -21,6 +21,7 @@ import {
   Plus,
   X,
   Users,
+  Building2,
 } from 'lucide-react';
 import { useAgent } from '../hooks/useAgent';
 import HomePg from './dashboard/Home';
@@ -37,6 +38,7 @@ import Handoffs from './dashboard/Handoffs';
 import Marketing from './dashboard/Marketing';
 import Studio from './dashboard/Studio';
 import Teams from './dashboard/Teams';
+import Business from './dashboard/Business';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -54,6 +56,7 @@ type Tab =
   | 'marketing'
   | 'teams'
   | 'studio'
+  | 'business'
   | 'settings'
   | 'feedback'
   | 'handoffs';
@@ -78,6 +81,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'marketing', label: 'Marketing', icon: Megaphone, section: 'main' },
   { id: 'teams', label: 'Teams', icon: Users, section: 'main' },
   { id: 'studio', label: 'Studio', icon: Palette, section: 'main' },
+  { id: 'business', label: 'Negocio', icon: Building2, section: 'main' },
   { id: 'settings', label: 'Settings', icon: Settings, section: 'main', shortcut: '9' },
   { id: 'feedback', label: 'Feedback', icon: ThumbsUp, section: 'more' },
   { id: 'handoffs', label: 'Handoffs', icon: HandHelping, section: 'more' },
@@ -95,6 +99,7 @@ const TAB_LABELS: Record<Tab, string> = {
   marketing: 'Marketing',
   teams: 'Agent Teams',
   studio: 'Creator Studio',
+  business: 'Negocio',
   settings: 'Settings',
   feedback: 'Feedback & Insights',
   handoffs: 'Escalation Handoffs',
@@ -446,6 +451,7 @@ export default function Dashboard({ onResetWizard }: DashboardProps) {
           {activeTab === 'marketing' && <Marketing />}
           {activeTab === 'teams' && <Teams />}
           {activeTab === 'studio' && <Studio />}
+          {activeTab === 'business' && <Business />}
           {activeTab === 'settings' && <SettingsPg onResetWizard={onResetWizard} />}
           {activeTab === 'feedback' && <FeedbackInsights />}
           {activeTab === 'handoffs' && <Handoffs />}

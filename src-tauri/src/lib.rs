@@ -10,6 +10,7 @@ pub mod automation;
 pub mod billing;
 pub mod brain;
 pub mod branding;
+pub mod business;
 pub mod cache;
 pub mod chains;
 mod channels;
@@ -365,6 +366,10 @@ pub struct AppState {
     pub product_start_time: std::time::Instant,
     /// T11: Agent Teams as a Service — active team configs + statuses
     pub active_teams: Arc<tokio::sync::Mutex<Vec<(teams_engine::TeamConfig, teams_engine::runner::TeamStatus)>>>,
+    /// B12-2: Cross-team orchestrator
+    pub cross_team_orchestrator: Arc<tokio::sync::Mutex<business::CrossTeamOrchestrator>>,
+    /// B12-3: Business automations engine
+    pub business_automations: Arc<tokio::sync::Mutex<business::BusinessAutomations>>,
 }
 
 #[tauri::command]
@@ -7393,6 +7398,172 @@ async fn cmd_run_team_cycle(
     Ok(result)
 }
 
+// ── B12-1: Business Dashboard ────────────────────────────────────────────
+
+#[tauri::command]
+fn cmd_get_business_overview(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let overview = business::BusinessDashboard::collect(db.conn());
+    serde_json::to_value(&overview).map_err(|e| e.to_string())
+}
+
+// ── B12-2: Inter-Team Orchestration ─────────────────────────────────────
+
+#[tauri::command]
+async fn cmd_get_orchestration_rules(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let orchestrator = state.cross_team_orchestrator.lock().await;
+    serde_json::to_value(orchestrator.list_rules()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_add_orchestration_rule(
+    rule: serde_json::Value,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let parsed: business::OrchestrationRule =
+        serde_json::from_value(rule).map_err(|e| format!("Invalid rule: {}", e))?;
+    let mut orchestrator = state.cross_team_orchestrator.lock().await;
+    orchestrator.add_rule(parsed);
+    Ok(serde_json::json!({"status": "ok"}))
+}
+
+#[tauri::command]
+async fn cmd_get_cross_team_events(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let orchestrator = state.cross_team_orchestrator.lock().await;
+    let events = orchestrator.get_event_log(100);
+    serde_json::to_value(&events).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_fire_cross_team_event(
+    event: serde_json::Value,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let parsed: business::CrossTeamEvent =
+        serde_json::from_value(event).map_err(|e| format!("Invalid event: {}", e))?;
+    let mut orchestrator = state.cross_team_orchestrator.lock().await;
+    orchestrator.fire_event(parsed);
+    let triggered = orchestrator.process_pending();
+    serde_json::to_value(&triggered).map_err(|e| e.to_string())
+}
+
+// ── B12-3: Business Automations ─────────────────────────────────────────
+
+#[tauri::command]
+async fn cmd_add_business_rule(
+    rule: serde_json::Value,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let parsed: business::automations::BusinessRule =
+        serde_json::from_value(rule).map_err(|e| format!("Invalid rule: {}", e))?;
+    let mut automations = state.business_automations.lock().await;
+    automations.add_rule(parsed);
+    Ok(serde_json::json!({"status": "ok"}))
+}
+
+#[tauri::command]
+async fn cmd_list_business_rules(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let automations = state.business_automations.lock().await;
+    serde_json::to_value(automations.list_rules()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_toggle_business_rule(
+    id: String,
+    active: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut automations = state.business_automations.lock().await;
+    automations.toggle_rule(&id, active);
+    Ok(serde_json::json!({"status": "ok"}))
+}
+
+#[tauri::command]
+async fn cmd_delete_business_rule(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut automations = state.business_automations.lock().await;
+    automations.delete_rule(&id);
+    Ok(serde_json::json!({"status": "ok"}))
+}
+
+#[tauri::command]
+async fn cmd_parse_business_rule(
+    description: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let gateway = state.gateway.lock().await;
+    let settings = state.settings.lock().map_err(|e| e.to_string())?.clone();
+    let rule = business::BusinessAutomations::parse_rule(&description, &gateway, &settings).await?;
+    serde_json::to_value(&rule).map_err(|e| e.to_string())
+}
+
+// ── B12-4: Revenue Analytics ────────────────────────────────────────────
+
+#[tauri::command]
+fn cmd_get_revenue_report(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let report = business::RevenueAnalytics::generate_report(db.conn());
+    serde_json::to_value(&report).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn cmd_project_revenue(
+    months: u32,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let projections = business::RevenueAnalytics::project_revenue(db.conn(), months);
+    serde_json::to_value(&projections).map_err(|e| e.to_string())
+}
+
+// ── B12-5: White-Label Business Branding ────────────────────────────────
+
+#[tauri::command]
+async fn cmd_update_business_branding(
+    config: serde_json::Value,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut branding = state.branding.write().await;
+    if let Some(name) = config["business_name"].as_str() {
+        branding.business_name = Some(name.to_string());
+    }
+    if let Some(tagline) = config["business_tagline"].as_str() {
+        branding.business_tagline = Some(tagline.to_string());
+    }
+    if let Some(teams) = config["enabled_teams"].as_array() {
+        branding.enabled_teams = teams
+            .iter()
+            .filter_map(|t| t.as_str().map(|s| s.to_string()))
+            .collect();
+    }
+    if let Some(custom) = config["custom_team_names"].as_object() {
+        for (k, v) in custom {
+            if let Some(name) = v.as_str() {
+                branding.custom_team_names.insert(k.clone(), name.to_string());
+            }
+        }
+    }
+    if let Some(hide_mp) = config["hide_marketplace"].as_bool() {
+        branding.hide_marketplace = hide_mp;
+    }
+    if let Some(hide_cs) = config["hide_creator_studio"].as_bool() {
+        branding.hide_creator_studio = hide_cs;
+    }
+    Ok(serde_json::json!({"status": "ok"}))
+}
+
 // ── M8-1: Social Media Connectors — IPC commands ─────────────────────────
 
 #[tauri::command]
@@ -8145,6 +8316,8 @@ pub fn run() {
                 crash_guard: crash_guard.clone(),
                 product_start_time: std::time::Instant::now(),
                 active_teams: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+                cross_team_orchestrator: Arc::new(tokio::sync::Mutex::new(business::CrossTeamOrchestrator::new())),
+                business_automations: Arc::new(tokio::sync::Mutex::new(business::BusinessAutomations::new())),
             });
 
             // ── R35: Deferred startup — plugin discovery in background ────
@@ -9037,6 +9210,24 @@ pub fn run() {
             cmd_get_team_status,
             cmd_list_active_teams,
             cmd_run_team_cycle,
+            // B12-1: Business Dashboard
+            cmd_get_business_overview,
+            // B12-2: Inter-Team Orchestration
+            cmd_get_orchestration_rules,
+            cmd_add_orchestration_rule,
+            cmd_get_cross_team_events,
+            cmd_fire_cross_team_event,
+            // B12-3: Business Automations
+            cmd_add_business_rule,
+            cmd_list_business_rules,
+            cmd_toggle_business_rule,
+            cmd_delete_business_rule,
+            cmd_parse_business_rule,
+            // B12-4: Revenue Analytics
+            cmd_get_revenue_report,
+            cmd_project_revenue,
+            // B12-5: White-Label Business Branding
+            cmd_update_business_branding,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");
