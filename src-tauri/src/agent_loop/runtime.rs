@@ -30,6 +30,8 @@ impl AgentRuntime {
         settings: &Settings,
         kill_switch: &Arc<AtomicBool>,
         event_emitter: Option<&tauri::AppHandle>,
+        session_store: Option<&crate::agent_loop::session::SessionStore>,
+        session_id: Option<&str>,
     ) -> Result<AgentTurnResult, String> {
         // Create hook registry with default hooks
         let hook_registry = HookRegistry::with_defaults();
@@ -45,6 +47,8 @@ impl AgentRuntime {
             kill_switch,
             event_emitter,
             &hook_registry,
+            session_store,
+            session_id,
         )
         .await
     }
@@ -62,11 +66,20 @@ impl AgentRuntime {
         kill_switch: &Arc<AtomicBool>,
         event_emitter: Option<&tauri::AppHandle>,
         hook_registry: &HookRegistry,
+        session_store: Option<&crate::agent_loop::session::SessionStore>,
+        session_id: Option<&str>,
     ) -> Result<AgentTurnResult, String> {
-        let mut messages: Vec<serde_json::Value> = vec![serde_json::json!({
+        let user_msg = serde_json::json!({
             "role": "user",
             "content": user_message
-        })];
+        });
+
+        // Persist user message
+        if let (Some(store), Some(sid)) = (session_store, session_id) {
+            store.append_message(sid, &user_msg).ok();
+        }
+
+        let mut messages: Vec<serde_json::Value> = vec![user_msg];
 
         let mut tool_records: Vec<ToolCallRecord> = vec![];
         let mut total_input = 0u32;
@@ -80,7 +93,7 @@ impl AgentRuntime {
             }
 
             // ── Context compaction check ───────────────────────────────
-            if super::compaction::should_compact(&messages, 80_000) {
+            if super::compaction::should_compact(&messages, self.config.compact_threshold_tokens) {
                 if let Ok(compacted) =
                     super::compaction::compact_messages(&messages, 4, gateway, settings).await
                 {
@@ -130,10 +143,17 @@ impl AgentRuntime {
             }
 
             // Add assistant message to conversation
-            messages.push(serde_json::json!({
+            let assistant_msg = serde_json::json!({
                 "role": "assistant",
                 "content": content
-            }));
+            });
+
+            // Persist assistant message
+            if let (Some(store), Some(sid)) = (session_store, session_id) {
+                store.append_message(sid, &assistant_msg).ok();
+            }
+
+            messages.push(assistant_msg);
 
             // If no tool calls, we're done
             if tool_uses.is_empty() || stop_reason == "end_turn" {
@@ -311,10 +331,17 @@ impl AgentRuntime {
             }
 
             // Add tool results as user message
-            messages.push(serde_json::json!({
+            let tool_results_msg = serde_json::json!({
                 "role": "user",
                 "content": tool_results
-            }));
+            });
+
+            // Persist tool results
+            if let (Some(store), Some(sid)) = (session_store, session_id) {
+                store.append_message(sid, &tool_results_msg).ok();
+            }
+
+            messages.push(tool_results_msg);
 
             // Emit iteration event
             if let Some(handle) = event_emitter {

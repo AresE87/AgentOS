@@ -920,6 +920,7 @@ Always be helpful, precise, and use tools judiciously.";
 
     let gateway = state.gateway.lock().await;
 
+    let task_id_for_session = ctx.task_id.clone();
     let agent_result = runtime
         .run_turn(
             &text,
@@ -931,6 +932,8 @@ Always be helpful, precise, and use tools judiciously.";
             &settings,
             &kill_switch,
             Some(&app_handle),
+            Some(state.session_store.as_ref()),
+            Some(&task_id_for_session),
         )
         .await;
 
@@ -2235,6 +2238,7 @@ For complex multi-step tasks, use spawn_agent to delegate subtasks to specialize
 
 Always be helpful, precise, and use tools judiciously.";
 
+    let task_id = ctx.task_id.clone();
     let result = runtime
         .run_turn(
             &message,
@@ -2246,6 +2250,8 @@ Always be helpful, precise, and use tools judiciously.";
             &settings,
             &kill_switch,
             Some(&app),
+            Some(state.session_store.as_ref()),
+            Some(&task_id),
         )
         .await?;
 

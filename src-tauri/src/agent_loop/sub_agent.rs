@@ -47,6 +47,7 @@ impl SubAgentManager {
         let config = AgentLoopConfig {
             max_iterations,
             max_tokens_per_turn: 4096,
+            compact_threshold_tokens: 80_000,
         };
 
         let runtime = AgentRuntime::new(config);
@@ -92,6 +93,7 @@ impl SubAgentManager {
         }
 
         // Box::pin the recursive future to avoid infinitely sized types
+        // Sub-agents don't persist sessions separately
         let result = Box::pin(runtime.run_turn(
             instructions,
             &system_prompt,
@@ -102,6 +104,8 @@ impl SubAgentManager {
             settings,
             &parent_ctx.kill_switch,
             event_emitter,
+            None,
+            None,
         ))
         .await;
 
