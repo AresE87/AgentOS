@@ -5,7 +5,7 @@ use tokio::process::Command;
 use tracing::info;
 
 const MAX_CONTENT_LENGTH: usize = 8000;
-const PAGE_TIMEOUT_SECS: u64 = 15;
+const PAGE_TIMEOUT_SECS: u64 = 30;
 
 /// Domains that should never be fetched (local/internal networks)
 const BLOCKED_PATTERNS: &[&str] = &[
@@ -435,24 +435,29 @@ pub async fn fetch_with_browser(url: &str) -> Result<PageContent, String> {
     let browser_path = browser.browser_path.unwrap();
     info!(url, browser = %browser_path, "Fetching with headless browser");
 
-    let output = Command::new(&browser_path)
-        .args([
-            "--headless",
-            "--disable-gpu",
-            "--no-sandbox",
-            "--dump-dom",
-            url,
-        ])
-        .output()
-        .await
-        .map_err(|e| format!("Failed to launch headless browser: {}", e))?;
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(PAGE_TIMEOUT_SECS),
+        Command::new(&browser_path)
+            .args([
+                "--headless=new",
+                "--disable-gpu",
+                "--no-sandbox",
+                "--dump-dom",
+                url,
+            ])
+            .output(),
+    )
+    .await
+    .map_err(|_| format!("Headless browser timed out after {}s for '{}'", PAGE_TIMEOUT_SECS, url))?
+    .map_err(|e| format!("Failed to launch headless browser: {}", e))?;
+
+    let output = result;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!(
-            "Headless browser exited with error: {}",
-            stderr.chars().take(500).collect::<String>()
-        ));
+        // If headless browser fails (site blocks headless, etc.), fall back to reqwest
+        info!(url, stderr = %stderr.chars().take(200).collect::<String>(), "Headless browser failed, falling back to reqwest");
+        return fetch_page(url).await;
     }
 
     let html = String::from_utf8_lossy(&output.stdout).to_string();
@@ -489,18 +494,24 @@ pub async fn screenshot_url(url: &str, output_path: &Path) -> Result<PathBuf, St
 
     info!(url, output = %output_path.display(), browser = %browser_path, "Taking screenshot with headless browser");
 
-    let output = Command::new(&browser_path)
-        .args([
-            "--headless",
-            "--disable-gpu",
-            "--no-sandbox",
-            "--window-size=1280,800",
-            &screenshot_arg,
-            url,
-        ])
-        .output()
-        .await
-        .map_err(|e| format!("Failed to launch headless browser for screenshot: {}", e))?;
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(PAGE_TIMEOUT_SECS),
+        Command::new(&browser_path)
+            .args([
+                "--headless=new",
+                "--disable-gpu",
+                "--no-sandbox",
+                "--window-size=1280,800",
+                &screenshot_arg,
+                url,
+            ])
+            .output(),
+    )
+    .await
+    .map_err(|_| format!("Screenshot timed out after {}s for '{}'", PAGE_TIMEOUT_SECS, url))?
+    .map_err(|e| format!("Failed to launch headless browser for screenshot: {}", e))?;
+
+    let output = result;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
