@@ -1,5 +1,69 @@
 # Changelog
 
+## [12.0.0] - 2026-04-04 -- Autonomous Business Operating System
+
+### Added
+- B12-1: Business Executive Dashboard (`src-tauri/src/business/dashboard.rs`)
+  - `BusinessDashboard::collect()` aggregates metrics from all 5 teams + marketplace
+  - `BusinessOverview` struct with team metrics, marketplace metrics, revenue/cost/profit
+  - `TeamMetrics`: active status, tasks completed/failed, cost, key_metric, trend percentage
+  - `MarketplaceMetrics`: trainings published/sold, revenue, creator earnings, avg rating
+  - IPC command: `cmd_get_business_overview`
+  - Frontend: 6 KPI cards (Ingresos, Costos, Ganancia, Tareas, Equipos activos, Marketplace)
+  - Frontend: 5 team cards grid with color-coded borders, key metrics, trend arrows
+  - Frontend: Marketplace section with published/sold/revenue/earnings/rating
+- B12-2: Inter-Team Orchestration (`src-tauri/src/business/orchestration.rs`)
+  - `CrossTeamOrchestrator` with event bus for cross-team communication
+  - 5 default orchestration rules: Marketing->Sales (lead), Sales->Finance (invoice),
+    Support->Sales (complaint), Content->Marketing (publish), Finance->Sales (overdue)
+  - `CrossTeamEvent` struct with from/to team, event type, payload, processed status
+  - `fire_event()` and `process_pending()` for event-driven team coordination
+  - IPC commands: `cmd_get_orchestration_rules`, `cmd_add_orchestration_rule`,
+    `cmd_get_cross_team_events`, `cmd_fire_cross_team_event`
+  - Frontend: Eventos tab with orchestration rules list and event timeline
+- B12-3: Business Automations with Natural Language Rules (`src-tauri/src/business/automations.rs`)
+  - `BusinessAutomations` engine with add/list/toggle/delete rule lifecycle
+  - `BusinessRule` struct: description, trigger type (time/event/threshold), action, team
+  - `parse_rule()` sends natural language to LLM gateway for structured rule extraction
+  - `check_rules()` evaluates time-based rules against intervals
+  - IPC commands: `cmd_add_business_rule`, `cmd_list_business_rules`,
+    `cmd_toggle_business_rule`, `cmd_delete_business_rule`, `cmd_parse_business_rule`
+  - Frontend: Automatizaciones tab with NL input, toggle switches, rule list
+- B12-4: Revenue Analytics (`src-tauri/src/business/revenue.rs`)
+  - `RevenueAnalytics::generate_report()` with total revenue, by-source breakdown,
+    monthly trend, top earners, and 3-month linear projections
+  - `project_revenue()` with growth-rate extrapolation from historical data
+  - Revenue sourced from marketplace purchases + business_revenue table
+  - IPC commands: `cmd_get_revenue_report`, `cmd_project_revenue`
+  - Frontend: Revenue tab with source bars, monthly trend chart, projection cards,
+    top earners list
+- B12-5: White-Label Business OS Branding
+  - Extended `BrandingConfig` with 6 new fields: `business_name`, `business_tagline`,
+    `enabled_teams`, `custom_team_names`, `hide_marketplace`, `hide_creator_studio`
+  - IPC command: `cmd_update_business_branding`
+  - Enables full white-label deployment with custom team names and selective feature visibility
+- Business module: `src-tauri/src/business/` with mod.rs, dashboard.rs, orchestration.rs,
+  automations.rs, revenue.rs
+- `cross_team_orchestrator` and `business_automations` fields in AppState
+- Business.tsx page with 4 tabs: Resumen, Automatizaciones, Eventos, Ingresos
+- "Negocio" sidebar entry with Building2 icon
+
+### Changed
+- Version bump to 12.0.0 across Cargo.toml, frontend package.json
+- `lib.rs`: added `business` module, 2 new AppState fields, 13 new IPC handler registrations
+- `Dashboard.tsx`: added Business tab, import, route, Building2 icon, Tab type
+- `branding/config.rs`: added HashMap import, 6 new BrandingConfig fields with serde defaults
+
+### Summary of versions 8.0.0 through 12.0.0
+
+| Version | Codename | Key Features |
+|---------|----------|-------------|
+| 8.0.0 | Marketing Autonomo | Marketing Command Center, Content Generator, Mentions Inbox, Campaigns, Self-Promotion Mode |
+| 9.0.0 | Creator Economy | Creator Studio, Training Marketplace, Creator Payments (70/30 split), Quality System |
+| 10.0.0 | Production Ready | Documentation/Onboarding, Product Health Monitoring, Distribution Scripts, Launch Prep |
+| 11.0.0 | Agent Teams as a Service | 5 Team Templates, Setup Wizard, Active Dashboard, Team Lifecycle |
+| 12.0.0 | Autonomous Business OS | Executive Dashboard, Inter-Team Orchestration, NL Automations, Revenue Analytics, White-Label |
+
 ## [11.0.0] - 2026-04-04 -- Agent Teams as a Service
 
 ### Added
