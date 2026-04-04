@@ -186,8 +186,7 @@ async function callInvoke<T>(cmd: string, args?: Record<string, unknown>): Promi
 
 export function useAgent() {
     const getStatus = () => callInvoke<AgentStatus>('get_status');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const getPlatformSupport = () => callInvoke<any>('get_platform_support');
+    const getPlatformSupport = () => callInvoke<any>('get_platform_support');
 
     const processMessage = (text: string) =>
         callInvoke<TaskResult>('process_message', { text });
@@ -247,11 +246,9 @@ export function useAgent() {
     const getAgents = () => callInvoke<{ agents: any[] }>('get_agents');
 
     // Phase 5: Mesh
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const getMeshNodes = () => callInvoke<{ nodes: MeshNode[] }>('get_mesh_nodes');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const sendMeshTask = (nodeId: string, description: string) =>
-    // callInvoke<{ task_id: string }>('send_mesh_task', { node_id: nodeId, description });
+    const getMeshNodes = () => callInvoke<{ nodes: MeshNode[] }>('get_mesh_nodes');
+    const sendMeshTask = (nodeId: string, description: string) =>
+    callInvoke<{ task_id: string }>('send_mesh_task', { node_id: nodeId, description });
 
     // Phase 6: Triggers
     const getTriggers = () => callInvoke<{ triggers: any[] }>('get_triggers');
@@ -330,30 +327,22 @@ export function useAgent() {
     const getSystemInfo = () => callInvoke<any>('get_system_info');
 
     // R41: Voice Interface
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const transcribeAudio = (audioBase64: string, language?: string) =>
-    // callInvoke<{ text: string }>('transcribe_audio', { audio_base64: audioBase64, language });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const speakText = (text: string, rate?: number, volume?: number) =>
-    // callInvoke<{ ok: boolean }>('speak_text', { text, rate, volume });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const listVoices = () => callInvoke<{ voices: string[] }>('list_voices');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const saveSpeech = (text: string, outputPath: string) =>
-    // callInvoke<{ ok: boolean }>('save_speech', { text, output_path: outputPath });
+    const transcribeAudio = (audioBase64: string, language?: string) =>
+    callInvoke<{ text: string }>('transcribe_audio', { audio_base64: audioBase64, language });
+    const speakText = (text: string, rate?: number, volume?: number) =>
+    callInvoke<{ ok: boolean }>('speak_text', { text, rate, volume });
+    const listVoices = () => callInvoke<{ voices: string[] }>('list_voices');
+    const saveSpeech = (text: string, outputPath: string) =>
+    callInvoke<{ ok: boolean }>('save_speech', { text, output_path: outputPath });
 
     // R42: Agent-to-Agent Protocol
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const aapSendTask = (host: string, port: number, task: string) =>
-    // callInvoke<any>('aap_send_task', { host, port, task });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const aapQueryCapabilities = (host: string, port: number) =>
-    // callInvoke<any>('aap_query_capabilities', { host, port });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const aapHealth = (host: string, port: number) =>
-    // callInvoke<any>('aap_health', { host, port });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const getAAPStatus = () => callInvoke<any>('get_aap_status');
+    const aapSendTask = (host: string, port: number, task: string) =>
+    callInvoke<any>('aap_send_task', { host, port, task });
+    const aapQueryCapabilities = (host: string, port: number) =>
+    callInvoke<any>('aap_query_capabilities', { host, port });
+    const aapHealth = (host: string, port: number) =>
+    callInvoke<any>('aap_health', { host, port });
+    const getAAPStatus = () => callInvoke<any>('get_aap_status');
 
     // R43: Advanced Vision
     const detectMonitors = () => callInvoke<{ monitors: any[]; count: number }>('detect_monitors');
@@ -363,28 +352,19 @@ export function useAgent() {
         callInvoke<{ changed: boolean; change_percentage: number; changed_regions: any[]; before_path: string; after_path: string }>('screen_diff');
 
     // R44: Cloud Mesh Relay
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const relayConnect = (serverUrl: string, authToken: string) =>
-    // callInvoke<any>('relay_connect', { server_url: serverUrl, auth_token: authToken });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const relayDisconnect = () => callInvoke<any>('relay_disconnect');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const relayListNodes = () => callInvoke<any>('relay_list_nodes');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const relaySendTask = (targetNode: string, task: string) =>
-    // callInvoke<any>('relay_send_task', { target_node: targetNode, task });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const getRelayStatus = () => callInvoke<any>('get_relay_status');
+    const relayConnect = (serverUrl: string, authToken: string) =>
+    callInvoke<any>('relay_connect', { server_url: serverUrl, auth_token: authToken });
+    const relayDisconnect = () => callInvoke<any>('relay_disconnect');
+    const relayListNodes = () => callInvoke<any>('relay_list_nodes');
+    const relaySendTask = (targetNode: string, task: string) =>
+    callInvoke<any>('relay_send_task', { target_node: targetNode, task });
+    const getRelayStatus = () => callInvoke<any>('get_relay_status');
 
     // R45: White-Label / OEM Branding
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const getBranding = (orgId?: string) => callInvoke<any>('get_branding', { org_id: orgId });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const updateBranding = (config: any, orgId?: string) => callInvoke<any>('update_branding', { config, org_id: orgId });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const getCssVariables = (orgId?: string) => callInvoke<{ css: string }>('get_css_variables', { org_id: orgId });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const resetBranding = (orgId?: string) => callInvoke<any>('reset_branding', { org_id: orgId });
+    const getBranding = (orgId?: string) => callInvoke<any>('get_branding', { org_id: orgId });
+    const updateBranding = (config: any, orgId?: string) => callInvoke<any>('update_branding', { config, org_id: orgId });
+    const getCssVariables = (orgId?: string) => callInvoke<{ css: string }>('get_css_variables', { org_id: orgId });
+    const resetBranding = (orgId?: string) => callInvoke<any>('reset_branding', { org_id: orgId });
 
     // R46: Observability
     const getLogs = (limit?: number, level?: string, module?: string) =>
@@ -411,26 +391,17 @@ export function useAgent() {
         callInvoke<any>('add_conversation_message', { id, from_agent: fromAgent, to_agent: toAgent, content });
 
     // R49: Desktop Widgets
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const getWidgets = () => callInvoke<any>('get_widgets');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const toggleWidget = (id: string, enabled: boolean) => callInvoke<any>('toggle_widget', { id, enabled });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const updateWidgetPosition = (id: string, x: number, y: number) => callInvoke<any>('update_widget_position', { id, x, y });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const updateWidgetOpacity = (id: string, opacity: number) => callInvoke<any>('update_widget_opacity', { id, opacity });
+    const getWidgets = () => callInvoke<any>('get_widgets');
+    const toggleWidget = (id: string, enabled: boolean) => callInvoke<any>('toggle_widget', { id, enabled });
+    const updateWidgetPosition = (id: string, x: number, y: number) => callInvoke<any>('update_widget_position', { id, x, y });
+    const updateWidgetOpacity = (id: string, opacity: number) => callInvoke<any>('update_widget_opacity', { id, opacity });
 
     // C9: Desktop Widget Windows
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const showQuickTask = () => callInvoke<any>('show_quick_task');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const hideQuickTask = () => callInvoke<any>('hide_quick_task');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const showWidget = (id: string) => callInvoke<any>('show_widget', { id });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const hideWidget = (id: string) => callInvoke<any>('hide_widget', { id });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const destroyWidget = (id: string) => callInvoke<any>('destroy_widget', { id });
+    const showQuickTask = () => callInvoke<any>('show_quick_task');
+    const hideQuickTask = () => callInvoke<any>('hide_quick_task');
+    const showWidget = (id: string) => callInvoke<any>('show_widget', { id });
+    const hideWidget = (id: string) => callInvoke<any>('hide_widget', { id });
+    const destroyWidget = (id: string) => callInvoke<any>('destroy_widget', { id });
 
     // C10: Headless Browser
     const detectBrowser = () => callInvoke<{ available: boolean; browser_path: string | null; browser_name: string | null }>('detect_browser');
@@ -438,21 +409,16 @@ export function useAgent() {
     const screenshotUrl = (url: string) => callInvoke<{ ok: boolean; path: string; url: string }>('screenshot_url', { url });
 
     // R52: Screen Recording & Replay
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const startScreenRecording = (taskId: string, description: string) =>
-    // callInvoke<{ id: string }>('start_screen_recording', { task_id: taskId, description });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const stopScreenRecording = (recordingId: string) =>
-    // callInvoke<any>('stop_screen_recording', { recording_id: recordingId });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const getScreenRecording = (id: string) =>
-    // callInvoke<any>('get_screen_recording', { id });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const listScreenRecordings = () =>
-    // callInvoke<any>('list_screen_recordings');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const deleteScreenRecording = (id: string) =>
-    // callInvoke<any>('delete_screen_recording', { id });
+    const startScreenRecording = (taskId: string, description: string) =>
+    callInvoke<{ id: string }>('start_screen_recording', { task_id: taskId, description });
+    const stopScreenRecording = (recordingId: string) =>
+    callInvoke<any>('stop_screen_recording', { recording_id: recordingId });
+    const getScreenRecording = (id: string) =>
+    callInvoke<any>('get_screen_recording', { id });
+    const listScreenRecordings = () =>
+    callInvoke<any>('list_screen_recordings');
+    const deleteScreenRecording = (id: string) =>
+    callInvoke<any>('delete_screen_recording', { id });
 
     // R53: Natural Language Triggers
     const parseNLTrigger = (input: string) =>
@@ -719,12 +685,10 @@ export function useAgent() {
     const analyticsModelComparison = () => callInvoke<any>('analytics_model_comparison');
 
     // R77: Embeddable Agent Widget
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const generateWidgetSnippet = (config: { api_key: string; agent_url: string; persona?: string; theme: string; position: string; welcome_message: string }) =>
-    // callInvoke<{ snippet: string }>('generate_widget_snippet', { config });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const generateWidgetIframe = (config: { api_key: string; agent_url: string; persona?: string; theme: string; position: string; welcome_message: string }) =>
-    // callInvoke<{ url: string }>('generate_widget_iframe', { config });
+    const generateWidgetSnippet = (config: { api_key: string; agent_url: string; persona?: string; theme: string; position: string; welcome_message: string }) =>
+    callInvoke<{ snippet: string }>('generate_widget_snippet', { config });
+    const generateWidgetIframe = (config: { api_key: string; agent_url: string; persona?: string; theme: string; position: string; welcome_message: string }) =>
+    callInvoke<{ url: string }>('generate_widget_iframe', { config });
 
     // R78: CLI Power Mode
     const terminalExecute = (command: string) =>
@@ -746,15 +710,12 @@ export function useAgent() {
         callInvoke<{ ok: boolean }>('plugin_storage_set', { name, key, value });
 
     // R86: Real-time Translation
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const translate = (text: string, sourceLang: string, targetLang: string) =>
-    // callInvoke<{ original: string; translated: string; source_lang: string; target_lang: string; confidence: number }>('translate', { text, source_lang: sourceLang, target_lang: targetLang });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const detectLanguage = (text: string) =>
-    // callInvoke<{ detected_language: string; text: string }>('detect_language', { text });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const supportedLanguages = () =>
-    // callInvoke<{ code: string; name: string }[]>('supported_languages');
+    const translate = (text: string, sourceLang: string, targetLang: string) =>
+    callInvoke<{ original: string; translated: string; source_lang: string; target_lang: string; confidence: number }>('translate', { text, source_lang: sourceLang, target_lang: targetLang });
+    const detectLanguage = (text: string) =>
+    callInvoke<{ detected_language: string; text: string }>('detect_language', { text });
+    const supportedLanguages = () =>
+    callInvoke<{ code: string; name: string }[]>('supported_languages');
 
     // R87: Accessibility
     const getAccessibility = () =>
@@ -807,97 +768,71 @@ export function useAgent() {
         });
 
     // R88: Industry Verticals
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const listVerticals = () =>
-    // callInvoke<any[]>('list_verticals');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const getVertical = (id: string) =>
-    // callInvoke<any>('get_vertical', { id });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const activateVertical = (id: string) =>
-    // callInvoke<any>('activate_vertical', { id });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const getActiveVertical = () =>
-    // callInvoke<any>('get_active_vertical');
+    const listVerticals = () =>
+    callInvoke<any[]>('list_verticals');
+    const getVertical = (id: string) =>
+    callInvoke<any>('get_vertical', { id });
+    const activateVertical = (id: string) =>
+    callInvoke<any>('activate_vertical', { id });
+    const getActiveVertical = () =>
+    callInvoke<any>('get_active_vertical');
 
     // R89: Offline First
     const checkConnectivity = () =>
         callInvoke<{ is_online: boolean }>('check_connectivity');
     const getOfflineStatus = () =>
         callInvoke<{ is_online: boolean; cached_responses: number; pending_sync: number; last_online: string | null; sync_state: string; last_sync_at: string | null; last_sync_error: string | null; connectivity_source: string }>('get_offline_status');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const syncOffline = () =>
-    // callInvoke<{ synced: number; status: any }>('sync_offline');
+    const syncOffline = () =>
+    callInvoke<{ synced: number; status: any }>('sync_offline');
     const getCachedResponse = (task: string) =>
         callInvoke<any>('get_cached_response', { task });
     const setConnectivityOverride = (forcedOnline?: boolean | null) =>
         callInvoke<any>('set_connectivity_override', { forced_online: forcedOnline ?? null });
 
     // R81: On-Device AI
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const ondeviceList = () => callInvoke<any[]>('ondevice_list');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const ondeviceLoad = (name: string) => callInvoke<any>('ondevice_load', { name });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const ondeviceUnload = (name: string) => callInvoke<any>('ondevice_unload', { name });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const ondeviceInfer = (model: string, prompt: string) =>
-    // callInvoke<{ model: string; result: string }>('ondevice_infer', { model, prompt });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const ondeviceStatus = () => callInvoke<any>('ondevice_status');
+    const ondeviceList = () => callInvoke<any[]>('ondevice_list');
+    const ondeviceLoad = (name: string) => callInvoke<any>('ondevice_load', { name });
+    const ondeviceUnload = (name: string) => callInvoke<any>('ondevice_unload', { name });
+    const ondeviceInfer = (model: string, prompt: string) =>
+    callInvoke<{ model: string; result: string }>('ondevice_infer', { model, prompt });
+    const ondeviceStatus = () => callInvoke<any>('ondevice_status');
 
     // R82: Multimodal Input
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const processMultimodal = (inputType: string, data?: string, task?: string) =>
-    // callInvoke<any>('process_multimodal', { input_type: inputType, data, task });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const captureClipboardInput = () => callInvoke<any>('capture_clipboard');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const detectInputType = (dataBase64: string) =>
-    // callInvoke<{ mime_type: string; size_bytes: number }>('detect_input_type', { data_base64: dataBase64 });
+    const processMultimodal = (inputType: string, data?: string, task?: string) =>
+    callInvoke<any>('process_multimodal', { input_type: inputType, data, task });
+    const captureClipboardInput = () => callInvoke<any>('capture_clipboard');
+    const detectInputType = (dataBase64: string) =>
+    callInvoke<{ mime_type: string; size_bytes: number }>('detect_input_type', { data_base64: dataBase64 });
 
     // R83: Predictive Actions
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const getPredictions = (recentTasks: string[]) =>
-    // callInvoke<any[]>('get_predictions', { recent_tasks: recentTasks });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const getPredictionSuggestions = (context: string) =>
-    // callInvoke<any[]>('get_prediction_suggestions', { context });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const dismissPrediction = (id: string) =>
-    // callInvoke<{ ok: boolean; dismissed: string }>('dismiss_prediction', { id });
+    const getPredictions = (recentTasks: string[]) =>
+    callInvoke<any[]>('get_predictions', { recent_tasks: recentTasks });
+    const getPredictionSuggestions = (context: string) =>
+    callInvoke<any[]>('get_prediction_suggestions', { context });
+    const dismissPrediction = (id: string) =>
+    callInvoke<{ ok: boolean; dismissed: string }>('dismiss_prediction', { id });
 
     // R84: Cross-App Automation
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const crossappRegister = (appName: string, connectionType: string, config: any) =>
-    // callInvoke<any>('crossapp_register', { app_name: appName, connection_type: connectionType, config });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const crossappList = () => callInvoke<any[]>('crossapp_list');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const crossappSend = (appId: string, action: string, data: any) =>
-    // callInvoke<any>('crossapp_send', { app_id: appId, action, data });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const crossappStatus = (appId: string) =>
-    // callInvoke<any>('crossapp_status', { app_id: appId });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const crossappRunCsvWorkflow = (csvText: string) =>
-    // callInvoke<any>('crossapp_run_csv_workflow', { csv_text: csvText });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const crossappHistory = () =>
-    // callInvoke<any[]>('crossapp_history');
+    const crossappRegister = (appName: string, connectionType: string, config: any) =>
+    callInvoke<any>('crossapp_register', { app_name: appName, connection_type: connectionType, config });
+    const crossappList = () => callInvoke<any[]>('crossapp_list');
+    const crossappSend = (appId: string, action: string, data: any) =>
+    callInvoke<any>('crossapp_send', { app_id: appId, action, data });
+    const crossappStatus = (appId: string) =>
+    callInvoke<any>('crossapp_status', { app_id: appId });
+    const crossappRunCsvWorkflow = (csvText: string) =>
+    callInvoke<any>('crossapp_run_csv_workflow', { csv_text: csvText });
+    const crossappHistory = () =>
+    callInvoke<any[]>('crossapp_history');
 
     // R85: Agent Swarm
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const swarmCreate = (description: string, agents: string[], strategy: string) =>
-    // callInvoke<any>('swarm_create', { description, agents, strategy });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const swarmExecute = (taskId: string) =>
-    // callInvoke<any>('swarm_execute', { task_id: taskId });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const swarmResults = (taskId: string) =>
-    // callInvoke<any>('swarm_results', { task_id: taskId });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const swarmList = () => callInvoke<any[]>('swarm_list');
+    const swarmCreate = (description: string, agents: string[], strategy: string) =>
+    callInvoke<any>('swarm_create', { description, agents, strategy });
+    const swarmExecute = (taskId: string) =>
+    callInvoke<any>('swarm_execute', { task_id: taskId });
+    const swarmResults = (taskId: string) =>
+    callInvoke<any>('swarm_results', { task_id: taskId });
+    const swarmList = () => callInvoke<any[]>('swarm_list');
 
     // R96: Agent Debugger
     const debuggerStartTrace = (taskId: string, agentName?: string, model?: string) =>
@@ -922,27 +857,19 @@ export function useAgent() {
         });
 
     // R97: Revenue Optimization
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const getRevenueMetrics = () => callInvoke<any>('revenue_metrics');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const getChurnPredictions = () => callInvoke<any>('churn_predictions');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const getUpsellCandidates = () => callInvoke<any>('upsell_candidates');
+    const getRevenueMetrics = () => callInvoke<any>('revenue_metrics');
+    const getChurnPredictions = () => callInvoke<any>('churn_predictions');
+    const getUpsellCandidates = () => callInvoke<any>('upsell_candidates');
 
     // R98: Global Infrastructure
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const getInfraStatus = () => callInvoke<any>('infra_status');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const infraCheckRegions = () => callInvoke<any>('infra_check_regions');
+    const getInfraStatus = () => callInvoke<any>('infra_status');
+    const infraCheckRegions = () => callInvoke<any>('infra_check_regions');
 
     // R99: IPO Readiness
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const getInvestorMetrics = () => callInvoke<any>('investor_metrics');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const getDataRoom = () => callInvoke<any>('data_room');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const getFinancialProjections = (years?: number) =>
-    // callInvoke<any>('financial_projections', { years });
+    const getInvestorMetrics = () => callInvoke<any>('investor_metrics');
+    const getDataRoom = () => callInvoke<any>('data_room');
+    const getFinancialProjections = (years?: number) =>
+    callInvoke<any>('financial_projections', { years });
     const getReadinessArtifacts = () => callInvoke<any>('readiness_artifacts');
 
     // R91: OS Integration
@@ -960,15 +887,11 @@ export function useAgent() {
     const consumePendingShellInvocation = () => callInvoke<any | null>('consume_pending_shell_invocation');
 
     // R92: Federated Learning
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const federatedTrain = () => callInvoke<any>('federated_train');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const federatedSubmit = () => callInvoke<any>('federated_submit');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const federatedStatus = () => callInvoke<any>('federated_status');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const federatedConfig = (serverUrl?: string, modelName?: string, privacyBudget?: number, minSamples?: number) =>
-    // callInvoke<any>('federated_config', { server_url: serverUrl, model_name: modelName, privacy_budget: privacyBudget, min_samples: minSamples });
+    const federatedTrain = () => callInvoke<any>('federated_train');
+    const federatedSubmit = () => callInvoke<any>('federated_submit');
+    const federatedStatus = () => callInvoke<any>('federated_status');
+    const federatedConfig = (serverUrl?: string, modelName?: string, privacyBudget?: number, minSamples?: number) =>
+    callInvoke<any>('federated_config', { server_url: serverUrl, model_name: modelName, privacy_budget: privacyBudget, min_samples: minSamples });
 
     // R93: Human Handoff
     const listEscalations = (status?: string) => callInvoke<any[]>('list_escalations', { status });
@@ -1026,312 +949,224 @@ export function useAgent() {
         callInvoke<any[]>('org_marketplace_search', { query, org_id: orgId });
 
     // R101: AR/VR Agent
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const arvrConnect = (headsetType: string, connection: string, resolution: string, fov: number) =>
-    // callInvoke<any>('arvr_connect', { headset_type: headsetType, connection, resolution, fov });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const arvrDisconnect = () =>
-    // callInvoke<{ ok: boolean }>('arvr_disconnect');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const arvrStatus = () =>
-    // callInvoke<any>('arvr_status');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const arvrOverlay = (text: string) =>
-    // callInvoke<{ ok: boolean }>('arvr_overlay', { text });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const arvrCommand = (action: string, params: Record<string, unknown> = {}) =>
-    // callInvoke<any>('arvr_command', { action, params });
+    const arvrConnect = (headsetType: string, connection: string, resolution: string, fov: number) =>
+    callInvoke<any>('arvr_connect', { headset_type: headsetType, connection, resolution, fov });
+    const arvrDisconnect = () =>
+    callInvoke<{ ok: boolean }>('arvr_disconnect');
+    const arvrStatus = () =>
+    callInvoke<any>('arvr_status');
+    const arvrOverlay = (text: string) =>
+    callInvoke<{ ok: boolean }>('arvr_overlay', { text });
+    const arvrCommand = (action: string, params: Record<string, unknown> = {}) =>
+    callInvoke<any>('arvr_command', { action, params });
 
     // R102: Wearable Integration
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const wearableScan = () =>
-    // callInvoke<any[]>('wearable_scan');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const wearableConnect = (id: string) =>
-    // callInvoke<any>('wearable_connect', { id });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const wearableDisconnect = (id: string) =>
-    // callInvoke<{ ok: boolean }>('wearable_disconnect', { id });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const wearableList = () =>
-    // callInvoke<any[]>('wearable_list');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const wearableNotify = (id: string, title: string, body: string) =>
-    // callInvoke<{ ok: boolean }>('wearable_notify', { id, title, body });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const wearableHealth = (id: string) =>
-    // callInvoke<any>('wearable_health', { id });
+    const wearableScan = () =>
+    callInvoke<any[]>('wearable_scan');
+    const wearableConnect = (id: string) =>
+    callInvoke<any>('wearable_connect', { id });
+    const wearableDisconnect = (id: string) =>
+    callInvoke<{ ok: boolean }>('wearable_disconnect', { id });
+    const wearableList = () =>
+    callInvoke<any[]>('wearable_list');
+    const wearableNotify = (id: string, title: string, body: string) =>
+    callInvoke<{ ok: boolean }>('wearable_notify', { id, title, body });
+    const wearableHealth = (id: string) =>
+    callInvoke<any>('wearable_health', { id });
 
     // R103: IoT Controller
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const iotDiscover = () =>
-    // callInvoke<any[]>('iot_discover');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const iotAdd = (device: Record<string, unknown>) =>
-    // callInvoke<{ ok: boolean }>('iot_add', { device });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const iotControl = (id: string, action: string, value: unknown = null) =>
-    // callInvoke<any>('iot_control', { id, action, value });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const iotState = (id: string) =>
-    // callInvoke<any>('iot_state', { id });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const iotList = () =>
-    // callInvoke<any[]>('iot_list');
+    const iotDiscover = () =>
+    callInvoke<any[]>('iot_discover');
+    const iotAdd = (device: Record<string, unknown>) =>
+    callInvoke<{ ok: boolean }>('iot_add', { device });
+    const iotControl = (id: string, action: string, value: unknown = null) =>
+    callInvoke<any>('iot_control', { id, action, value });
+    const iotState = (id: string) =>
+    callInvoke<any>('iot_state', { id });
+    const iotList = () =>
+    callInvoke<any[]>('iot_list');
 
     // R104: Tablet Mode
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const tabletEnable = (touchEnabled: boolean, gestureSupport: boolean, fontScale: number, layout: string) =>
-    // callInvoke<any>('tablet_enable', { touch_enabled: touchEnabled, gesture_support: gestureSupport, font_scale: fontScale, layout });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const tabletDisable = () =>
-    // callInvoke<{ ok: boolean }>('tablet_disable');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const tabletStatus = () =>
-    // callInvoke<any>('tablet_status');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const tabletLayout = (layout: string) =>
-    // callInvoke<any>('tablet_layout', { layout });
+    const tabletEnable = (touchEnabled: boolean, gestureSupport: boolean, fontScale: number, layout: string) =>
+    callInvoke<any>('tablet_enable', { touch_enabled: touchEnabled, gesture_support: gestureSupport, font_scale: fontScale, layout });
+    const tabletDisable = () =>
+    callInvoke<{ ok: boolean }>('tablet_disable');
+    const tabletStatus = () =>
+    callInvoke<any>('tablet_status');
+    const tabletLayout = (layout: string) =>
+    callInvoke<any>('tablet_layout', { layout });
 
     // R105: TV Display Mode
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const tvEnable = (displayMode: string, autoRefreshSecs: number, contentType: string) =>
-    // callInvoke<any>('tv_enable', { display_mode: displayMode, auto_refresh_secs: autoRefreshSecs, content_type: contentType });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const tvDisable = () =>
-    // callInvoke<{ ok: boolean }>('tv_disable');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const tvStatus = () =>
-    // callInvoke<any>('tv_status');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const tvContent = (contentType: string) =>
-    // callInvoke<any>('tv_content', { content_type: contentType });
+    const tvEnable = (displayMode: string, autoRefreshSecs: number, contentType: string) =>
+    callInvoke<any>('tv_enable', { display_mode: displayMode, auto_refresh_secs: autoRefreshSecs, content_type: contentType });
+    const tvDisable = () =>
+    callInvoke<{ ok: boolean }>('tv_disable');
+    const tvStatus = () =>
+    callInvoke<any>('tv_status');
+    const tvContent = (contentType: string) =>
+    callInvoke<any>('tv_content', { content_type: contentType });
 
     // R106: Car Integration
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const carConnect = (config: { vehicle_name: string; protocol: string; endpoint?: string; api_key?: string }) =>
-    // callInvoke<any>('car_connect', { config });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const carDisconnect = (id: string) =>
-    // callInvoke<{ ok: boolean }>('car_disconnect', { id });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const carData = (id: string) =>
-    // callInvoke<any>('car_data', { id });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const carDiagnostics = (id: string) =>
-    // callInvoke<any>('car_diagnostics', { id });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const carCommand = (id: string, command: string) =>
-    // callInvoke<any>('car_command', { id, command });
+    const carConnect = (config: { vehicle_name: string; protocol: string; endpoint?: string; api_key?: string }) =>
+    callInvoke<any>('car_connect', { config });
+    const carDisconnect = (id: string) =>
+    callInvoke<{ ok: boolean }>('car_disconnect', { id });
+    const carData = (id: string) =>
+    callInvoke<any>('car_data', { id });
+    const carDiagnostics = (id: string) =>
+    callInvoke<any>('car_diagnostics', { id });
+    const carCommand = (id: string, command: string) =>
+    callInvoke<any>('car_command', { id, command });
 
     // R107: Browser Extension
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const browserExtStart = (port: number) =>
-    // callInvoke<any>('browser_ext_start', { port });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const browserExtStatus = () =>
-    // callInvoke<any>('browser_ext_status');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const browserExtSend = (data: any) =>
-    // callInvoke<any>('browser_ext_send', { data });
+    const browserExtStart = (port: number) =>
+    callInvoke<any>('browser_ext_start', { port });
+    const browserExtStatus = () =>
+    callInvoke<any>('browser_ext_status');
+    const browserExtSend = (data: any) =>
+    callInvoke<any>('browser_ext_send', { data });
 
     // R108: Email Client
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const emailClientAdd = (name: string, host: string, port: number, username: string, password: string, useTls: boolean) =>
-    // callInvoke<any>('email_client_add', { name, host, port, username, password, use_tls: useTls });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const emailClientList = () =>
-    // callInvoke<any>('email_client_list');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const emailClientConnect = (accountId: string) =>
-    // callInvoke<any>('email_client_connect', { account_id: accountId });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const emailClientFetch = (accountId: string, folder: string, limit: number) =>
-    // callInvoke<any>('email_client_fetch', { account_id: accountId, folder, limit });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const emailClientSend = (accountId: string, to: string, subject: string, body: string) =>
-    // callInvoke<any>('email_client_send', { account_id: accountId, to, subject, body });
+    const emailClientAdd = (name: string, host: string, port: number, username: string, password: string, useTls: boolean) =>
+    callInvoke<any>('email_client_add', { name, host, port, username, password, use_tls: useTls });
+    const emailClientList = () =>
+    callInvoke<any>('email_client_list');
+    const emailClientConnect = (accountId: string) =>
+    callInvoke<any>('email_client_connect', { account_id: accountId });
+    const emailClientFetch = (accountId: string, folder: string, limit: number) =>
+    callInvoke<any>('email_client_fetch', { account_id: accountId, folder, limit });
+    const emailClientSend = (accountId: string, to: string, subject: string, body: string) =>
+    callInvoke<any>('email_client_send', { account_id: accountId, to, subject, body });
 
     // R109: Hardware Partnerships
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const listPartners = () =>
-    // callInvoke<any>('list_partners');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const getPartner = (id: string) =>
-    // callInvoke<any>('get_partner', { id });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const registerPartner = (company: string, deviceType: string, integrationLevel: string) =>
-    // callInvoke<any>('register_partner', { company, device_type: deviceType, integration_level: integrationLevel });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const certifyPartner = (id: string) =>
-    // callInvoke<any>('certify_partner', { id });
+    const listPartners = () =>
+    callInvoke<any>('list_partners');
+    const getPartner = (id: string) =>
+    callInvoke<any>('get_partner', { id });
+    const registerPartner = (company: string, deviceType: string, integrationLevel: string) =>
+    callInvoke<any>('register_partner', { company, device_type: deviceType, integration_level: integrationLevel });
+    const certifyPartner = (id: string) =>
+    callInvoke<any>('certify_partner', { id });
 
     // R111: Autonomous Inbox
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const autoInboxAddRule = (name: string, condition: string, action: string, priority: number) =>
-    // callInvoke<any>('auto_inbox_add_rule', { name, condition, action, priority });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const autoInboxListRules = () =>
-    // callInvoke<any>('auto_inbox_list_rules');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const autoInboxProcess = (from: string, subject: string, body: string, labels: string[]) =>
-    // callInvoke<any>('auto_inbox_process', { from, subject, body, labels });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const autoInboxRemoveRule = (id: string) =>
-    // callInvoke<any>('auto_inbox_remove_rule', { id });
+    const autoInboxAddRule = (name: string, condition: string, action: string, priority: number) =>
+    callInvoke<any>('auto_inbox_add_rule', { name, condition, action, priority });
+    const autoInboxListRules = () =>
+    callInvoke<any>('auto_inbox_list_rules');
+    const autoInboxProcess = (from: string, subject: string, body: string, labels: string[]) =>
+    callInvoke<any>('auto_inbox_process', { from, subject, body, labels });
+    const autoInboxRemoveRule = (id: string) =>
+    callInvoke<any>('auto_inbox_remove_rule', { id });
 
     // R112: Autonomous Scheduling
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const autoScheduleOptimize = (events: any[]) =>
-    // callInvoke<any>('auto_schedule_optimize', { events });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const autoScheduleFindSlot = (durationMinutes: number, attendees: string[], events: any[]) =>
-    // callInvoke<any>('auto_schedule_find_slot', { duration_minutes: durationMinutes, attendees, events });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const autoSchedulePreferences = (preferredStart?: number, preferredEnd?: number, bufferMinutes?: number, maxMeetings?: number) =>
-    // callInvoke<any>('auto_schedule_preferences', { preferred_start: preferredStart, preferred_end: preferredEnd, buffer_minutes: bufferMinutes, max_meetings: maxMeetings });
+    const autoScheduleOptimize = (events: any[]) =>
+    callInvoke<any>('auto_schedule_optimize', { events });
+    const autoScheduleFindSlot = (durationMinutes: number, attendees: string[], events: any[]) =>
+    callInvoke<any>('auto_schedule_find_slot', { duration_minutes: durationMinutes, attendees, events });
+    const autoSchedulePreferences = (preferredStart?: number, preferredEnd?: number, bufferMinutes?: number, maxMeetings?: number) =>
+    callInvoke<any>('auto_schedule_preferences', { preferred_start: preferredStart, preferred_end: preferredEnd, buffer_minutes: bufferMinutes, max_meetings: maxMeetings });
 
     // R113: Autonomous Reporting
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const autoReportCreate = (name: string, schedule: string, dataSources: string[], template: string, recipients: string[]) =>
-    // callInvoke<any>('auto_report_create', { name, schedule, data_sources: dataSources, template, recipients });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const autoReportList = () =>
-    // callInvoke<any>('auto_report_list');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const autoReportGenerate = (configId: string) =>
-    // callInvoke<any>('auto_report_generate', { config_id: configId });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const autoReportSchedule = () =>
-    // callInvoke<any>('auto_report_schedule');
+    const autoReportCreate = (name: string, schedule: string, dataSources: string[], template: string, recipients: string[]) =>
+    callInvoke<any>('auto_report_create', { name, schedule, data_sources: dataSources, template, recipients });
+    const autoReportList = () =>
+    callInvoke<any>('auto_report_list');
+    const autoReportGenerate = (configId: string) =>
+    callInvoke<any>('auto_report_generate', { config_id: configId });
+    const autoReportSchedule = () =>
+    callInvoke<any>('auto_report_schedule');
 
     // R114: Autonomous Data Entry
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const dataEntryCreate = (sourceType: string, sourcePath: string, targetSystem: string, mapping: Record<string, string>) =>
-    // callInvoke<any>('data_entry_create', { source_type: sourceType, source_path: sourcePath, target_system: targetSystem, mapping });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const dataEntryProcess = (id: string) =>
-    // callInvoke<any>('data_entry_process', { id });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const dataEntryList = () =>
-    // callInvoke<any>('data_entry_list');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const dataEntryValidate = (sourceType: string, sourcePath: string, targetSystem: string, mapping: Record<string, string>) =>
-    // callInvoke<any>('data_entry_validate', { source_type: sourceType, source_path: sourcePath, target_system: targetSystem, mapping });
+    const dataEntryCreate = (sourceType: string, sourcePath: string, targetSystem: string, mapping: Record<string, string>) =>
+    callInvoke<any>('data_entry_create', { source_type: sourceType, source_path: sourcePath, target_system: targetSystem, mapping });
+    const dataEntryProcess = (id: string) =>
+    callInvoke<any>('data_entry_process', { id });
+    const dataEntryList = () =>
+    callInvoke<any>('data_entry_list');
+    const dataEntryValidate = (sourceType: string, sourcePath: string, targetSystem: string, mapping: Record<string, string>) =>
+    callInvoke<any>('data_entry_validate', { source_type: sourceType, source_path: sourcePath, target_system: targetSystem, mapping });
 
     // R115: Autonomous QA
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const qaRunChecks = (target: string) =>
-    // callInvoke<any>('qa_run_checks', { target });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const qaGeneratePlan = (description: string) =>
-    // callInvoke<any>('qa_generate_plan', { description });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const qaCoverage = () =>
-    // callInvoke<any>('qa_coverage');
+    const qaRunChecks = (target: string) =>
+    callInvoke<any>('qa_run_checks', { target });
+    const qaGeneratePlan = (description: string) =>
+    callInvoke<any>('qa_generate_plan', { description });
+    const qaCoverage = () =>
+    callInvoke<any>('qa_coverage');
 
     // R116: Autonomous Support
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const supportProcess = (customer: string, issue: string, priority: string) =>
-    // callInvoke<any>('support_process', { customer, issue, priority });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const supportList = () =>
-    // callInvoke<any>('support_list');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const supportResolve = (id: string) =>
-    // callInvoke<any>('support_resolve', { id });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const supportStats = () =>
-    // callInvoke<any>('support_stats');
+    const supportProcess = (customer: string, issue: string, priority: string) =>
+    callInvoke<any>('support_process', { customer, issue, priority });
+    const supportList = () =>
+    callInvoke<any>('support_list');
+    const supportResolve = (id: string) =>
+    callInvoke<any>('support_resolve', { id });
+    const supportStats = () =>
+    callInvoke<any>('support_stats');
 
     // R117: Autonomous Procurement
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const procurementSubmit = (item: string, vendor: string, amount: number, currency: string, justification: string, requester: string) =>
-    // callInvoke<any>('procurement_submit', { item, vendor, amount, currency, justification, requester });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const procurementList = () =>
-    // callInvoke<any>('procurement_list');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const procurementApprove = (id: string) =>
-    // callInvoke<any>('procurement_approve', { id });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const procurementSpend = () =>
-    // callInvoke<any>('procurement_spend');
+    const procurementSubmit = (item: string, vendor: string, amount: number, currency: string, justification: string, requester: string) =>
+    callInvoke<any>('procurement_submit', { item, vendor, amount, currency, justification, requester });
+    const procurementList = () =>
+    callInvoke<any>('procurement_list');
+    const procurementApprove = (id: string) =>
+    callInvoke<any>('procurement_approve', { id });
+    const procurementSpend = () =>
+    callInvoke<any>('procurement_spend');
 
     // R118: Autonomous Compliance
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const autoComplianceRegister = (regulation: string, requirement: string, checkCommand: string) =>
-    // callInvoke<any>('auto_compliance_register', { regulation, requirement, check_command: checkCommand });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const autoComplianceRun = () =>
-    // callInvoke<any>('auto_compliance_run');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const autoComplianceIssues = () =>
-    // callInvoke<any>('auto_compliance_issues');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const autoComplianceRemediate = (id: string) =>
-    // callInvoke<any>('auto_compliance_remediate', { id });
+    const autoComplianceRegister = (regulation: string, requirement: string, checkCommand: string) =>
+    callInvoke<any>('auto_compliance_register', { regulation, requirement, check_command: checkCommand });
+    const autoComplianceRun = () =>
+    callInvoke<any>('auto_compliance_run');
+    const autoComplianceIssues = () =>
+    callInvoke<any>('auto_compliance_issues');
+    const autoComplianceRemediate = (id: string) =>
+    callInvoke<any>('auto_compliance_remediate', { id });
 
     // R119: Autonomous Reconciliation
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const reconcileCreate = (sourceA: string, sourceB: string) =>
-    // callInvoke<any>('reconcile_create', { source_a: sourceA, source_b: sourceB });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const reconcileRun = (jobId: string) =>
-    // callInvoke<any>('reconcile_run', { job_id: jobId });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const reconcileResolve = (jobId: string) =>
-    // callInvoke<any>('reconcile_resolve', { job_id: jobId });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const reconcileList = () =>
-    // callInvoke<any>('reconcile_list');
+    const reconcileCreate = (sourceA: string, sourceB: string) =>
+    callInvoke<any>('reconcile_create', { source_a: sourceA, source_b: sourceB });
+    const reconcileRun = (jobId: string) =>
+    callInvoke<any>('reconcile_run', { job_id: jobId });
+    const reconcileResolve = (jobId: string) =>
+    callInvoke<any>('reconcile_resolve', { job_id: jobId });
+    const reconcileList = () =>
+    callInvoke<any>('reconcile_list');
 
     // R121: Reasoning Chains
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const reasoningStart = (taskId: string) =>
-    // callInvoke<any>('reasoning_start', { task_id: taskId });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const reasoningAddStep = (chainId: string, thought: string, conclusion: string, confidence: number) =>
-    // callInvoke<any>('reasoning_add_step', { chain_id: chainId, thought, conclusion, confidence });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const reasoningFinish = (chainId: string, answer: string) =>
-    // callInvoke<any>('reasoning_finish', { chain_id: chainId, answer });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const reasoningGetChain = (chainId: string) =>
-    // callInvoke<any>('reasoning_get_chain', { chain_id: chainId });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const reasoningListChains = (limit?: number) =>
-    // callInvoke<any>('reasoning_list_chains', { limit: limit || 20 });
+    const reasoningStart = (taskId: string) =>
+    callInvoke<any>('reasoning_start', { task_id: taskId });
+    const reasoningAddStep = (chainId: string, thought: string, conclusion: string, confidence: number) =>
+    callInvoke<any>('reasoning_add_step', { chain_id: chainId, thought, conclusion, confidence });
+    const reasoningFinish = (chainId: string, answer: string) =>
+    callInvoke<any>('reasoning_finish', { chain_id: chainId, answer });
+    const reasoningGetChain = (chainId: string) =>
+    callInvoke<any>('reasoning_get_chain', { chain_id: chainId });
+    const reasoningListChains = (limit?: number) =>
+    callInvoke<any>('reasoning_list_chains', { limit: limit || 20 });
 
     // R122: Self-Correction
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const selfCorrectVerify = (output: string, task: string, taskId: string) =>
-    // callInvoke<any>('self_correct_verify', { output, task, task_id: taskId });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const selfCorrectApply = (taskId: string, output: string, issue: string) =>
-    // callInvoke<any>('self_correct_apply', { task_id: taskId, output, issue });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const selfCorrectHistory = (taskId: string) =>
-    // callInvoke<any>('self_correct_history', { task_id: taskId });
+    const selfCorrectVerify = (output: string, task: string, taskId: string) =>
+    callInvoke<any>('self_correct_verify', { output, task, task_id: taskId });
+    const selfCorrectApply = (taskId: string, output: string, issue: string) =>
+    callInvoke<any>('self_correct_apply', { task_id: taskId, output, issue });
+    const selfCorrectHistory = (taskId: string) =>
+    callInvoke<any>('self_correct_history', { task_id: taskId });
 
     // R123: Multimodal Reasoning
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const multimodalAnalyze = (sources: Array<{ modality_type: string; content_summary: string; confidence: number }>) =>
-    // callInvoke<any>('multimodal_analyze', { sources });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const multimodalGetAnalysis = (analysisId: string) =>
-    // callInvoke<any>('multimodal_get_analysis', { analysis_id: analysisId });
+    const multimodalAnalyze = (sources: Array<{ modality_type: string; content_summary: string; confidence: number }>) =>
+    callInvoke<any>('multimodal_analyze', { sources });
+    const multimodalGetAnalysis = (analysisId: string) =>
+    callInvoke<any>('multimodal_get_analysis', { analysis_id: analysisId });
 
     // R124: Causal Inference
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const causalAnalyze = (events: string[]) =>
-    // callInvoke<any>('causal_analyze', { events });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const causalCounterfactual = (claimId: string, scenario: string) =>
-    // callInvoke<any>('causal_counterfactual', { claim_id: claimId, scenario });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const causalGetGraph = (graphId: string) =>
-    // callInvoke<any>('causal_get_graph', { graph_id: graphId });
+    const causalAnalyze = (events: string[]) =>
+    callInvoke<any>('causal_analyze', { events });
+    const causalCounterfactual = (claimId: string, scenario: string) =>
+    callInvoke<any>('causal_counterfactual', { claim_id: claimId, scenario });
+    const causalGetGraph = (graphId: string) =>
+    callInvoke<any>('causal_get_graph', { graph_id: graphId });
 
     // R125: Knowledge Graph
     const kgAddEntity = (id: string, name: string, entityType: string, properties: Record<string, string>) =>
@@ -1348,286 +1183,201 @@ export function useAgent() {
         callInvoke<any>('kg_stats');
 
     // R126: Hypothesis Generation
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const hypothesisGenerate = (question: string) =>
-    // callInvoke<any>('hypothesis_generate', { question });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const hypothesisUpdate = (id: string, evidence: string, supports: boolean) =>
-    // callInvoke<any>('hypothesis_update', { id, evidence, supports });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const hypothesisGet = (id: string) =>
-    // callInvoke<any>('hypothesis_get', { id });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const hypothesisList = (limit?: number) =>
-    // callInvoke<any>('hypothesis_list', { limit });
+    const hypothesisGenerate = (question: string) =>
+    callInvoke<any>('hypothesis_generate', { question });
+    const hypothesisUpdate = (id: string, evidence: string, supports: boolean) =>
+    callInvoke<any>('hypothesis_update', { id, evidence, supports });
+    const hypothesisGet = (id: string) =>
+    callInvoke<any>('hypothesis_get', { id });
+    const hypothesisList = (limit?: number) =>
+    callInvoke<any>('hypothesis_list', { limit });
 
     // R127: Confidence Calibration
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const confidenceRecord = (taskId: string, score: number, correct?: boolean) =>
-    // callInvoke<any>('confidence_record', { task_id: taskId, score, correct });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const confidenceCalibration = () =>
-    // callInvoke<any>('confidence_calibration');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const confidenceStats = () =>
-    // callInvoke<any>('confidence_stats');
+    const confidenceRecord = (taskId: string, score: number, correct?: boolean) =>
+    callInvoke<any>('confidence_record', { task_id: taskId, score, correct });
+    const confidenceCalibration = () =>
+    callInvoke<any>('confidence_calibration');
+    const confidenceStats = () =>
+    callInvoke<any>('confidence_stats');
 
     // R128: Transfer Learning
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const transferRegister = (patternName: string, sourceDomain: string, applicableDomains: string[], confidence: number) =>
-    // callInvoke<any>('transfer_register', { pattern_name: patternName, source_domain: sourceDomain, applicable_domains: applicableDomains, confidence });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const transferFind = (domain: string) =>
-    // callInvoke<any>('transfer_find', { domain });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const transferApply = (patternId: string, newDomain: string) =>
-    // callInvoke<any>('transfer_apply', { pattern_id: patternId, new_domain: newDomain });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const transferList = () =>
-    // callInvoke<any>('transfer_list');
+    const transferRegister = (patternName: string, sourceDomain: string, applicableDomains: string[], confidence: number) =>
+    callInvoke<any>('transfer_register', { pattern_name: patternName, source_domain: sourceDomain, applicable_domains: applicableDomains, confidence });
+    const transferFind = (domain: string) =>
+    callInvoke<any>('transfer_find', { domain });
+    const transferApply = (patternId: string, newDomain: string) =>
+    callInvoke<any>('transfer_apply', { pattern_id: patternId, new_domain: newDomain });
+    const transferList = () =>
+    callInvoke<any>('transfer_list');
 
     // R129: Meta-Learning
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const metaRecord = (domain: string, success: boolean, corrected: boolean) =>
-    // callInvoke<any>('meta_record', { domain, success, corrected });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const metaCurve = (domain: string) =>
-    // callInvoke<any>('meta_curve', { domain });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const metaAllCurves = () =>
-    // callInvoke<any>('meta_all_curves');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const metaPredict = (domain: string, nTasks: number) =>
-    // callInvoke<any>('meta_predict', { domain, n_tasks: nTasks });
+    const metaRecord = (domain: string, success: boolean, corrected: boolean) =>
+    callInvoke<any>('meta_record', { domain, success, corrected });
+    const metaCurve = (domain: string) =>
+    callInvoke<any>('meta_curve', { domain });
+    const metaAllCurves = () =>
+    callInvoke<any>('meta_all_curves');
+    const metaPredict = (domain: string, nTasks: number) =>
+    callInvoke<any>('meta_predict', { domain, n_tasks: nTasks });
 
     // R131: Legal Suite
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const legalCreateCase = (caseNumber: string, title: string, client: string) =>
-    // callInvoke<any>('legal_create_case', { case_number: caseNumber, title, client });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const legalListCases = (status?: string) =>
-    // callInvoke<any>('legal_list_cases', { status });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const legalSearch = (query: string) =>
-    // callInvoke<any>('legal_search', { query });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const legalAnalyze = (caseId: string, docPath: string) =>
-    // callInvoke<any>('legal_analyze', { case_id: caseId, doc_path: docPath });
+    const legalCreateCase = (caseNumber: string, title: string, client: string) =>
+    callInvoke<any>('legal_create_case', { case_number: caseNumber, title, client });
+    const legalListCases = (status?: string) =>
+    callInvoke<any>('legal_list_cases', { status });
+    const legalSearch = (query: string) =>
+    callInvoke<any>('legal_search', { query });
+    const legalAnalyze = (caseId: string, docPath: string) =>
+    callInvoke<any>('legal_analyze', { case_id: caseId, doc_path: docPath });
 
     // R132: Medical
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const medicalAdd = (name: string, dateOfBirth: string, conditions: string[]) =>
-    // callInvoke<any>('medical_add', { name, date_of_birth: dateOfBirth, conditions });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const medicalSearch = (query: string) =>
-    // callInvoke<any>('medical_search', { query });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const medicalInteractions = (medications: string[]) =>
-    // callInvoke<any>('medical_interactions', { medications });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const medicalSummary = (patientId: string) =>
-    // callInvoke<any>('medical_summary', { patient_id: patientId });
+    const medicalAdd = (name: string, dateOfBirth: string, conditions: string[]) =>
+    callInvoke<any>('medical_add', { name, date_of_birth: dateOfBirth, conditions });
+    const medicalSearch = (query: string) =>
+    callInvoke<any>('medical_search', { query });
+    const medicalInteractions = (medications: string[]) =>
+    callInvoke<any>('medical_interactions', { medications });
+    const medicalSummary = (patientId: string) =>
+    callInvoke<any>('medical_summary', { patient_id: patientId });
 
     // R133: Accounting
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const accountingAdd = (date: string, description: string, amount: number, category: string, account: string, txType: string) =>
-    // callInvoke<any>('accounting_add', { date, description, amount, category, account, tx_type: txType });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const accountingBalance = (account?: string) =>
-    // callInvoke<any>('accounting_balance', { account });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const accountingReport = (period: string) =>
-    // callInvoke<any>('accounting_report', { period });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const accountingCategorize = (description: string) =>
-    // callInvoke<any>('accounting_categorize', { description });
+    const accountingAdd = (date: string, description: string, amount: number, category: string, account: string, txType: string) =>
+    callInvoke<any>('accounting_add', { date, description, amount, category, account, tx_type: txType });
+    const accountingBalance = (account?: string) =>
+    callInvoke<any>('accounting_balance', { account });
+    const accountingReport = (period: string) =>
+    callInvoke<any>('accounting_report', { period });
+    const accountingCategorize = (description: string) =>
+    callInvoke<any>('accounting_categorize', { description });
 
     // R134: Real Estate
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const realestateAdd = (address: string, price: number, bedrooms: number, bathrooms: number, sqft: number, propertyType: string) =>
-    // callInvoke<any>('realestate_add', { address, price, bedrooms, bathrooms, sqft, property_type: propertyType });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const realestateSearch = (minPrice?: number, maxPrice?: number, minBedrooms?: number, minSqft?: number) =>
-    // callInvoke<any>('realestate_search', { min_price: minPrice, max_price: maxPrice, min_bedrooms: minBedrooms, min_sqft: minSqft });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const realestateRoi = (propertyId: string, monthlyRent: number, annualExpenses: number) =>
-    // callInvoke<any>('realestate_roi', { property_id: propertyId, monthly_rent: monthlyRent, annual_expenses: annualExpenses });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const realestateListing = (propertyId: string) =>
-    // callInvoke<any>('realestate_listing', { property_id: propertyId });
+    const realestateAdd = (address: string, price: number, bedrooms: number, bathrooms: number, sqft: number, propertyType: string) =>
+    callInvoke<any>('realestate_add', { address, price, bedrooms, bathrooms, sqft, property_type: propertyType });
+    const realestateSearch = (minPrice?: number, maxPrice?: number, minBedrooms?: number, minSqft?: number) =>
+    callInvoke<any>('realestate_search', { min_price: minPrice, max_price: maxPrice, min_bedrooms: minBedrooms, min_sqft: minSqft });
+    const realestateRoi = (propertyId: string, monthlyRent: number, annualExpenses: number) =>
+    callInvoke<any>('realestate_roi', { property_id: propertyId, monthly_rent: monthlyRent, annual_expenses: annualExpenses });
+    const realestateListing = (propertyId: string) =>
+    callInvoke<any>('realestate_listing', { property_id: propertyId });
 
     // R135: Education
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const eduCreateCourse = (title: string, subject: string, level: string, lessonTitles: string[]) =>
-    // callInvoke<any>('edu_create_course', { title, subject, level, lesson_titles: lessonTitles });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const eduQuiz = (courseId: string, numQuestions: number) =>
-    // callInvoke<any>('edu_quiz', { course_id: courseId, num_questions: numQuestions });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const eduGrade = (studentId: string, courseId: string, score: number) =>
-    // callInvoke<any>('edu_grade', { student_id: studentId, course_id: courseId, score });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const eduProgress = (studentId: string, courseId: string) =>
-    // callInvoke<any>('edu_progress', { student_id: studentId, course_id: courseId });
+    const eduCreateCourse = (title: string, subject: string, level: string, lessonTitles: string[]) =>
+    callInvoke<any>('edu_create_course', { title, subject, level, lesson_titles: lessonTitles });
+    const eduQuiz = (courseId: string, numQuestions: number) =>
+    callInvoke<any>('edu_quiz', { course_id: courseId, num_questions: numQuestions });
+    const eduGrade = (studentId: string, courseId: string, score: number) =>
+    callInvoke<any>('edu_grade', { student_id: studentId, course_id: courseId, score });
+    const eduProgress = (studentId: string, courseId: string) =>
+    callInvoke<any>('edu_progress', { student_id: studentId, course_id: courseId });
 
     // R136: HR
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const hrAdd = (name: string, department: string, role: string, hireDate: string, salary: number | null, email: string) =>
-    // callInvoke<any>('hr_add', { name, department, role, hire_date: hireDate, salary, email });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const hrList = (department?: string, status?: string) =>
-    // callInvoke<any>('hr_list', { department, status });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const hrOfferLetter = (candidateName: string, role: string, department: string, salary: number, startDate: string) =>
-    // callInvoke<any>('hr_offer_letter', { candidate_name: candidateName, role, department, salary, start_date: startDate });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const hrBenefits = (employeeId: string) =>
-    // callInvoke<any>('hr_benefits', { employee_id: employeeId });
+    const hrAdd = (name: string, department: string, role: string, hireDate: string, salary: number | null, email: string) =>
+    callInvoke<any>('hr_add', { name, department, role, hire_date: hireDate, salary, email });
+    const hrList = (department?: string, status?: string) =>
+    callInvoke<any>('hr_list', { department, status });
+    const hrOfferLetter = (candidateName: string, role: string, department: string, salary: number, startDate: string) =>
+    callInvoke<any>('hr_offer_letter', { candidate_name: candidateName, role, department, salary, start_date: startDate });
+    const hrBenefits = (employeeId: string) =>
+    callInvoke<any>('hr_benefits', { employee_id: employeeId });
 
     // R137: Supply Chain
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const supplyTrack = (shipmentId: string) =>
-    // callInvoke<any>('supply_track', { shipment_id: shipmentId });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const supplyOptimize = (origin: string, destination: string, weightKg: number) =>
-    // callInvoke<any>('supply_optimize', { origin, destination, weight_kg: weightKg });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const supplyForecast = (product: string, periodMonths: number) =>
-    // callInvoke<any>('supply_forecast', { product, period_months: periodMonths });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const supplyList = (status?: string) =>
-    // callInvoke<any>('supply_list', { status });
+    const supplyTrack = (shipmentId: string) =>
+    callInvoke<any>('supply_track', { shipment_id: shipmentId });
+    const supplyOptimize = (origin: string, destination: string, weightKg: number) =>
+    callInvoke<any>('supply_optimize', { origin, destination, weight_kg: weightKg });
+    const supplyForecast = (product: string, periodMonths: number) =>
+    callInvoke<any>('supply_forecast', { product, period_months: periodMonths });
+    const supplyList = (status?: string) =>
+    callInvoke<any>('supply_list', { status });
 
     // R138: Construction
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const constructionCreate = (name: string, site: string, budget: number, timeline: string, milestoneNames: string[]) =>
-    // callInvoke<any>('construction_create', { name, site, budget, timeline, milestone_names: milestoneNames });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const constructionMilestone = (projectId: string, milestoneId: string, completed: boolean, notes?: string) =>
-    // callInvoke<any>('construction_milestone', { project_id: projectId, milestone_id: milestoneId, completed, notes });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const constructionBudget = (projectId: string) =>
-    // callInvoke<any>('construction_budget', { project_id: projectId });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const constructionSafety = (projectId: string) =>
-    // callInvoke<any>('construction_safety', { project_id: projectId });
+    const constructionCreate = (name: string, site: string, budget: number, timeline: string, milestoneNames: string[]) =>
+    callInvoke<any>('construction_create', { name, site, budget, timeline, milestone_names: milestoneNames });
+    const constructionMilestone = (projectId: string, milestoneId: string, completed: boolean, notes?: string) =>
+    callInvoke<any>('construction_milestone', { project_id: projectId, milestone_id: milestoneId, completed, notes });
+    const constructionBudget = (projectId: string) =>
+    callInvoke<any>('construction_budget', { project_id: projectId });
+    const constructionSafety = (projectId: string) =>
+    callInvoke<any>('construction_safety', { project_id: projectId });
 
     // R139: Agriculture
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const agriCreatePlan = (crop: string, field: string, fieldAcres: number, plantedDate: string, expectedHarvest: string) =>
-    // callInvoke<any>('agri_create_plan', { crop, field, field_acres: fieldAcres, planted_date: plantedDate, expected_harvest: expectedHarvest });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const agriWeather = (cropId: string, temperatureC: number, rainfallMm: number, humidityPct: number) =>
-    // callInvoke<any>('agri_weather', { crop_id: cropId, temperature_c: temperatureC, rainfall_mm: rainfallMm, humidity_pct: humidityPct });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const agriIrrigation = (cropId: string, soilMoisturePct: number) =>
-    // callInvoke<any>('agri_irrigation', { crop_id: cropId, soil_moisture_pct: soilMoisturePct });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const agriYield = (cropId: string, soilQuality: number, pestPressure: number) =>
-    // callInvoke<any>('agri_yield', { crop_id: cropId, soil_quality: soilQuality, pest_pressure: pestPressure });
+    const agriCreatePlan = (crop: string, field: string, fieldAcres: number, plantedDate: string, expectedHarvest: string) =>
+    callInvoke<any>('agri_create_plan', { crop, field, field_acres: fieldAcres, planted_date: plantedDate, expected_harvest: expectedHarvest });
+    const agriWeather = (cropId: string, temperatureC: number, rainfallMm: number, humidityPct: number) =>
+    callInvoke<any>('agri_weather', { crop_id: cropId, temperature_c: temperatureC, rainfall_mm: rainfallMm, humidity_pct: humidityPct });
+    const agriIrrigation = (cropId: string, soilMoisturePct: number) =>
+    callInvoke<any>('agri_irrigation', { crop_id: cropId, soil_moisture_pct: soilMoisturePct });
+    const agriYield = (cropId: string, soilQuality: number, pestPressure: number) =>
+    callInvoke<any>('agri_yield', { crop_id: cropId, soil_quality: soilQuality, pest_pressure: pestPressure });
 
     // R141: Agent Hiring
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const hiringPost = (title: string, description: string, requirements: string[], budget: number, posterId: string) =>
-    // callInvoke<any>('hiring_post', { title, description, requirements, budget, poster_id: posterId });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const hiringList = () => callInvoke<any>('hiring_list');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const hiringApply = (jobId: string, agentId: string, coverNote: string) =>
-    // callInvoke<any>('hiring_apply', { job_id: jobId, agent_id: agentId, cover_note: coverNote });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const hiringHire = (jobId: string, agentId: string) =>
-    // callInvoke<any>('hiring_hire', { job_id: jobId, agent_id: agentId });
+    const hiringPost = (title: string, description: string, requirements: string[], budget: number, posterId: string) =>
+    callInvoke<any>('hiring_post', { title, description, requirements, budget, poster_id: posterId });
+    const hiringList = () => callInvoke<any>('hiring_list');
+    const hiringApply = (jobId: string, agentId: string, coverNote: string) =>
+    callInvoke<any>('hiring_apply', { job_id: jobId, agent_id: agentId, cover_note: coverNote });
+    const hiringHire = (jobId: string, agentId: string) =>
+    callInvoke<any>('hiring_hire', { job_id: jobId, agent_id: agentId });
 
     // R142: Reputation System
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const reputationGet = (agentId: string) => callInvoke<any>('reputation_get', { agent_id: agentId });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const reputationReview = (agentId: string, rating: number, comment: string, reviewerId: string) =>
-    // callInvoke<any>('reputation_review', { agent_id: agentId, rating, comment, reviewer_id: reviewerId });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const reputationLeaderboard = (limit?: number) => callInvoke<any>('reputation_leaderboard', { limit });
+    const reputationGet = (agentId: string) => callInvoke<any>('reputation_get', { agent_id: agentId });
+    const reputationReview = (agentId: string, rating: number, comment: string, reviewerId: string) =>
+    callInvoke<any>('reputation_review', { agent_id: agentId, rating, comment, reviewer_id: reviewerId });
+    const reputationLeaderboard = (limit?: number) => callInvoke<any>('reputation_leaderboard', { limit });
 
     // R143: Cross-User Collaboration
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const collabCreate = (name: string, creator: string, task: string, sharedContext: string) =>
-    // callInvoke<any>('collab_create', { name, creator, task, shared_context: sharedContext });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const collabJoin = (sessionId: string, userId: string, agents: string[]) =>
-    // callInvoke<any>('collab_join', { session_id: sessionId, user_id: userId, agents });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const collabList = () => callInvoke<any>('collab_list');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const collabShare = (sessionId: string, fromUser: string, agentId: string, content: string) =>
-    // callInvoke<any>('collab_share', { session_id: sessionId, from_user: fromUser, agent_id: agentId, content });
+    const collabCreate = (name: string, creator: string, task: string, sharedContext: string) =>
+    callInvoke<any>('collab_create', { name, creator, task, shared_context: sharedContext });
+    const collabJoin = (sessionId: string, userId: string, agents: string[]) =>
+    callInvoke<any>('collab_join', { session_id: sessionId, user_id: userId, agents });
+    const collabList = () => callInvoke<any>('collab_list');
+    const collabShare = (sessionId: string, fromUser: string, agentId: string, content: string) =>
+    callInvoke<any>('collab_share', { session_id: sessionId, from_user: fromUser, agent_id: agentId, content });
 
     // R144: Microtasks
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const microtaskPost = (title: string, description: string, rewardAmount: number, deadline: string | null, posterId: string) =>
-    // callInvoke<any>('microtask_post', { title, description, reward_amount: rewardAmount, deadline, poster_id: posterId });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const microtaskClaim = (taskId: string, agentId: string) =>
-    // callInvoke<any>('microtask_claim', { task_id: taskId, agent_id: agentId });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const microtaskComplete = (taskId: string, result: string) =>
-    // callInvoke<any>('microtask_complete', { task_id: taskId, result });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const microtaskList = () => callInvoke<any>('microtask_list');
+    const microtaskPost = (title: string, description: string, rewardAmount: number, deadline: string | null, posterId: string) =>
+    callInvoke<any>('microtask_post', { title, description, reward_amount: rewardAmount, deadline, poster_id: posterId });
+    const microtaskClaim = (taskId: string, agentId: string) =>
+    callInvoke<any>('microtask_claim', { task_id: taskId, agent_id: agentId });
+    const microtaskComplete = (taskId: string, result: string) =>
+    callInvoke<any>('microtask_complete', { task_id: taskId, result });
+    const microtaskList = () => callInvoke<any>('microtask_list');
 
     // R145: Escrow
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const escrowCreate = (payer: string, payee: string, amount: number, taskDescription: string) =>
-    // callInvoke<any>('escrow_create', { payer, payee, amount, task_description: taskDescription });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const escrowRelease = (txId: string) => callInvoke<any>('escrow_release', { tx_id: txId });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const escrowRefund = (txId: string) => callInvoke<any>('escrow_refund', { tx_id: txId });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const escrowList = (userId?: string) => callInvoke<any>('escrow_list', { user_id: userId });
+    const escrowCreate = (payer: string, payee: string, amount: number, taskDescription: string) =>
+    callInvoke<any>('escrow_create', { payer, payee, amount, task_description: taskDescription });
+    const escrowRelease = (txId: string) => callInvoke<any>('escrow_release', { tx_id: txId });
+    const escrowRefund = (txId: string) => callInvoke<any>('escrow_refund', { tx_id: txId });
+    const escrowList = (userId?: string) => callInvoke<any>('escrow_list', { user_id: userId });
 
     // R146: Agent Insurance
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const insuranceCreate = (agentId: string, coverageType: string) =>
-    // callInvoke<any>('insurance_create', { agent_id: agentId, coverage_type: coverageType });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const insuranceList = (agentId?: string) => callInvoke<any>('insurance_list', { agent_id: agentId });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const insuranceClaim = (policyId: string, description: string, amount: number, evidence: string[]) =>
-    // callInvoke<any>('insurance_claim', { policy_id: policyId, description, amount, evidence });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const insuranceStatus = (policyId: string, claimId: string) =>
-    // callInvoke<any>('insurance_status', { policy_id: policyId, claim_id: claimId });
+    const insuranceCreate = (agentId: string, coverageType: string) =>
+    callInvoke<any>('insurance_create', { agent_id: agentId, coverage_type: coverageType });
+    const insuranceList = (agentId?: string) => callInvoke<any>('insurance_list', { agent_id: agentId });
+    const insuranceClaim = (policyId: string, description: string, amount: number, evidence: string[]) =>
+    callInvoke<any>('insurance_claim', { policy_id: policyId, description, amount, evidence });
+    const insuranceStatus = (policyId: string, claimId: string) =>
+    callInvoke<any>('insurance_status', { policy_id: policyId, claim_id: claimId });
 
     // R147: Creator Studio
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const creatorCreate = (name: string, description: string, projectType: string, creatorId: string) =>
-    // callInvoke<any>('creator_create', { name, description, project_type: projectType, creator_id: creatorId });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const creatorPublish = (projectId: string) => callInvoke<any>('creator_publish', { project_id: projectId });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const creatorList = (creatorId?: string) => callInvoke<any>('creator_list', { creator_id: creatorId });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const creatorAnalytics = (projectId: string) => callInvoke<any>('creator_analytics', { project_id: projectId });
+    const creatorCreate = (name: string, description: string, projectType: string, creatorId: string) =>
+    callInvoke<any>('creator_create', { name, description, project_type: projectType, creator_id: creatorId });
+    const creatorPublish = (projectId: string) => callInvoke<any>('creator_publish', { project_id: projectId });
+    const creatorList = (creatorId?: string) => callInvoke<any>('creator_list', { creator_id: creatorId });
+    const creatorAnalytics = (projectId: string) => callInvoke<any>('creator_analytics', { project_id: projectId });
 
     // R148: Creator Analytics
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const creatorMetrics = () => callInvoke<any>('creator_metrics');
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const creatorRevenue = (limit?: number) => callInvoke<any>('creator_revenue', { limit });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const creatorTrends = (limit?: number) => callInvoke<any>('creator_trends', { limit });
+    const creatorMetrics = () => callInvoke<any>('creator_metrics');
+    const creatorRevenue = (limit?: number) => callInvoke<any>('creator_revenue', { limit });
+    const creatorTrends = (limit?: number) => callInvoke<any>('creator_trends', { limit });
 
     // R149: Affiliate Program
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const affiliateCreate = (creatorId: string, productId: string) =>
-    // callInvoke<any>('affiliate_create', { creator_id: creatorId, product_id: productId });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const affiliateEarnings = (creatorId: string) => callInvoke<any>('affiliate_earnings', { creator_id: creatorId });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const affiliateList = (creatorId?: string) => callInvoke<any>('affiliate_list', { creator_id: creatorId });
-    // === MOVED TO FUTURE -- not available in v5.0.0 ===
-    // const affiliateTrack = (linkCode: string, conversion: boolean, amount?: number) =>
-    // callInvoke<any>('affiliate_track', { link_code: linkCode, conversion, amount });
+    const affiliateCreate = (creatorId: string, productId: string) =>
+    callInvoke<any>('affiliate_create', { creator_id: creatorId, product_id: productId });
+    const affiliateEarnings = (creatorId: string) => callInvoke<any>('affiliate_earnings', { creator_id: creatorId });
+    const affiliateList = (creatorId?: string) => callInvoke<any>('affiliate_list', { creator_id: creatorId });
+    const affiliateTrack = (linkCode: string, conversion: boolean, amount?: number) =>
+    callInvoke<any>('affiliate_track', { link_code: linkCode, conversion, amount });
 
     // C2: Auto-Update
     const checkForUpdate = () => callInvoke<any>('check_for_update');
