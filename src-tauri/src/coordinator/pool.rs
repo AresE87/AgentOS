@@ -4,7 +4,7 @@ use crate::config::Settings;
 use crate::coordinator::event_bus::{CoordinatorEvent, EventBus};
 use crate::coordinator::specialists::{SpecialistProfile, SpecialistRegistry};
 use crate::coordinator::types::*;
-use crate::tools::{ToolContext, ToolRegistry};
+use crate::tools::{ExecutionMode, ToolContext, ToolRegistry};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -211,6 +211,7 @@ impl AgentPool {
             db_path: self.db_path.clone(),
             app_data_dir: self.app_data_dir.clone(),
             kill_switch: self.kill_switch.clone(),
+            execution_mode: ExecutionMode::default(),
         };
 
         let system_prompt = worker

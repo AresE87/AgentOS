@@ -143,6 +143,25 @@ impl SandboxManager {
         Ok(containers)
     }
 
+    /// S2: Execute a command inside an already-running container.
+    /// Returns (stdout, stderr, exit_code).
+    pub async fn exec_command(
+        container_id: &str,
+        command: &str,
+    ) -> Result<(String, String, i32), String> {
+        let output = Command::new("docker")
+            .args(["exec", container_id, "sh", "-c", command])
+            .output()
+            .await
+            .map_err(|e| format!("Docker exec failed: {}", e))?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        let exit_code = output.status.code().unwrap_or(-1);
+
+        Ok((stdout, stderr, exit_code))
+    }
+
     /// Kill (stop + remove) a running sandbox container by ID or name.
     pub async fn kill_sandbox(id: &str) -> Result<(), String> {
         let output = Command::new("docker")

@@ -29,7 +29,7 @@ impl Tool for BashTool {
     async fn execute(
         &self,
         input: serde_json::Value,
-        _ctx: &ToolContext,
+        ctx: &ToolContext,
     ) -> Result<ToolOutput, ToolError> {
         let command = input
             .get("command")
@@ -51,50 +51,83 @@ impl Tool for BashTool {
             crate::security::bash_validator::ValidationResult::Allow => {}
         }
 
-        let output = if cfg!(windows) {
-            let mut cmd = tokio::process::Command::new("powershell");
-            cmd.args(&["-NoProfile", "-NonInteractive", "-Command", command]);
-            // Hide the PowerShell window on Windows (CREATE_NO_WINDOW)
-            #[cfg(windows)]
-            {
-                use std::os::windows::process::CommandExt;
-                cmd.creation_flags(0x08000000);
+        // S2: Execute based on mode — sandbox (Docker) vs host
+        match &ctx.execution_mode {
+            crate::tools::ExecutionMode::Sandbox { container_id } => {
+                let (stdout, stderr, exit_code) =
+                    crate::sandbox::SandboxManager::exec_command(container_id, command)
+                        .await
+                        .map_err(|e| ToolError(e))?;
+
+                let result = if stderr.is_empty() {
+                    stdout.trim().to_string()
+                } else {
+                    format!(
+                        "stdout:\n{}\nstderr:\n{}\nexit_code: {}",
+                        stdout.trim(),
+                        stderr.trim(),
+                        exit_code
+                    )
+                };
+
+                let truncated = if result.len() > 50_000 {
+                    format!("{}...[truncated]", &result[..50_000])
+                } else {
+                    result
+                };
+                Ok(ToolOutput {
+                    content: truncated,
+                    is_error: exit_code != 0,
+                })
             }
-            cmd.output().await
-        } else {
-            tokio::process::Command::new("bash")
-                .args(&["-c", command])
-                .output()
-                .await
-        };
+            crate::tools::ExecutionMode::Host => {
+                // Original host execution
+                let output = if cfg!(windows) {
+                    let mut cmd = tokio::process::Command::new("powershell");
+                    cmd.args(&["-NoProfile", "-NonInteractive", "-Command", command]);
+                    #[cfg(windows)]
+                    {
+                        use std::os::windows::process::CommandExt;
+                        cmd.creation_flags(0x08000000);
+                    }
+                    cmd.output().await
+                } else {
+                    tokio::process::Command::new("bash")
+                        .args(&["-c", command])
+                        .output()
+                        .await
+                };
 
-        let output = output.map_err(|e| ToolError(format!("Failed to execute: {}", e)))?;
+                let output =
+                    output.map_err(|e| ToolError(format!("Failed to execute: {}", e)))?;
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let exit_code = output.status.code().unwrap_or(-1);
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let exit_code = output.status.code().unwrap_or(-1);
 
-        let result = if stderr.is_empty() {
-            stdout.trim().to_string()
-        } else {
-            format!(
-                "stdout:\n{}\nstderr:\n{}\nexit_code: {}",
-                stdout.trim(),
-                stderr.trim(),
-                exit_code
-            )
-        };
+                let result = if stderr.is_empty() {
+                    stdout.trim().to_string()
+                } else {
+                    format!(
+                        "stdout:\n{}\nstderr:\n{}\nexit_code: {}",
+                        stdout.trim(),
+                        stderr.trim(),
+                        exit_code
+                    )
+                };
 
-        // Truncate to 50KB
-        let truncated = if result.len() > 50_000 {
-            format!("{}...[truncated]", &result[..50_000])
-        } else {
-            result
-        };
+                // Truncate to 50KB
+                let truncated = if result.len() > 50_000 {
+                    format!("{}...[truncated]", &result[..50_000])
+                } else {
+                    result
+                };
 
-        Ok(ToolOutput {
-            content: truncated,
-            is_error: exit_code != 0,
-        })
+                Ok(ToolOutput {
+                    content: truncated,
+                    is_error: exit_code != 0,
+                })
+            }
+        }
     }
 }

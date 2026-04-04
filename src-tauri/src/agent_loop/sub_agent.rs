@@ -58,6 +58,7 @@ impl SubAgentManager {
             db_path: parent_ctx.db_path.clone(),
             app_data_dir: parent_ctx.app_data_dir.clone(),
             kill_switch: parent_ctx.kill_switch.clone(),
+            execution_mode: parent_ctx.execution_mode.clone(),
         };
 
         let system_prompt = format!(

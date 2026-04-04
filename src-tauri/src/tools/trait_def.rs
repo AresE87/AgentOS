@@ -18,12 +18,29 @@ pub enum PermissionLevel {
     Dangerous,
 }
 
+/// S2: Execution mode for tool commands — sandbox (Docker) vs host.
+#[derive(Debug, Clone)]
+pub enum ExecutionMode {
+    /// Execute directly on the host OS (default, existing behavior).
+    Host,
+    /// Execute inside a Docker container identified by container_id.
+    Sandbox { container_id: String },
+}
+
+impl Default for ExecutionMode {
+    fn default() -> Self {
+        Self::Host
+    }
+}
+
 pub struct ToolContext {
     pub agent_name: String,
     pub task_id: String,
     pub db_path: PathBuf,
     pub app_data_dir: PathBuf,
     pub kill_switch: Arc<AtomicBool>,
+    /// S2: Whether tools run on the host or inside a Docker sandbox.
+    pub execution_mode: ExecutionMode,
 }
 
 #[derive(Debug, Clone, Serialize)]

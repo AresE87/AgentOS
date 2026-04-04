@@ -659,6 +659,7 @@ Always be helpful, precise, and use tools judiciously.";
             .unwrap_or(std::path::Path::new("."))
             .to_path_buf(),
         kill_switch: kill_switch.clone(),
+        execution_mode: tools::ExecutionMode::Host,
     };
 
     let gateway = state.gateway.lock().await;
@@ -1681,6 +1682,7 @@ async fn cmd_agent_run(
             .unwrap_or(std::path::Path::new("."))
             .to_path_buf(),
         kill_switch: kill_switch.clone(),
+        execution_mode: tools::ExecutionMode::Host,
     };
 
     let system_prompt = "\
@@ -5411,6 +5413,56 @@ async fn cmd_sandbox_kill(
     Ok(serde_json::json!({ "ok": true }))
 }
 
+// ── S1: Docker Worker Image + Container Lifecycle commands ────────────────
+
+#[tauri::command]
+async fn cmd_get_docker_status() -> Result<serde_json::Value, String> {
+    let available = sandbox::SandboxManager::is_docker_available().await;
+    let image_exists = sandbox::WorkerImage::exists().await;
+    let workers = sandbox::WorkerContainer::list_all().await.unwrap_or_default();
+    let running: Vec<serde_json::Value> = workers
+        .iter()
+        .map(|(id, name, status)| {
+            serde_json::json!({ "id": id, "name": name, "status": status })
+        })
+        .collect();
+    Ok(serde_json::json!({
+        "available": available,
+        "image_exists": image_exists,
+        "running_workers": running,
+    }))
+}
+
+#[tauri::command]
+async fn cmd_build_worker_image() -> Result<serde_json::Value, String> {
+    sandbox::WorkerImage::build().await?;
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+#[tauri::command]
+async fn cmd_list_worker_containers() -> Result<serde_json::Value, String> {
+    let workers = sandbox::WorkerContainer::list_all().await?;
+    let list: Vec<serde_json::Value> = workers
+        .iter()
+        .map(|(id, name, status)| {
+            serde_json::json!({ "id": id, "name": name, "status": status })
+        })
+        .collect();
+    Ok(serde_json::json!({ "containers": list }))
+}
+
+#[tauri::command]
+async fn cmd_get_container_logs(container_id: String) -> Result<serde_json::Value, String> {
+    let logs = sandbox::WorkerContainer::get_logs(&container_id, 100).await?;
+    Ok(serde_json::json!({ "logs": logs }))
+}
+
+#[tauri::command]
+async fn cmd_kill_container(container_id: String) -> Result<serde_json::Value, String> {
+    sandbox::WorkerContainer::stop(&container_id).await?;
+    Ok(serde_json::json!({ "ok": true }))
+}
+
 // ── R68: Agent Marketplace commands ──────────────────────────────────────
 
 #[tauri::command]
@@ -7725,6 +7777,12 @@ pub fn run() {
             cmd_sandbox_run,
             cmd_sandbox_list,
             cmd_sandbox_kill,
+            // S1: Docker Worker Image + Container Lifecycle
+            cmd_get_docker_status,
+            cmd_build_worker_image,
+            cmd_list_worker_containers,
+            cmd_get_container_logs,
+            cmd_kill_container,
             // R68: Agent Marketplace commands
             cmd_marketplace_list_agents,
             cmd_marketplace_search_agents,
