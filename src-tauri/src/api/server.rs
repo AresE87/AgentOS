@@ -1,5 +1,5 @@
 use axum::{
-    routing::{get, post},
+    routing::{delete, get, post},
     Router,
 };
 use serde::{Deserialize, Serialize};
@@ -10,6 +10,7 @@ use tokio::sync::RwLock;
 use tower_http::cors::{Any, CorsLayer};
 
 use super::routes::{self, TaskEntry};
+use super::worker_routes;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiTask {
@@ -66,6 +67,12 @@ pub async fn start_api_server_with_stripe(
         .route("/v1/tasks", get(routes::list_tasks))
         .route("/v1/task/:id", get(routes::get_task))
         .route("/webhooks/stripe", post(routes::stripe_webhook))
+        // S4: Mesh remote worker routes
+        .route("/workers/deploy", post(worker_routes::deploy_worker))
+        .route("/workers/status", get(worker_routes::get_node_status))
+        .route("/workers/:id/exec", post(worker_routes::exec_in_worker))
+        .route("/workers/:id/status", get(worker_routes::get_worker_status))
+        .route("/workers/:id", delete(worker_routes::stop_worker))
         .layer(cors)
         .with_state(state);
 

@@ -13,7 +13,7 @@ use super::server::ApiState;
 
 type ApiResult = Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)>;
 
-fn api_error(
+pub fn api_error(
     status: StatusCode,
     code: &str,
     message: impl Into<String>,

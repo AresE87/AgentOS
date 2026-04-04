@@ -5463,6 +5463,58 @@ async fn cmd_kill_container(container_id: String) -> Result<serde_json::Value, S
     Ok(serde_json::json!({ "ok": true }))
 }
 
+// ── S4: Mesh Remote Worker commands ──────────────────────────────────────
+
+#[tauri::command]
+async fn cmd_deploy_remote_worker(node_address: String) -> Result<serde_json::Value, String> {
+    let manager = coordinator::RemoteWorkerManager::new();
+    let result = manager
+        .deploy(&node_address, "agentos-worker:latest", 512, 1.0)
+        .await?;
+    Ok(serde_json::to_value(result).map_err(|e| e.to_string())?)
+}
+
+#[tauri::command]
+async fn cmd_list_mesh_nodes_with_docker(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+
+    // Ensure mesh_nodes table exists
+    db.conn()
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS mesh_nodes (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                address TEXT NOT NULL,
+                docker_available INTEGER DEFAULT 0,
+                last_seen TEXT
+            );",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let mut stmt = db
+        .conn()
+        .prepare("SELECT id, name, address, docker_available, last_seen FROM mesh_nodes")
+        .map_err(|e| e.to_string())?;
+
+    let nodes: Vec<serde_json::Value> = stmt
+        .query_map([], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, String>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "address": row.get::<_, String>(2)?,
+                "docker_available": row.get::<_, bool>(3).unwrap_or(false),
+                "last_seen": row.get::<_, String>(4).unwrap_or_default(),
+            }))
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(serde_json::json!({ "nodes": nodes }))
+}
+
 // ── R68: Agent Marketplace commands ──────────────────────────────────────
 
 #[tauri::command]
@@ -7783,6 +7835,9 @@ pub fn run() {
             cmd_list_worker_containers,
             cmd_get_container_logs,
             cmd_kill_container,
+            // S4: Mesh Remote Worker commands
+            cmd_deploy_remote_worker,
+            cmd_list_mesh_nodes_with_docker,
             // R68: Agent Marketplace commands
             cmd_marketplace_list_agents,
             cmd_marketplace_search_agents,

@@ -419,6 +419,26 @@ export function useCoordinator() {
     return callInvoke<void>('kill_container', { container_id: containerId });
   }, []);
 
+  // S4: Mesh remote worker hooks
+  const deployRemoteWorker = useCallback(async (nodeAddress: string) => {
+    return callInvoke<{ worker_id: string; container_id: string; ollama_port: number }>(
+      'cmd_deploy_remote_worker',
+      { node_address: nodeAddress },
+    );
+  }, []);
+
+  const listMeshNodesWithDocker = useCallback(async () => {
+    return callInvoke<{
+      nodes: Array<{
+        id: string;
+        name: string;
+        address: string;
+        docker_available: boolean;
+        last_seen: string;
+      }>;
+    }>('cmd_list_mesh_nodes_with_docker');
+  }, []);
+
   return {
     mission,
     events,
@@ -456,5 +476,7 @@ export function useCoordinator() {
     listWorkerContainers,
     getContainerLogs,
     killContainer,
+    deployRemoteWorker,
+    listMeshNodesWithDocker,
   };
 }
