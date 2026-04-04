@@ -75,10 +75,9 @@ const T = {
 /* ------------------------------------------------------------------ */
 
 const SUGGESTIONS = [
-  { label: 'What files are on my desktop?', icon: '📂' },
-  { label: 'Open the calculator app', icon: '🧮' },
-  { label: 'How much disk space do I have?', icon: '💾' },
-  { label: 'Take a screenshot of my screen', icon: '📸' },
+  { label: 'Que hora es?', icon: '⏰' },
+  { label: 'Lista los archivos en mi Desktop', icon: '📂' },
+  { label: "Crea un archivo test.txt con 'Hola Mundo'", icon: '📝' },
 ];
 
 /* ------------------------------------------------------------------ */
@@ -249,6 +248,13 @@ export default function Chat() {
   const [forcePC, setForcePC] = useState(false);
   const [streamingText, setStreamingText] = useState('');
 
+  // Tool progress state
+  const [activeTools, setActiveTools] = useState<Array<{ id: string; tool: string; startTime: number }>>([]);
+  const [completedTools, setCompletedTools] = useState<Array<{ id: string; tool: string; durationMs: number }>>([]);
+
+  // Smart scroll state
+  const [userScrolledUp, setUserScrolledUp] = useState(false);
+
   // Vision mode state
   const [taskRunning, setTaskRunning] = useState(false);
   const [visionSteps, setVisionSteps] = useState<VisionStep[]>([]);
@@ -304,6 +310,8 @@ export default function Chat() {
     let unComplete: (() => void) | null = null;
     let unToken: (() => void) | null = null;
     let unError: (() => void) | null = null;
+    let unToolStart: (() => void) | null = null;
+    let unToolResult: (() => void) | null = null;
 
     async function subscribe() {
       try {
@@ -386,6 +394,29 @@ export default function Chat() {
           };
           setMessages((m) => [...m, doneMsg]);
         });
+        // I1: Tool progress events
+        unToolStart = await listen<any>('agent:tool_start', (event) => {
+          const p = event.payload;
+          const toolId = p.tool_use_id || `tool-${Date.now()}`;
+          setActiveTools((prev) => [
+            ...prev,
+            { id: toolId, tool: p.tool_name || p.name || 'tool', startTime: Date.now() },
+          ]);
+        });
+
+        unToolResult = await listen<any>('agent:tool_result', (event) => {
+          const p = event.payload;
+          const toolId = p.tool_use_id || '';
+          setActiveTools((prev) => {
+            const found = prev.find((t) => t.id === toolId);
+            if (found) {
+              const elapsed = Date.now() - found.startTime;
+              setCompletedTools((c) => [...c, { id: found.id, tool: found.tool, durationMs: elapsed }]);
+            }
+            return prev.filter((t) => t.id !== toolId);
+          });
+        });
+
         // E2: Agent error events — show inline with retry
         unError = await listen<any>('agent:error', (event) => {
           const p = event.payload;
@@ -412,15 +443,36 @@ export default function Chat() {
       unComplete?.();
       unToken?.();
       unError?.();
+      unToolStart?.();
+      unToolResult?.();
     };
   }, []);
 
-  /* ---- Auto-scroll chat ------------------------------------------- */
+  /* ---- Smart auto-scroll chat -------------------------------------- */
   useEffect(() => {
-    if (scrollRef.current) {
+    if (scrollRef.current && !userScrolledUp) {
       scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
     }
-  }, [messages, typing, streamingText]);
+  }, [messages, typing, streamingText, userScrolledUp]);
+
+  /* ---- Detect user scroll-up --------------------------------------- */
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const handleScroll = () => {
+      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+      setUserScrolledUp(!atBottom);
+    };
+    el.addEventListener('scroll', handleScroll, { passive: true });
+    return () => el.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  const scrollToBottom = useCallback(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+      setUserScrolledUp(false);
+    }
+  }, []);
 
   /* ---- Auto-scroll timeline --------------------------------------- */
   useEffect(() => {
@@ -524,6 +576,8 @@ export default function Chat() {
       setInput('');
       setTyping(true);
       setStreamingText('');
+      setActiveTools([]);
+      setCompletedTools([]);
 
       // Reset textarea height
       if (inputRef.current) {
@@ -748,19 +802,19 @@ export default function Chat() {
                   className="text-xl font-semibold mb-2"
                   style={{ color: T.textPrimary }}
                 >
-                  What can I help you with?
+                  En que puedo ayudarte?
                 </h2>
                 <p className="text-sm mb-8" style={{ color: T.textMuted }}>
-                  Ask a question or describe a task for your PC
+                  Preguntame algo o describe una tarea para tu PC
                 </p>
 
-                {/* 2x2 suggestion grid */}
-                <div className="grid grid-cols-2 gap-3">
+                {/* Suggestion chips */}
+                <div className="flex flex-col gap-3 max-w-sm mx-auto">
                   {SUGGESTIONS.map((s) => (
                     <button
                       key={s.label}
                       onClick={() => handleSend(s.label)}
-                      className="group text-left rounded-xl px-4 py-3 transition-all duration-200"
+                      className="group flex items-center gap-3 text-left rounded-xl px-4 py-3 transition-all duration-200"
                       style={{
                         background: T.bgSurface,
                         border: '1px solid rgba(0,229,229,0.06)',
@@ -774,9 +828,9 @@ export default function Chat() {
                         e.currentTarget.style.background = T.bgSurface;
                       }}
                     >
-                      <span className="text-lg mb-1 block">{s.icon}</span>
+                      <span className="text-lg shrink-0">{s.icon}</span>
                       <span
-                        className="text-xs leading-snug group-hover:text-[#00E5E5] transition-colors"
+                        className="text-sm leading-snug group-hover:text-[#00E5E5] transition-colors"
                         style={{ color: T.textSecondary }}
                       >
                         {s.label}
@@ -862,34 +916,39 @@ export default function Chat() {
                     </button>
                   )}
 
-                  {/* Agent message footer */}
-                  {!isUser && !isErr && (msg.model || msg.cost !== undefined || msg.latency !== undefined) && (
+                  {/* Agent message footer — model · cost · latency · thumbs */}
+                  {!isUser && !isErr && (
                     <div
-                      className="flex items-center gap-3 mt-2.5 pt-2"
+                      className="flex items-center gap-2 mt-2.5 pt-2"
                       style={{ borderTop: `1px solid ${T.bgElevated}` }}
                     >
-                      {msg.model && (
-                        <span
-                          className="text-[10px] px-2 py-0.5 rounded"
-                          style={{
-                            fontFamily: T.mono,
-                            color: T.textMuted,
-                            background: 'rgba(61,79,95,0.15)',
-                          }}
-                        >
-                          {msg.model}
-                        </span>
-                      )}
-                      {msg.cost !== undefined && (
-                        <span className="text-[10px]" style={{ fontFamily: T.mono, color: T.textMuted }}>
-                          {formatCost(msg.cost)}
-                        </span>
-                      )}
-                      {msg.latency !== undefined && (
-                        <span className="text-[10px]" style={{ fontFamily: T.mono, color: T.textMuted }}>
-                          {formatDuration(msg.latency)}
-                        </span>
-                      )}
+                      {/* Metadata with dot separators */}
+                      <div className="flex items-center gap-1.5 flex-wrap" style={{ fontFamily: T.mono }}>
+                        {msg.model && (
+                          <span
+                            className="text-[10px] px-2 py-0.5 rounded"
+                            style={{ color: T.textMuted, background: 'rgba(61,79,95,0.15)' }}
+                          >
+                            {msg.model}
+                          </span>
+                        )}
+                        {msg.cost !== undefined && (
+                          <>
+                            <span className="text-[10px]" style={{ color: T.textMuted }}>·</span>
+                            <span className="text-[10px]" style={{ color: T.textMuted }}>
+                              {formatCost(msg.cost)}
+                            </span>
+                          </>
+                        )}
+                        {msg.latency !== undefined && (
+                          <>
+                            <span className="text-[10px]" style={{ color: T.textMuted }}>·</span>
+                            <span className="text-[10px]" style={{ color: T.textMuted }}>
+                              {formatDuration(msg.latency)}
+                            </span>
+                          </>
+                        )}
+                      </div>
 
                       <div className="flex-1" />
 
@@ -943,6 +1002,46 @@ export default function Chat() {
             );
           })}
 
+          {/* I1: Tool progress indicators */}
+          {(activeTools.length > 0 || completedTools.length > 0) && (
+            <div className="space-y-1.5 py-1">
+              {completedTools.map((t) => (
+                <div
+                  key={t.id}
+                  className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg"
+                  style={{ color: T.green, background: `${T.green}08` }}
+                >
+                  <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                  <span style={{ fontFamily: T.mono }}>
+                    {t.tool} completado ({(t.durationMs / 1000).toFixed(1)}s)
+                  </span>
+                </div>
+              ))}
+              {activeTools.map((t) => (
+                <div
+                  key={t.id}
+                  className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg"
+                  style={{ color: T.amber, background: `${T.amber}08` }}
+                >
+                  <span
+                    className="inline-block rounded-full animate-spin shrink-0"
+                    style={{
+                      width: 12,
+                      height: 12,
+                      border: `2px solid ${T.amber}`,
+                      borderTopColor: 'transparent',
+                    }}
+                  />
+                  <span style={{ fontFamily: T.mono }}>
+                    Ejecutando {t.tool}...
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Streaming text / typing indicator */}
           {typing && !taskRunning && (
             streamingText ? (
@@ -970,6 +1069,27 @@ export default function Chat() {
           )}
         </div>
       </div>
+
+      {/* I1: Jump to bottom button */}
+      {userScrolledUp && messages.length > 0 && (
+        <div className="flex justify-center -mt-2 mb-1 relative z-10">
+          <button
+            onClick={scrollToBottom}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-200 shadow-lg"
+            style={{
+              background: T.bgElevated,
+              color: T.cyan,
+              border: `1px solid ${T.cyan}30`,
+              boxShadow: `0 4px 12px rgba(0,0,0,0.3)`,
+            }}
+          >
+            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+            </svg>
+            Ir al final
+          </button>
+        </div>
+      )}
 
       {/* ============================================================ */}
       {/*  VISION MODE PANEL                                            */}
