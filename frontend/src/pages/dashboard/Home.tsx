@@ -218,6 +218,17 @@ export default function Home() {
   const isWorking = status?.state === 'running';
   const activeChains = status?.session_stats?.tasks ?? 0;
 
+  // Memoize sparkline data and delta values so they don't regenerate on every render
+  const kpiData = useMemo(() => ({
+    tasksSpark: spark(stats.tasks_today),
+    tasksDelta: Math.floor(Math.random() * 5) - 1,
+    tokensSpark: spark(stats.tokens_today),
+    tokensDelta: Math.floor(Math.random() * 3000) - 500,
+    costSpark: spark(stats.cost_today),
+    costDelta: Number((Math.random() * 0.2 - 0.05).toFixed(2)),
+    chainsSpark: spark(activeChains),
+  }), [stats.tasks_today, stats.tokens_today, stats.cost_today, activeChains]);
+
   const suggestions = [
     'Summarize my recent tasks',
     'Check system health',
@@ -357,29 +368,29 @@ export default function Home() {
           <KpiCard
             label="Tasks Today"
             value={String(stats.tasks_today)}
-            sparkData={spark(stats.tasks_today)}
-            delta={Math.floor(Math.random() * 5) - 1}
+            sparkData={kpiData.tasksSpark}
+            delta={kpiData.tasksDelta}
             deltaSuffix=" vs yesterday"
           />
           <KpiCard
             label="Tokens Used"
             value={formatTokens(stats.tokens_today)}
-            sparkData={spark(stats.tokens_today)}
-            delta={Math.floor(Math.random() * 3000) - 500}
+            sparkData={kpiData.tokensSpark}
+            delta={kpiData.tokensDelta}
             deltaSuffix=""
           />
           <KpiCard
             label="Cost Today"
             value={`$${stats.cost_today?.toFixed(2) ?? '0.00'}`}
-            sparkData={spark(stats.cost_today)}
-            delta={Number((Math.random() * 0.2 - 0.05).toFixed(2))}
+            sparkData={kpiData.costSpark}
+            delta={kpiData.costDelta}
             deltaSuffix=""
             sparkColor={stats.cost_today > 1 ? C.warning : C.cyan}
           />
           <KpiCard
             label="Active Chains"
             value={String(activeChains)}
-            sparkData={spark(activeChains)}
+            sparkData={kpiData.chainsSpark}
             delta={0}
           />
         </div>

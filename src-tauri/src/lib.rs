@@ -3567,9 +3567,14 @@ async fn execute_accessibility_plan(
             }
         }
         accessibility::AccessibilityActionKind::OpenCalculator => {
-            let output = tokio::process::Command::new("powershell")
-                .args(["-NoProfile", "-Command", "Start-Process calc"])
-                .output()
+            let mut cmd = tokio::process::Command::new("powershell");
+            cmd.args(["-NoProfile", "-NonInteractive", "-Command", "Start-Process calc"]);
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                cmd.creation_flags(0x08000000);
+            }
+            let output = cmd.output()
                 .await
                 .map_err(|e| format!("Failed to launch Calculator: {}", e))?;
             if !output.status.success() {
@@ -3581,13 +3586,19 @@ async fn execute_accessibility_plan(
             Ok("Calculator launched.".to_string())
         }
         accessibility::AccessibilityActionKind::CheckDiskSpace => {
-            let output = tokio::process::Command::new("powershell")
-                .args([
+            let mut cmd = tokio::process::Command::new("powershell");
+            cmd.args([
                     "-NoProfile",
+                    "-NonInteractive",
                     "-Command",
                     "Get-PSDrive -PSProvider FileSystem | ForEach-Object { \"$($_.Name): $([math]::Round($_.Free / 1GB, 2)) GB free\" }",
-                ])
-                .output()
+                ]);
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                cmd.creation_flags(0x08000000);
+            }
+            let output = cmd.output()
                 .await
                 .map_err(|e| format!("Failed to read disk space: {}", e))?;
             if !output.status.success() {

@@ -52,10 +52,15 @@ impl Tool for BashTool {
         }
 
         let output = if cfg!(windows) {
-            tokio::process::Command::new("powershell")
-                .args(&["-NoProfile", "-NonInteractive", "-Command", command])
-                .output()
-                .await
+            let mut cmd = tokio::process::Command::new("powershell");
+            cmd.args(&["-NoProfile", "-NonInteractive", "-Command", command]);
+            // Hide the PowerShell window on Windows (CREATE_NO_WINDOW)
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                cmd.creation_flags(0x08000000);
+            }
+            cmd.output().await
         } else {
             tokio::process::Command::new("bash")
                 .args(&["-c", command])

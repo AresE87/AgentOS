@@ -200,11 +200,15 @@ impl SmartPlaybookRunner {
                     }
 
                     #[cfg(target_os = "windows")]
-                    let output = tokio::process::Command::new("powershell")
-                        .args(["-NoProfile", "-Command", &cmd])
-                        .output()
-                        .await
-                        .map_err(|e| e.to_string())?;
+                    let output = {
+                        let mut cmd_proc = tokio::process::Command::new("powershell");
+                        cmd_proc.args(["-NoProfile", "-NonInteractive", "-Command", &cmd]);
+                        {
+                            use std::os::windows::process::CommandExt;
+                            cmd_proc.creation_flags(0x08000000);
+                        }
+                        cmd_proc.output().await.map_err(|e| e.to_string())?
+                    };
 
                     #[cfg(not(target_os = "windows"))]
                     let output = tokio::process::Command::new("sh")

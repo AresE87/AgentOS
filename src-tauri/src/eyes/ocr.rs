@@ -22,9 +22,15 @@ Write-Output $result.Text"#,
             path = escaped_path
         );
 
-        let output = tokio::process::Command::new("powershell")
-            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
-            .output()
+        let mut cmd = tokio::process::Command::new("powershell");
+        cmd.args(["-NoProfile", "-NonInteractive", "-Command", &script]);
+        // Hide the PowerShell window on Windows (CREATE_NO_WINDOW)
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000);
+        }
+        let output = cmd.output()
             .await
             .map_err(|e| format!("OCR process error: {}", e))?;
 

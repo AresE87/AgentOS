@@ -49,9 +49,15 @@ impl SmartTerminal {
     pub async fn execute(&mut self, command: &str) -> Result<TerminalOutput, String> {
         let start = Instant::now();
 
-        let output = tokio::process::Command::new("powershell")
-            .args(&["-NoProfile", "-Command", command])
-            .output()
+        let mut cmd = tokio::process::Command::new("powershell");
+        cmd.args(&["-NoProfile", "-NonInteractive", "-Command", command]);
+        // Hide the PowerShell window on Windows (CREATE_NO_WINDOW)
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000);
+        }
+        let output = cmd.output()
             .await
             .map_err(|e| format!("Failed to execute command: {}", e))?;
 

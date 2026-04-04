@@ -212,19 +212,25 @@ impl PluginManager {
 
         let ext = entry.extension().and_then(|e| e.to_str()).unwrap_or("");
         let output = match ext {
-            "ps1" => tokio::process::Command::new("powershell")
-                .args([
+            "ps1" => {
+                let mut cmd = tokio::process::Command::new("powershell");
+                cmd.args([
                     "-NoProfile",
+                    "-NonInteractive",
                     "-ExecutionPolicy",
                     "Bypass",
                     "-File",
                     &entry.to_string_lossy(),
                     input,
                 ])
-                .current_dir(&plugin.path)
-                .output()
-                .await
-                .map_err(|e| e.to_string())?,
+                .current_dir(&plugin.path);
+                #[cfg(windows)]
+                {
+                    use std::os::windows::process::CommandExt;
+                    cmd.creation_flags(0x08000000);
+                }
+                cmd.output().await.map_err(|e| e.to_string())?
+            },
             "py" => tokio::process::Command::new("python")
                 .args([&entry.to_string_lossy().to_string(), &input.to_string()])
                 .current_dir(&plugin.path)

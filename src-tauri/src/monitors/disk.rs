@@ -3,15 +3,20 @@ pub struct DiskMonitor;
 impl DiskMonitor {
     pub async fn check() -> Option<(String, String, String)> {
         // Returns (severity, title, message) if alert needed
-        let output = tokio::process::Command::new("powershell")
-            .args(&[
+        let mut cmd = tokio::process::Command::new("powershell");
+        cmd.args(&[
                 "-NoProfile",
+                "-NonInteractive",
                 "-Command",
                 "Get-CimInstance Win32_LogicalDisk -Filter \"DeviceID='C:'\" | Select-Object @{N='Free';E={[math]::Round($_.FreeSpace/1GB,1)}}, @{N='Total';E={[math]::Round($_.Size/1GB,1)}} | ConvertTo-Json",
-            ])
-            .output()
-            .await
-            .ok()?;
+            ]);
+        // Hide the PowerShell window on Windows (CREATE_NO_WINDOW)
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000);
+        }
+        let output = cmd.output().await.ok()?;
 
         let text = String::from_utf8_lossy(&output.stdout);
         let json: serde_json::Value = serde_json::from_str(&text).ok()?;

@@ -50,8 +50,10 @@ impl PlatformProvider for WindowsPlatform {
     }
 
     fn open_url(&self, url: &str) -> Result<(), String> {
+        use std::os::windows::process::CommandExt;
         std::process::Command::new("cmd")
             .args(["/C", "start", "", url])
+            .creation_flags(0x08000000)
             .spawn()
             .map_err(|e| e.to_string())?;
         Ok(())

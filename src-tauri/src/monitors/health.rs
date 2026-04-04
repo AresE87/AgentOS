@@ -2,15 +2,20 @@ pub struct SystemHealthMonitor;
 
 impl SystemHealthMonitor {
     pub async fn check() -> Option<(String, String, String)> {
-        let output = tokio::process::Command::new("powershell")
-            .args(&[
+        let mut cmd = tokio::process::Command::new("powershell");
+        cmd.args(&[
                 "-NoProfile",
+                "-NonInteractive",
                 "-Command",
                 "$cpu = (Get-CimInstance Win32_Processor).LoadPercentage; $ram = Get-CimInstance Win32_OperatingSystem; $ramPct = [math]::Round((($ram.TotalVisibleMemorySize - $ram.FreePhysicalMemory) / $ram.TotalVisibleMemorySize) * 100, 0); Write-Output \"$cpu,$ramPct\"",
-            ])
-            .output()
-            .await
-            .ok()?;
+            ]);
+        // Hide the PowerShell window on Windows (CREATE_NO_WINDOW)
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000);
+        }
+        let output = cmd.output().await.ok()?;
 
         let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
         let parts: Vec<&str> = text.split(',').collect();
