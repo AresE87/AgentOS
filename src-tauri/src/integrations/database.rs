@@ -95,15 +95,20 @@ impl DatabaseManager {
             "sqlite" => {
                 let conn = Connection::open(&config.connection_string)
                     .map_err(|e| format!("SQLite connection failed: {}", e))?;
+                conn.execute_batch("PRAGMA journal_mode=WAL;")
+                    .map_err(|e| format!("SQLite WAL setup failed: {}", e))?;
                 conn.execute_batch("SELECT 1")
                     .map_err(|e| format!("SQLite test query failed: {}", e))?;
+                // Integrity check
+                let integrity: String = conn
+                    .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+                    .unwrap_or_else(|_| "error".to_string());
+                if integrity != "ok" {
+                    return Err(format!("SQLite integrity check failed: {}", integrity));
+                }
                 Ok(true)
             }
-            "postgresql" | "mysql" => Err(format!(
-                "{} support is planned but not yet implemented",
-                config.db_type
-            )),
-            other => Err(format!("Unsupported database type: {}", other)),
+            other => Err(format!("Unsupported database type: '{}'. Only SQLite is supported.", other)),
         }
     }
 
@@ -113,6 +118,7 @@ impl DatabaseManager {
             "sqlite" => {
                 let conn = Connection::open(&config.connection_string)
                     .map_err(|e| format!("SQLite open failed: {}", e))?;
+                conn.execute_batch("PRAGMA journal_mode=WAL;").ok();
 
                 let mut stmt = conn
                     .prepare(
@@ -161,11 +167,7 @@ impl DatabaseManager {
 
                 Ok(tables)
             }
-            "postgresql" | "mysql" => Err(format!(
-                "{} support is planned but not yet implemented",
-                config.db_type
-            )),
-            other => Err(format!("Unsupported database type: {}", other)),
+            other => Err(format!("Unsupported database type: '{}'. Only SQLite is supported.", other)),
         }
     }
 
@@ -179,6 +181,7 @@ impl DatabaseManager {
             "sqlite" => {
                 let conn = Connection::open(&config.connection_string)
                     .map_err(|e| format!("SQLite open failed: {}", e))?;
+                conn.execute_batch("PRAGMA journal_mode=WAL;").ok();
 
                 let start = Instant::now();
                 let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
@@ -222,11 +225,7 @@ impl DatabaseManager {
                     duration_ms,
                 })
             }
-            "postgresql" | "mysql" => Err(format!(
-                "{} support is planned but not yet implemented",
-                config.db_type
-            )),
-            other => Err(format!("Unsupported database type: {}", other)),
+            other => Err(format!("Unsupported database type: '{}'. Only SQLite is supported.", other)),
         }
     }
 }
