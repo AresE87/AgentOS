@@ -1,5 +1,6 @@
 use reqwest::Client;
 use serde_json::json;
+use tracing::info;
 
 use super::types::Message;
 
