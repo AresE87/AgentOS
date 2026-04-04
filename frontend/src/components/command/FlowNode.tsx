@@ -97,10 +97,24 @@ export function FlowNode({ data: rawData, selected }: NodeProps) {
             </div>
             {/* Execution target badge — v7 bridge */}
             {node.execution_target && node.execution_target !== 'Local' && (
-              <div className="text-[9px] font-mono text-[#8A9E97] mt-0.5">
-                {node.execution_target === 'DockerLocal' ? '\uD83D\uDC33 Docker'
-                 : node.execution_target?.startsWith?.('DockerRemote') ? '\uD83C\uDF10 Remote'
-                 : ''}
+              <div className="mt-1 inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[9px] font-mono leading-none"
+                style={{
+                  borderColor: node.execution_target === 'DockerLocal'
+                    ? 'rgba(92,212,202,0.20)'
+                    : 'rgba(255,190,112,0.20)',
+                  backgroundColor: node.execution_target === 'DockerLocal'
+                    ? 'rgba(92,212,202,0.08)'
+                    : 'rgba(255,190,112,0.08)',
+                  color: node.execution_target === 'DockerLocal'
+                    ? '#5CD4CA'
+                    : '#F6C27C',
+                }}
+              >
+                {node.execution_target === 'DockerLocal'
+                  ? <><span>{'\uD83D\uDC33'}</span><span>Docker</span></>
+                  : node.execution_target?.startsWith?.('DockerRemote')
+                    ? <><span>{'\uD83C\uDF10'}</span><span>Remote</span></>
+                    : null}
               </div>
             )}
           </div>

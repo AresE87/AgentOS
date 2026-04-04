@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronUp, Container, Server, Skull, Trash2 } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 
 export interface ContainerInfo {
   id: string;

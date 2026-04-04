@@ -25,6 +25,8 @@ import AgentLog from '../../components/command/AgentLog';
 import AgentPalette from '../../components/command/AgentPalette';
 import EmptyState from '../../components/command/EmptyState';
 import FlowView from '../../components/command/FlowView';
+import InfraPanel from '../../components/command/InfraPanel';
+import type { DockerStatus } from '../../components/command/InfraPanel';
 import KanbanView from '../../components/command/KanbanView';
 import PropertiesPanel from '../../components/command/PropertiesPanel';
 import TopBar from '../../components/command/TopBar';
@@ -207,6 +209,11 @@ export default function CommandCenter() {
     replaceMissionDag,
   } = coordinator;
 
+  const {
+    getDockerStatus,
+    killContainer,
+  } = coordinator;
+
   const deferredEvents = useDeferredValue(events);
   const [mode, setMode] = useState<CoordinatorMode>('Autopilot');
   const [view, setView] = useState<CommandView>('kanban');
@@ -217,6 +224,7 @@ export default function CommandCenter() {
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
   const [undoStack, setUndoStack] = useState<TaskDAG[]>([]);
   const [redoStack, setRedoStack] = useState<TaskDAG[]>([]);
+  const [dockerStatus, setDockerStatus] = useState<DockerStatus | null>(null);
 
   useEffect(() => {
     if (!mission) return;
@@ -245,6 +253,56 @@ export default function CommandCenter() {
     window.addEventListener('click', closeMenu);
     return () => window.removeEventListener('click', closeMenu);
   }, []);
+
+  /* Docker status polling — every 10s */
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const status = await getDockerStatus();
+        if (!cancelled) setDockerStatus(status);
+      } catch {
+        /* Tauri not available or command missing — silently ignore */
+      }
+    };
+    void poll();
+    const interval = setInterval(() => void poll(), 10_000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [getDockerStatus]);
+
+  /* Listen for ContainerStarted / ContainerStopped events and update docker status */
+  useEffect(() => {
+    const lastEvent = deferredEvents[deferredEvents.length - 1];
+    if (!lastEvent) return;
+
+    if (lastEvent.type === 'ContainerStarted') {
+      setDockerStatus((prev) => {
+        if (!prev) return prev;
+        const existing = prev.running_workers.find((c) => c.id === lastEvent.container_id);
+        if (existing) return prev;
+        return {
+          ...prev,
+          running_workers: [
+            ...prev.running_workers,
+            { id: lastEvent.container_id, name: lastEvent.name, status: 'running', port: lastEvent.port },
+          ],
+        };
+      });
+    }
+
+    if (lastEvent.type === 'ContainerStopped') {
+      setDockerStatus((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          running_workers: prev.running_workers.filter((c) => c.id !== lastEvent.container_id),
+        };
+      });
+    }
+  }, [deferredEvents]);
 
   const selectedNode = mission && selectedNodeId ? mission.dag.nodes[selectedNodeId] ?? null : null;
   const validation = useMemo(
@@ -447,6 +505,24 @@ export default function CommandCenter() {
       });
     },
     [activateMission],
+  );
+
+  const handleKillContainer = useCallback(
+    async (containerId: string) => {
+      try {
+        await killContainer(containerId);
+        setDockerStatus((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            running_workers: prev.running_workers.filter((c) => c.id !== containerId),
+          };
+        });
+      } catch {
+        /* silently ignore if kill fails */
+      }
+    },
+    [killContainer],
   );
 
   const handleApproveRequest = useCallback(
@@ -660,6 +736,7 @@ export default function CommandCenter() {
         autonomy={autonomy}
         view={view}
         runDisabledReason={validation.errors[0]}
+        dockerContainerCount={dockerStatus?.running_workers.length ?? 0}
         onModeChange={(nextMode) => {
           startTransition(() => setMode(nextMode));
           if (nextMode === 'Commander') {
@@ -930,7 +1007,11 @@ export default function CommandCenter() {
               />
             </div>
 
-            <div className="min-h-[260px]">
+            <div className="min-h-[260px] space-y-4">
+              <InfraPanel
+                dockerStatus={dockerStatus}
+                onKill={handleKillContainer}
+              />
               <AgentLog
                 events={deferredEvents}
                 onSelectSubtask={(subtaskId) => setSelectedNodeId(subtaskId)}
