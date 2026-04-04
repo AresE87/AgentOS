@@ -8,6 +8,8 @@ use super::router::Router;
 use super::types::{LLMResponse, Message};
 use crate::config::Settings;
 
+// ── Container Ollama (S7) ─────────────────────────────────────────────────
+
 pub struct Gateway {
     pub router: Router,
     providers: Providers,
@@ -437,6 +439,126 @@ impl Gateway {
             "openai": !settings.openai_api_key.is_empty(),
             "google": !settings.google_api_key.is_empty(),
         })
+    }
+
+    /// Call Ollama running inside a Docker container (S7).
+    /// This enables zero-cost local inference for cheap/standard tiers.
+    pub async fn complete_container_ollama(
+        container_ollama_port: u16,
+        model: &str,
+        prompt: &str,
+        system_prompt: &str,
+    ) -> Result<LLMResponse, String> {
+        let client = reqwest::Client::new();
+        let url = format!("http://localhost:{}/api/generate", container_ollama_port);
+
+        let body = serde_json::json!({
+            "model": model,
+            "prompt": prompt,
+            "system": system_prompt,
+            "stream": false,
+        });
+
+        let start = Instant::now();
+
+        let response = client
+            .post(&url)
+            .json(&body)
+            .timeout(std::time::Duration::from_secs(120))
+            .send()
+            .await
+            .map_err(|e| format!("Container Ollama error: {}", e))?;
+
+        let json: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| format!("Container Ollama parse error: {}", e))?;
+
+        let content = json
+            .get("response")
+            .and_then(|r| r.as_str())
+            .unwrap_or("")
+            .to_string();
+        let total_duration = json
+            .get("total_duration")
+            .and_then(|d| d.as_u64())
+            .unwrap_or(0);
+
+        let duration_ms = if total_duration > 0 {
+            total_duration / 1_000_000
+        } else {
+            start.elapsed().as_millis() as u64
+        };
+
+        info!(
+            model = %model,
+            port = container_ollama_port,
+            duration_ms = duration_ms,
+            "Container Ollama completion succeeded"
+        );
+
+        Ok(LLMResponse {
+            task_id: Uuid::new_v4().to_string(),
+            content,
+            model: format!("ollama-container/{}", model),
+            provider: "ollama-container".to_string(),
+            tokens_in: 0,
+            tokens_out: 0,
+            cost: 0.0, // FREE — local model
+            duration_ms,
+        })
+    }
+
+    /// Smart routing: use local container model when possible, cloud when needed (S7).
+    /// Tier determines routing preference:
+    ///   "cheap"    → always try container Ollama first (FREE)
+    ///   "standard" → use container if no cloud keys configured
+    ///   "premium"  → always cloud (needs capable model)
+    pub async fn complete_smart(
+        &self,
+        prompt: &str,
+        system_prompt: &str,
+        tier: &str,
+        settings: &Settings,
+        container_ollama_port: Option<u16>,
+    ) -> Result<LLMResponse, String> {
+        // 1. Cheap tier AND container has Ollama → use local model (FREE)
+        if tier == "cheap" {
+            if let Some(port) = container_ollama_port {
+                match Self::complete_container_ollama(port, "phi3:mini", prompt, system_prompt).await
+                {
+                    Ok(r) => return Ok(r),
+                    Err(e) => warn!("Local container model failed, falling back to cloud: {}", e),
+                }
+            }
+        }
+
+        // 2. Standard tier AND no cloud key → use local container
+        if tier == "standard" {
+            let has_cloud_key = !settings.anthropic_api_key.is_empty()
+                || !settings.openai_api_key.is_empty()
+                || !settings.google_api_key.is_empty();
+
+            if !has_cloud_key {
+                if let Some(port) = container_ollama_port {
+                    match Self::complete_container_ollama(
+                        port,
+                        "llama3.2:1b",
+                        prompt,
+                        system_prompt,
+                    )
+                    .await
+                    {
+                        Ok(r) => return Ok(r),
+                        Err(e) => warn!("Local container model failed: {}", e),
+                    }
+                }
+            }
+        }
+
+        // 3. Cloud routing (existing behavior)
+        self.complete_with_system(prompt, Some(system_prompt), settings)
+            .await
     }
 
     /// Try local Ollama first (when enabled), then fall back to cloud.
