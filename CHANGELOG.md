@@ -1,5 +1,30 @@
 # Changelog
 
+## [5.0.0] - 2026-04-03 -- Zero Gaps Release
+
+### Added
+- H2: Structured logging with trace ID propagation across all request paths
+- H2: Trace IDs in cmd_process_message, chain, PC task, and agentic loop responses
+- H4: Performance audit -- WAL mode, 20+ SQLite indexes, no unbounded collections
+- AUDIT_V5.md: comprehensive final state assessment for v5.0.0 release
+
+### Changed
+- Version bump to 5.0.0 across Cargo.toml, frontend, and mobile packages
+- Sessions E1-E4, F1-F4, G1-G4, H1-H4, I1-I2, J1-J2 all completed (20/20)
+
+### Security
+- 6-layer bash validator, workspace boundary enforcer, 100KB input cap
+- AES-256-GCM vault with 11 secret types, secret scrubbing on persist
+- API auth on all HTTP endpoints, rate limiter, injection detection
+- Verified: no API keys or secrets in logs
+
+### Verified
+- cargo check: PASS (39 warnings, 0 errors)
+- cargo test: 10 tests passing
+- tsc --noEmit: PASS
+- Binary size: 44 MB
+- 46,556 lines Rust, 13,308 lines TypeScript
+
 ## [4.2.0] - 2026-03-29 — The Agent Economy
 
 ### Added
