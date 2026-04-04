@@ -28,6 +28,7 @@ struct RedditSubmitJson {
 struct RedditSubmitData {
     id: Option<String>,
     url: Option<String>,
+    #[allow(dead_code)]
     name: Option<String>,
 }
 
@@ -67,6 +68,7 @@ struct RedditChildData {
     score: Option<i64>,
     created_utc: Option<f64>,
     body: Option<String>,
+    #[allow(dead_code)]
     subreddit: Option<String>,
 }
 

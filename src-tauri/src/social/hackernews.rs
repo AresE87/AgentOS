@@ -14,6 +14,7 @@ pub struct HackerNewsConnector {
 
 // ── HN Firebase + Algolia response types ───────────────────────────────────
 
+#[allow(dead_code)]
 #[derive(Deserialize)]
 struct HNItem {
     id: Option<u64>,
