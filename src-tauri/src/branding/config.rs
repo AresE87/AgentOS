@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17,6 +18,19 @@ pub struct BrandingConfig {
     pub attribution_text: String,
     pub custom_specialists: Vec<CustomSpecialist>,
     pub oem_license: Option<OEMLicense>,
+    // B12-5: White-Label Business OS fields
+    #[serde(default)]
+    pub business_name: Option<String>,
+    #[serde(default)]
+    pub business_tagline: Option<String>,
+    #[serde(default)]
+    pub enabled_teams: Vec<String>,
+    #[serde(default)]
+    pub custom_team_names: HashMap<String, String>,
+    #[serde(default)]
+    pub hide_marketplace: bool,
+    #[serde(default)]
+    pub hide_creator_studio: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,6 +65,19 @@ impl Default for BrandingConfig {
             attribution_text: "Powered by AgentOS".to_string(),
             custom_specialists: vec![],
             oem_license: None,
+            // B12-5: White-Label Business OS defaults
+            business_name: None,
+            business_tagline: None,
+            enabled_teams: vec![
+                "marketing".into(),
+                "sales".into(),
+                "support".into(),
+                "content".into(),
+                "finance".into(),
+            ],
+            custom_team_names: HashMap::new(),
+            hide_marketplace: false,
+            hide_creator_studio: false,
         }
     }
 }
