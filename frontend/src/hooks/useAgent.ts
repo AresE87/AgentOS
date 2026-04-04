@@ -149,7 +149,15 @@
 // Insurance:       insuranceCreate, insuranceList, insuranceClaim, insuranceStatus
 // Creator Studio:  creatorCreate, creatorPublish, creatorList, creatorAnalytics
 // Creator Metrics: creatorMetrics, creatorRevenue, creatorTrends
+// Training Studio (E9): trainingListByCreator, trainingUnpublish, trainingDelete,
+//                       trainingGetPurchases, trainingQualityCheck, trainingQualityCheckLocal
+// Creator Payments (E9-4): requestPayout, getPayoutHistory, getPendingBalance
 // Affiliate:       affiliateCreate, affiliateEarnings, affiliateList, affiliateTrack
+// Training Studio: trainingStartRecording, trainingStartExample, trainingRecordToolCall,
+//                  trainingFinishExample, trainingAddCorrection, trainingStopRecording,
+//                  trainingExecute
+// Training Mkt:    trainingPublish, trainingList, trainingSearch, trainingGet,
+//                  trainingPurchase, trainingReview, trainingGetReviews, trainingCreatorEarnings
 //
 // ============================================================================
 
@@ -1423,6 +1431,64 @@ export function useAgent() {
     // M8-5: Self-Promotion Mode
     const generatePromoContent = () => callInvoke<any>('generate_promo_content');
 
+    // E9-1: Training Studio
+    const trainingStartRecording = (title: string, description: string, category: string, creatorId: string, creatorName: string) =>
+        callInvoke<string>('training_start_recording', { title, description, category, creator_id: creatorId, creator_name: creatorName });
+    const trainingStartExample = (input: string) =>
+        callInvoke<void>('training_start_example', { input });
+    const trainingRecordToolCall = (toolName: string, input: any, output: string, success: boolean) =>
+        callInvoke<void>('training_record_tool_call', { tool_name: toolName, input, output, success });
+    const trainingFinishExample = (output: string) =>
+        callInvoke<void>('training_finish_example', { output });
+    const trainingAddCorrection = (correction: string) =>
+        callInvoke<void>('training_add_correction', { correction });
+    const trainingStopRecording = () =>
+        callInvoke<any>('training_stop_recording');
+    const trainingExecute = (packJson: string, input: string) =>
+        callInvoke<string>('training_execute', { pack_json: packJson, input });
+
+    // E9-3: Marketplace 2.0 — Training Store
+    const trainingPublish = (packJson: string) =>
+        callInvoke<void>('training_publish', { pack_json: packJson });
+    const trainingList = (category?: string, limit?: number) =>
+        callInvoke<any>('training_list', { category, limit });
+    const trainingSearch = (query: string) =>
+        callInvoke<any>('training_search', { query });
+    const trainingGet = (id: string) =>
+        callInvoke<any>('training_get', { id });
+    const trainingPurchase = (packId: string, buyerId: string, price: number) =>
+        callInvoke<void>('training_purchase', { pack_id: packId, buyer_id: buyerId, price });
+    const trainingReview = (packId: string, reviewerId: string, rating: number, comment?: string) =>
+        callInvoke<void>('training_review', { pack_id: packId, reviewer_id: reviewerId, rating, comment });
+    const trainingGetReviews = (packId: string) =>
+        callInvoke<any>('training_get_reviews', { pack_id: packId });
+    const trainingCreatorEarnings = (creatorId: string) =>
+        callInvoke<any>('training_creator_earnings', { creator_id: creatorId });
+
+    // E9-2: Creator Studio — enhanced marketplace
+    const trainingListByCreator = () =>
+        callInvoke<any>('training_list_by_creator');
+    const trainingUnpublish = (packId: string) =>
+        callInvoke<void>('training_unpublish', { pack_id: packId });
+    const trainingDelete = (packId: string) =>
+        callInvoke<void>('training_delete', { pack_id: packId });
+    const trainingGetPurchases = () =>
+        callInvoke<any>('training_get_purchases');
+
+    // E9-4: Creator Payments
+    const requestPayout = (amount: number, method: string, destination: string) =>
+        callInvoke<any>('request_payout', { amount, method, destination });
+    const getPayoutHistory = () =>
+        callInvoke<any>('get_payout_history');
+    const getPendingBalance = () =>
+        callInvoke<any>('get_pending_balance');
+
+    // E9-5: Training Quality System
+    const trainingQualityCheck = (packJson: string) =>
+        callInvoke<any>('training_quality_check', { pack_json: packJson });
+    const trainingQualityCheckLocal = (packJson: string) =>
+        callInvoke<any>('training_quality_check_local', { pack_json: packJson });
+
     return {
         getStatus, getPlatformSupport, processMessage, getTasks, getPlaybooks, setActivePlaybook,
         getSettings, updateSettings, healthCheck, getActiveChain, getChainHistory,
@@ -1684,6 +1750,18 @@ export function useAgent() {
         createCampaign, getCampaign, listCampaigns,
         // M8-5: Self-Promotion Mode
         generatePromoContent,
+        // E9-1: Training Studio
+        trainingStartRecording, trainingStartExample, trainingRecordToolCall,
+        trainingFinishExample, trainingAddCorrection, trainingStopRecording, trainingExecute,
+        // E9-3: Marketplace 2.0 — Training Store
+        trainingPublish, trainingList, trainingSearch, trainingGet,
+        trainingPurchase, trainingReview, trainingGetReviews, trainingCreatorEarnings,
+        // E9-2: Creator Studio — enhanced marketplace
+        trainingListByCreator, trainingUnpublish, trainingDelete, trainingGetPurchases,
+        // E9-4: Creator Payments
+        requestPayout, getPayoutHistory, getPendingBalance,
+        // E9-5: Training Quality System
+        trainingQualityCheck, trainingQualityCheckLocal,
     };
 }
 

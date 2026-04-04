@@ -50,6 +50,7 @@ pub mod terminal;
 pub mod testing;
 pub mod tools;
 pub mod training;
+pub mod training_studio;
 pub mod types;
 pub mod updater;
 pub mod users;
@@ -353,6 +354,8 @@ pub struct AppState {
     pub editorial_calendar: Arc<tokio::sync::Mutex<marketing::EditorialCalendar>>,
     /// M8-2: Campaign Manager for marketing campaigns
     pub campaign_manager: Arc<tokio::sync::Mutex<marketing::CampaignManager>>,
+    /// E9-1: Training Studio — recorder for capturing training packs
+    pub training_recorder: Arc<tokio::sync::Mutex<training_studio::TrainingRecorder>>,
 }
 
 #[tauri::command]
@@ -7377,6 +7380,355 @@ async fn cmd_social_search(
     Ok(serde_json::json!({ "results": results }))
 }
 
+// ── E9-1: Training Studio commands ──────────────────────────────────────
+
+#[tauri::command]
+async fn cmd_training_start_recording(
+    title: String,
+    description: String,
+    category: String,
+    creator_id: String,
+    creator_name: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    let mut recorder = state.training_recorder.lock().await;
+    Ok(recorder.start_recording(&title, &description, &category, &creator_id, &creator_name))
+}
+
+#[tauri::command]
+async fn cmd_training_start_example(
+    input: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let mut recorder = state.training_recorder.lock().await;
+    recorder.start_example(&input)
+}
+
+#[tauri::command]
+async fn cmd_training_record_tool_call(
+    tool_name: String,
+    input: serde_json::Value,
+    output: String,
+    success: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let mut recorder = state.training_recorder.lock().await;
+    recorder.record_tool_call(&tool_name, input, &output, success)
+}
+
+#[tauri::command]
+async fn cmd_training_finish_example(
+    output: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let mut recorder = state.training_recorder.lock().await;
+    recorder.finish_example(&output)
+}
+
+#[tauri::command]
+async fn cmd_training_add_correction(
+    correction: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let mut recorder = state.training_recorder.lock().await;
+    recorder.add_correction(&correction)
+}
+
+#[tauri::command]
+async fn cmd_training_stop_recording(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut recorder = state.training_recorder.lock().await;
+    let pack = recorder.stop_recording()?;
+    serde_json::to_value(&pack).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_training_execute(
+    pack_json: String,
+    input: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    let pack = training_studio::pack::TrainingPack::from_json(&pack_json)?;
+    let gateway = state.gateway.lock().await;
+    let settings = state.settings.lock().map_err(|e| e.to_string())?.clone();
+    training_studio::TrainingPlayer::execute(&pack, &input, &gateway, &settings).await
+}
+
+// ── E9-3: Marketplace 2.0 — Training Store commands ────────────────────
+
+#[tauri::command]
+async fn cmd_training_publish(
+    pack_json: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let pack = training_studio::pack::TrainingPack::from_json(&pack_json)?;
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    marketplace::TrainingStore::publish(db.conn(), &pack)
+}
+
+#[tauri::command]
+async fn cmd_training_list(
+    category: Option<String>,
+    limit: Option<u32>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let packs = marketplace::TrainingStore::list_published(
+        db.conn(),
+        category.as_deref(),
+        limit.unwrap_or(50),
+    )?;
+    serde_json::to_value(&packs).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_training_search(
+    query: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let packs = marketplace::TrainingStore::search(db.conn(), &query)?;
+    serde_json::to_value(&packs).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_training_get(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let pack = marketplace::TrainingStore::get(db.conn(), &id)?;
+    serde_json::to_value(&pack).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_training_purchase(
+    pack_id: String,
+    buyer_id: String,
+    price: f64,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    marketplace::TrainingStore::purchase(db.conn(), &pack_id, &buyer_id, price)
+}
+
+#[tauri::command]
+async fn cmd_training_review(
+    pack_id: String,
+    reviewer_id: String,
+    rating: i32,
+    comment: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    marketplace::TrainingStore::add_review(
+        db.conn(),
+        &pack_id,
+        &reviewer_id,
+        rating,
+        comment.as_deref(),
+    )
+}
+
+#[tauri::command]
+async fn cmd_training_get_reviews(
+    pack_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let reviews = marketplace::TrainingStore::get_reviews(db.conn(), &pack_id)?;
+    Ok(serde_json::json!({ "reviews": reviews }))
+}
+
+#[tauri::command]
+async fn cmd_training_creator_earnings(
+    creator_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let earnings = marketplace::TrainingStore::get_creator_earnings(db.conn(), &creator_id)?;
+    serde_json::to_value(&earnings).map_err(|e| e.to_string())
+}
+
+// ── E9-4: Creator Payments commands ───────────────────────────────────
+
+#[tauri::command]
+async fn cmd_request_payout(
+    amount: f64,
+    method: String,
+    destination: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    billing::CreatorPayments::ensure_tables(db.conn())?;
+    let creator_id = "local_user".to_string(); // single-user desktop app
+    let payout = billing::CreatorPayments::request_payout(
+        db.conn(),
+        &creator_id,
+        amount,
+        &method,
+        &destination,
+    )?;
+    serde_json::to_value(&payout).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_get_payout_history(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    billing::CreatorPayments::ensure_tables(db.conn())?;
+    let creator_id = "local_user";
+    let payouts = billing::CreatorPayments::get_payouts(db.conn(), creator_id)?;
+    serde_json::to_value(&payouts).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_get_pending_balance(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    billing::CreatorPayments::ensure_tables(db.conn())?;
+    let creator_id = "local_user";
+    let balance = billing::CreatorPayments::get_pending_balance(db.conn(), creator_id)?;
+    let earnings = billing::CreatorPayments::get_earnings(db.conn(), creator_id)?;
+    let monthly = billing::CreatorPayments::get_monthly_revenue(db.conn(), creator_id)?;
+    Ok(serde_json::json!({
+        "pending_balance": balance,
+        "earnings": earnings,
+        "monthly_revenue": monthly,
+    }))
+}
+
+// ── E9-5: Training Quality System commands ───────────────────────────
+
+#[tauri::command]
+async fn cmd_training_quality_check(
+    pack_json: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let pack = training_studio::pack::TrainingPack::from_json(&pack_json)?;
+    let gateway = state.gateway.lock().await;
+    let settings = state.settings.lock().map_err(|e| e.to_string())?.clone();
+    let report =
+        training_studio::QualityChecker::validate(&pack, &gateway, &settings).await?;
+    serde_json::to_value(&report).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_training_quality_check_local(
+    pack_json: String,
+) -> Result<serde_json::Value, String> {
+    let pack = training_studio::pack::TrainingPack::from_json(&pack_json)?;
+    let report = training_studio::QualityChecker::validate_local(&pack);
+    serde_json::to_value(&report).map_err(|e| e.to_string())
+}
+
+// ── E9-2: Enhanced marketplace commands for Creator Studio ───────────
+
+#[tauri::command]
+async fn cmd_training_list_by_creator(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    marketplace::TrainingStore::ensure_table(db.conn())?;
+    let creator_id = "local_user";
+    // list all packs (all statuses) for this creator
+    let mut stmt = db.conn()
+        .prepare(
+            "SELECT pack_json, status, downloads, rating, rating_count
+             FROM training_packs WHERE creator_id = ?1 ORDER BY updated_at DESC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(rusqlite::params![creator_id], |row| {
+            let json: String = row.get(0)?;
+            let status: String = row.get(1)?;
+            let downloads: u64 = row.get(2)?;
+            let rating: f64 = row.get(3)?;
+            let rating_count: u32 = row.get(4)?;
+            Ok(serde_json::json!({
+                "pack_json": json,
+                "status": status,
+                "downloads": downloads,
+                "rating": rating,
+                "rating_count": rating_count,
+            }))
+        })
+        .map_err(|e| e.to_string())?;
+    let mut result = Vec::new();
+    for r in rows {
+        result.push(r.map_err(|e| e.to_string())?);
+    }
+    Ok(serde_json::json!({ "trainings": result }))
+}
+
+#[tauri::command]
+async fn cmd_training_unpublish(
+    pack_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.conn()
+        .execute(
+            "UPDATE training_packs SET status = 'unpublished', updated_at = ?1 WHERE id = ?2",
+            rusqlite::params![chrono::Utc::now().to_rfc3339(), pack_id],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn cmd_training_delete(
+    pack_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.conn()
+        .execute(
+            "DELETE FROM training_packs WHERE id = ?1 AND status != 'published'",
+            rusqlite::params![pack_id],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn cmd_training_get_purchases(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    marketplace::TrainingStore::ensure_table(db.conn())?;
+    let buyer_id = "local_user";
+    let mut stmt = db.conn()
+        .prepare(
+            "SELECT tp.id, tp.pack_id, tp.price_paid, tp.purchased_at, p.title, p.category
+             FROM training_purchases tp
+             JOIN training_packs p ON tp.pack_id = p.id
+             WHERE tp.buyer_id = ?1
+             ORDER BY tp.purchased_at DESC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(rusqlite::params![buyer_id], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, String>(0)?,
+                "pack_id": row.get::<_, String>(1)?,
+                "price_paid": row.get::<_, f64>(2)?,
+                "purchased_at": row.get::<_, String>(3)?,
+                "title": row.get::<_, String>(4)?,
+                "category": row.get::<_, String>(5)?,
+            }))
+        })
+        .map_err(|e| e.to_string())?;
+    let mut result = Vec::new();
+    for r in rows {
+        result.push(r.map_err(|e| e.to_string())?);
+    }
+    Ok(serde_json::json!({ "purchases": result }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -7597,6 +7949,10 @@ pub fn run() {
                 )),
                 campaign_manager: Arc::new(tokio::sync::Mutex::new(
                     marketing::CampaignManager::new(),
+                )),
+                // E9-1: Training Studio recorder
+                training_recorder: Arc::new(tokio::sync::Mutex::new(
+                    training_studio::TrainingRecorder::new(),
                 )),
             });
 
@@ -8424,6 +8780,35 @@ pub fn run() {
             cmd_social_get_mentions,
             cmd_social_get_engagement,
             cmd_social_search,
+            // E9-1: Training Studio commands
+            cmd_training_start_recording,
+            cmd_training_start_example,
+            cmd_training_record_tool_call,
+            cmd_training_finish_example,
+            cmd_training_add_correction,
+            cmd_training_stop_recording,
+            cmd_training_execute,
+            // E9-3: Marketplace 2.0 — Training Store commands
+            cmd_training_publish,
+            cmd_training_list,
+            cmd_training_search,
+            cmd_training_get,
+            cmd_training_purchase,
+            cmd_training_review,
+            cmd_training_get_reviews,
+            cmd_training_creator_earnings,
+            // E9-2: Creator Studio — enhanced marketplace
+            cmd_training_list_by_creator,
+            cmd_training_unpublish,
+            cmd_training_delete,
+            cmd_training_get_purchases,
+            // E9-4: Creator Payments
+            cmd_request_payout,
+            cmd_get_payout_history,
+            cmd_get_pending_balance,
+            // E9-5: Training Quality System
+            cmd_training_quality_check,
+            cmd_training_quality_check_local,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");

@@ -16,6 +16,7 @@ import {
   ThumbsUp,
   HandHelping,
   Megaphone,
+  Palette,
   Search,
   Plus,
   X,
@@ -33,6 +34,7 @@ import ScheduledTasks from './dashboard/ScheduledTasks';
 import FeedbackInsights from './dashboard/FeedbackInsights';
 import Handoffs from './dashboard/Handoffs';
 import Marketing from './dashboard/Marketing';
+import Studio from './dashboard/Studio';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -48,6 +50,7 @@ type Tab =
   | 'developer'
   | 'triggers'
   | 'marketing'
+  | 'studio'
   | 'settings'
   | 'feedback'
   | 'handoffs';
@@ -70,6 +73,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'developer', label: 'Developer', icon: Code2, section: 'main', shortcut: '7' },
   { id: 'triggers', label: 'Triggers', icon: Clock, section: 'main', shortcut: '8' },
   { id: 'marketing', label: 'Marketing', icon: Megaphone, section: 'main' },
+  { id: 'studio', label: 'Studio', icon: Palette, section: 'main' },
   { id: 'settings', label: 'Settings', icon: Settings, section: 'main', shortcut: '9' },
   { id: 'feedback', label: 'Feedback', icon: ThumbsUp, section: 'more' },
   { id: 'handoffs', label: 'Handoffs', icon: HandHelping, section: 'more' },
@@ -85,6 +89,7 @@ const TAB_LABELS: Record<Tab, string> = {
   developer: 'Developer Tools',
   triggers: 'Scheduled Tasks',
   marketing: 'Marketing',
+  studio: 'Creator Studio',
   settings: 'Settings',
   feedback: 'Feedback & Insights',
   handoffs: 'Escalation Handoffs',
@@ -434,6 +439,7 @@ export default function Dashboard({ onResetWizard }: DashboardProps) {
           {activeTab === 'developer' && <Developer />}
           {activeTab === 'triggers' && <ScheduledTasks />}
           {activeTab === 'marketing' && <Marketing />}
+          {activeTab === 'studio' && <Studio />}
           {activeTab === 'settings' && <SettingsPg onResetWizard={onResetWizard} />}
           {activeTab === 'feedback' && <FeedbackInsights />}
           {activeTab === 'handoffs' && <Handoffs />}

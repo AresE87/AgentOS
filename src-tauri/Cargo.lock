@@ -45,7 +45,7 @@ dependencies = [
 
 [[package]]
 name = "agentos"
-version = "7.0.0"
+version = "8.0.0"
 dependencies = [
  "aes-gcm",
  "async-trait",
