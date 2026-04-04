@@ -1,5 +1,44 @@
 # Changelog
 
+## [9.0.0] - 2026-04-04 -- Creator Economy
+
+### Added
+- E9-2: Creator Studio frontend page (`Studio.tsx`) with 4 tabs:
+  - Mis Trainings: list user's training packs with status, downloads, rating, edit/publish/delete actions
+  - Grabar Training: live recorder with example capture, corrections, category selector, tags
+  - Marketplace: search, category filter, training pack grid with detail modal, reviews, purchase flow
+  - Dashboard de Creador: revenue KPIs, monthly bar chart, top trainings by revenue, payout history
+- E9-2: Studio tab added to Dashboard sidebar with Palette icon
+- E9-2: Enhanced marketplace IPC commands: `cmd_training_list_by_creator`, `cmd_training_unpublish`,
+  `cmd_training_delete`, `cmd_training_get_purchases`
+- E9-4: Creator Payments module (`billing/creator_payments.rs`):
+  - 70/30 revenue split (creator/platform) with rounding
+  - `CreatorPayments::record_sale` — tracks sales with split calculation
+  - `CreatorPayments::request_payout` — payout requests with balance validation
+  - `CreatorPayments::get_payouts` — payout history
+  - `CreatorPayments::get_pending_balance` — balance = earned - paid
+  - `CreatorPayments::get_earnings` — full earnings summary
+  - `CreatorPayments::get_monthly_revenue` — last 6 months revenue data
+  - IPC commands: `cmd_request_payout`, `cmd_get_payout_history`, `cmd_get_pending_balance`
+- E9-5: Training Quality System (`training_studio/quality.rs`):
+  - 5-point validation: min 2 examples, description length, tags, output presence, smoke test
+  - `QualityChecker::validate` — full async validation with LLM smoke test
+  - `QualityChecker::validate_local` — quick local validation without LLM
+  - 80% pass rate required for publishing approval
+  - IPC commands: `cmd_training_quality_check`, `cmd_training_quality_check_local`
+- E9-2: Training Marketplace module (`training_studio/marketplace.rs`):
+  - Publish, search, get, purchase, review, unpublish, delete
+  - Per-training earnings tracking with creator_sales integration
+  - Average rating auto-calculation on review
+- E9-2: Frontend hooks in useAgent.ts: trainingListByCreator, trainingUnpublish, trainingDelete,
+  trainingGetPurchases, requestPayout, getPayoutHistory, getPendingBalance,
+  trainingQualityCheck, trainingQualityCheckLocal
+
+### Changed
+- Version bump to 9.0.0 across Cargo.toml, frontend, and mobile packages
+- billing/mod.rs: added creator_payments module export
+- training_studio/mod.rs: added quality and marketplace module exports
+
 ## [8.0.0] - 2026-04-04 -- Marketing Autonomo
 
 ### Added
