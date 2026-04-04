@@ -17,7 +17,7 @@ export function MissionHistory({ items, onSelectMission }: MissionHistoryProps) 
   return (
     <div className="rounded-[28px] border border-[rgba(92,212,202,0.12)] bg-[linear-gradient(180deg,rgba(13,17,23,0.94),rgba(8,11,16,0.92))] p-5">
       <div className="mb-4 text-[10px] font-mono uppercase tracking-[0.24em] text-[#9A8A74]">
-        Mission History
+        Historial de Misiones
       </div>
       <div className="space-y-2">
         {items.slice(0, 20).map((mission) => (
@@ -35,7 +35,7 @@ export function MissionHistory({ items, onSelectMission }: MissionHistoryProps) 
               {mission.status}
             </div>
             <div className="text-xs text-[#D3E1DB]">
-              {mission.completed_count}/{mission.subtask_count} done
+              {mission.completed_count}/{mission.subtask_count} listo
             </div>
             <div className="text-xs text-[#D3E1DB]">{formatCurrency(mission.total_cost)}</div>
             <div className="text-xs text-[#D3E1DB]">{formatDuration(mission.total_elapsed_ms)}</div>

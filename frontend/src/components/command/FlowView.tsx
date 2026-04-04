@@ -64,10 +64,10 @@ function findWarnings(mission: Mission): string[] {
   Object.values(mission.dag.nodes).forEach((node) => {
     const linked = mission.dag.edges.some((edge) => edge.from === node.id || edge.to === node.id);
     if (!linked && Object.keys(mission.dag.nodes).length > 1) {
-      warnings.push(`${node.title} is orphaned`);
+      warnings.push(`${node.title} está sin conexión`);
     }
     if (!node.assignment.specialist && mission.mode === 'Commander') {
-      warnings.push(`${node.title} has no specialist assigned`);
+      warnings.push(`${node.title} no tiene especialista asignado`);
     }
   });
   return Array.from(new Set(warnings)).slice(0, 3);
@@ -122,20 +122,20 @@ export function FlowView({
         <div className="flex flex-col gap-3">
           <div className="rounded-[24px] border border-[rgba(0,229,229,0.08)] bg-[#0D1117] p-4">
             <div className="mb-3 text-[10px] font-mono uppercase tracking-[0.24em] text-[#68829A]">
-              Mission Pulse
+              Pulso de Misión
             </div>
             <div className="text-3xl font-semibold text-[#00E5E5]">{running}</div>
-            <div className="mt-1 text-sm text-[#8FA5BA]">nodes currently running</div>
+            <div className="mt-1 text-sm text-[#8FA5BA]">nodos en ejecución</div>
           </div>
 
           <div className="rounded-[24px] border border-[rgba(0,229,229,0.08)] bg-[#0D1117] p-4">
             <div className="mb-3 text-[10px] font-mono uppercase tracking-[0.24em] text-[#68829A]">
-              Canvas Hints
+              Controles del Canvas
             </div>
             <div className="space-y-2 text-sm text-[#AFC1D0]">
-              <div>Scroll to zoom. Drag the pane to pan.</div>
-              <div>Drag handles to create dependencies in Commander.</div>
-              <div>Double-click a node to open its full properties.</div>
+              <div>Scrolleá para hacer zoom. Arrastrá el canvas para moverte.</div>
+              <div>Arrastrá los conectores para crear dependencias en Commander.</div>
+              <div>Doble clic en un nodo para abrir sus propiedades.</div>
             </div>
           </div>
         </div>

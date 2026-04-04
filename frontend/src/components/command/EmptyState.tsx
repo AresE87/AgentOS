@@ -54,10 +54,10 @@ export function EmptyState({
             </div>
 
             <div className="font-['Sora'] text-4xl font-semibold tracking-[-0.06em] text-[#F5F0E8]">
-              Describe a complex task or assemble your team
+              Describí una tarea compleja o armá tu equipo
             </div>
             <div className="max-w-2xl text-sm leading-7 text-[#C3D3CC]">
-              Autopilot decomposes the work into a DAG automatically. Commander gives you the canvas and lets you orchestrate each node yourself.
+              Autopilot descompone el trabajo automáticamente. Commander te da el canvas para orquestar cada nodo.
             </div>
           </div>
 
@@ -72,7 +72,7 @@ export function EmptyState({
           <div className="flex justify-center">
             <div className="inline-flex items-center gap-2 text-[11px] text-[#5E7068]">
               <kbd className="rounded border border-[rgba(0,229,229,0.08)] bg-[rgba(0,229,229,0.04)] px-1.5 py-0.5 font-mono text-[10px] text-[#8A9E97]">Enter</kbd>
-              <span>to submit</span>
+              <span>para enviar</span>
             </div>
           </div>
         </div>
@@ -80,7 +80,7 @@ export function EmptyState({
 
       <div className="space-y-4">
         <div className="text-[10px] font-mono uppercase tracking-[0.24em] text-[#9A8A74]">
-          Start from a template
+          Empezá con un template
         </div>
         <MissionTemplates onLaunchTemplate={onLaunchTemplate} />
       </div>

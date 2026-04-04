@@ -23,7 +23,7 @@ export function AgentPalette({
   return (
     <div className="rounded-[24px] border border-[rgba(0,229,229,0.08)] bg-[#0D1117] px-4 py-3">
       <div className="mb-3 text-[10px] font-mono uppercase tracking-[0.24em] text-[#68829A]">
-        Agent Palette
+        Paleta de Agentes
       </div>
       <div className="flex gap-4 overflow-x-auto pb-1">
         {Object.entries(grouped).map(([category, items]) => (

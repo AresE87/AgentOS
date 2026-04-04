@@ -28,9 +28,9 @@ const views: Array<{ id: CommandView; label: string }> = [
 ];
 
 const autonomies: Array<{ id: AutonomyLevel; label: string }> = [
-  { id: 'Full', label: 'Full' },
-  { id: 'AskOnError', label: 'Ask on Error' },
-  { id: 'AskAlways', label: 'Ask Always' },
+  { id: 'Full', label: 'Autónomo' },
+  { id: 'AskOnError', label: 'Preguntar si falla' },
+  { id: 'AskAlways', label: 'Preguntar siempre' },
 ];
 
 function kpiValue(mission: Mission | null) {
@@ -118,11 +118,11 @@ export function TopBar({
             Command Center
           </div>
           <div className="font-['Sora'] text-[24px] font-semibold tracking-[-0.05em] text-[#F4EEE5]">
-            {mission?.title ?? 'Coordinator Mode'}
+            {mission?.title ?? 'Centro de Comando'}
           </div>
           <div className="max-w-3xl text-sm text-[#B8C8C2]">
             {mission?.description ??
-              'Spin up a mission, inspect the plan, then run agents in Autopilot or direct them manually in Commander.'}
+              'Creá una misión, revisá el plan y ejecutá agentes en Autopilot o dirigilos manualmente en Commander.'}
           </div>
         </div>
 
@@ -167,7 +167,7 @@ export function TopBar({
             className="inline-flex items-center gap-2 rounded-full border border-[rgba(255,190,112,0.24)] bg-[rgba(255,190,112,0.12)] px-4 py-2 text-xs font-semibold text-[#F6C27C] disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Play size={12} />
-            {mission?.status === 'Paused' ? 'Resume' : 'Run'}
+            {mission?.status === 'Paused' ? 'Reanudar' : 'Ejecutar'}
           </button>
 
           <button
@@ -177,7 +177,7 @@ export function TopBar({
             className="inline-flex items-center gap-2 rounded-full border border-[rgba(243,156,18,0.20)] bg-[rgba(243,156,18,0.10)] px-4 py-2 text-xs font-semibold text-[#F6B24E] disabled:cursor-not-allowed disabled:opacity-45"
           >
             <Pause size={12} />
-            Pause
+            Pausar
           </button>
 
           <button
@@ -187,7 +187,7 @@ export function TopBar({
             className="inline-flex items-center gap-2 rounded-full border border-[rgba(231,76,60,0.18)] bg-[rgba(231,76,60,0.08)] px-4 py-2 text-xs font-semibold text-[#F07F76] disabled:cursor-not-allowed disabled:opacity-45"
           >
             <Square size={12} />
-            Stop
+            Detener
           </button>
         </div>
       </div>
@@ -219,7 +219,7 @@ export function TopBar({
         >
           <div className="mb-1 flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.24em] text-[#8A9E97]">
             <Activity size={10} />
-            Status
+            Estado
           </div>
           <div className="flex items-center gap-2">
             {isRunning && (
@@ -233,16 +233,16 @@ export function TopBar({
         <div className="rounded-[22px] border border-[rgba(92,212,202,0.10)] bg-[rgba(8,11,16,0.88)] px-4 py-3">
           <div className="mb-1 flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.24em] text-[#8A9E97]">
             <Layers size={10} />
-            Agents
+            Agentes
           </div>
-          <div className="text-lg font-semibold text-[#F4EEE5]">{metrics.agents} nodes</div>
+          <div className="text-lg font-semibold text-[#F4EEE5]">{metrics.agents} nodos</div>
         </div>
 
         {/* Progress KPI with circular indicator */}
         <div className="rounded-[22px] border border-[rgba(92,212,202,0.10)] bg-[rgba(8,11,16,0.88)] px-4 py-3">
           <div className="mb-1 flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.24em] text-[#8A9E97]">
             <TrendingUp size={10} />
-            Progress
+            Progreso
           </div>
           <div className="flex items-center gap-2.5">
             <CircularProgress percent={metrics.progressNum} />
@@ -254,7 +254,7 @@ export function TopBar({
         <div className="rounded-[22px] border border-[rgba(92,212,202,0.10)] bg-[rgba(8,11,16,0.88)] px-4 py-3">
           <div className="mb-1 flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.24em] text-[#8A9E97]">
             <DollarSign size={10} />
-            Cost
+            Costo
           </div>
           <div className="text-lg font-semibold text-[#F4EEE5]">{metrics.cost}</div>
         </div>
@@ -263,7 +263,7 @@ export function TopBar({
         <div className="rounded-[22px] border border-[rgba(92,212,202,0.10)] bg-[rgba(8,11,16,0.88)] px-4 py-3">
           <div className="mb-1 flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.24em] text-[#8A9E97]">
             <Clock3 size={10} />
-            Time
+            Tiempo
           </div>
           <div className="text-lg font-semibold text-[#F4EEE5]">{metrics.time}</div>
         </div>

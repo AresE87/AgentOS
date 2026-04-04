@@ -35,7 +35,7 @@ export function TimelineView({ mission, onSelectNode }: TimelineViewProps) {
           <div className="text-[10px] font-mono uppercase tracking-[0.24em] text-[#68829A]">
             Timeline
           </div>
-          <div className="text-sm text-[#8FA5BA]">Hold Shift and scroll to zoom horizontally.</div>
+          <div className="text-sm text-[#8FA5BA]">Mantené Shift y scrolleá para hacer zoom horizontal.</div>
         </div>
         <div className="text-xs font-mono text-[#00E5E5]">{scale.toFixed(2)}x</div>
       </div>
@@ -73,7 +73,7 @@ export function TimelineView({ mission, onSelectNode }: TimelineViewProps) {
                 <div>
                   <div className="text-sm font-semibold text-[#E6EDF3]">{node.title}</div>
                   <div className="text-xs text-[#7E95AB]">
-                    {node.assignment.specialist_name ?? node.assignment.specialist ?? 'Generalist'}
+                    {node.assignment.specialist_name ?? node.assignment.specialist ?? 'Generalista'}
                   </div>
                 </div>
                 <div className="relative h-11 rounded-full bg-[#080B10]">

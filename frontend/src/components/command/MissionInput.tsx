@@ -39,7 +39,7 @@ export function MissionInput({
           className="inline-flex min-w-[170px] items-center justify-center gap-2 rounded-[24px] border border-[rgba(255,186,104,0.24)] bg-[linear-gradient(180deg,rgba(255,186,104,0.16),rgba(255,186,104,0.05))] px-5 py-4 text-sm font-semibold text-[#F6C27C] transition-all duration-200 hover:translate-y-[-1px] hover:shadow-[0_0_20px_rgba(255,186,104,0.12)] disabled:cursor-not-allowed disabled:opacity-45"
         >
           {isBusy ? <Loader2 size={16} className="animate-spin" /> : <ArrowRight size={16} />}
-          {isBusy ? 'Planning...' : 'Launch Mission'}
+          {isBusy ? 'Planificando...' : 'Lanzar Misión'}
         </button>
       </div>
     </div>

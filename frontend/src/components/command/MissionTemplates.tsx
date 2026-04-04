@@ -26,7 +26,7 @@ export function MissionTemplates({ onLaunchTemplate }: MissionTemplatesProps) {
             <div className="mb-2 flex items-center justify-between">
               <div className="font-['Sora'] text-base font-semibold text-[#F4EEE5]">{template.title}</div>
               <div className="rounded-full border border-[rgba(255,186,104,0.14)] px-2 py-1 text-[10px] font-mono uppercase tracking-[0.2em] text-[#F6C27C]">
-                {template.agentCount} agents
+                {template.agentCount} agentes
               </div>
             </div>
             <div className="text-sm leading-6 text-[#BFD2CC]">{template.description}</div>
@@ -40,7 +40,7 @@ export function MissionTemplates({ onLaunchTemplate }: MissionTemplatesProps) {
             <div className="mb-4 flex items-start justify-between gap-3">
               <div>
                 <div className="text-[10px] font-mono uppercase tracking-[0.24em] text-[#9A8A74]">
-                  Mission Template
+                  Template de Misión
                 </div>
                 <div className="mt-1 font-['Sora'] text-xl font-semibold text-[#F4EEE5]">{selected.title}</div>
                 <div className="mt-2 text-sm leading-6 text-[#BFD2CC]">{selected.description}</div>
@@ -78,7 +78,7 @@ export function MissionTemplates({ onLaunchTemplate }: MissionTemplatesProps) {
                 className="inline-flex items-center gap-2 rounded-full border border-[rgba(255,186,104,0.24)] bg-[rgba(255,186,104,0.12)] px-4 py-2 text-xs font-semibold text-[#F6C27C] transition-all duration-200 hover:shadow-[0_0_16px_rgba(255,186,104,0.12)] disabled:cursor-not-allowed disabled:opacity-45"
               >
                 <ArrowRight size={12} />
-                Create mission
+                Crear misión
               </button>
             </div>
           </div>

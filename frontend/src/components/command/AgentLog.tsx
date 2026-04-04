@@ -9,53 +9,53 @@ interface AgentLogProps {
 function describeEvent(event: CoordinatorEvent): string {
   switch (event.type) {
     case 'MissionCreated':
-      return `Mission "${event.title}" created in ${event.mode}`;
+      return `Misión "${event.title}" creada en ${event.mode}`;
     case 'MissionPlanning':
-      return 'Planning mission graph';
+      return 'Planificando grafo de misión';
     case 'MissionPlanReady':
-      return `Plan ready with ${event.node_count} nodes`;
+      return `Plan listo con ${event.node_count} nodos`;
     case 'MissionStarted':
-      return 'Mission started';
+      return 'Misión iniciada';
     case 'MissionProgress':
-      return `Mission progress ${event.completed}/${event.total}`;
+      return `Progreso ${event.completed}/${event.total}`;
     case 'MissionCompleted':
-      return 'Mission completed';
+      return 'Misión completada';
     case 'MissionFailed':
       return event.error;
     case 'MissionPaused':
-      return 'Mission paused';
+      return 'Misión pausada';
     case 'MissionCancelled':
-      return 'Mission cancelled';
+      return 'Misión cancelada';
     case 'SubtaskQueued':
-      return `${event.title} queued`;
+      return `${event.title} en cola`;
     case 'SubtaskStarted':
-      return `${event.agent_name} started working`;
+      return `${event.agent_name} trabajando`;
     case 'SubtaskProgress':
       return event.message;
     case 'SubtaskStreaming':
-      return event.text_delta.trim() || 'Streaming output';
+      return event.text_delta.trim() || 'Transmitiendo output';
     case 'SubtaskToolUse':
-      return `Running ${event.tool_name}`;
+      return `Ejecutando ${event.tool_name}`;
     case 'SubtaskToolResult':
-      return `${event.tool_name} ${event.success ? 'completed' : 'failed'}`;
+      return `${event.tool_name} ${event.success ? 'completado' : 'falló'}`;
     case 'SubtaskCompleted':
-      return `Completed in ${Math.round(event.elapsed_ms / 100) / 10}s`;
+      return `Completado en ${Math.round(event.elapsed_ms / 100) / 10}s`;
     case 'SubtaskFailed':
       return event.error;
     case 'SubtaskRetrying':
-      return `Retrying attempt ${event.attempt}`;
+      return `Reintentando, intento ${event.attempt}`;
     case 'NodeAdded':
-      return `Node ${event.node_id} added`;
+      return `Nodo ${event.node_id} agregado`;
     case 'NodeRemoved':
-      return `Node ${event.node_id} removed`;
+      return `Nodo ${event.node_id} eliminado`;
     case 'EdgeAdded':
-      return `Edge ${event.from} -> ${event.to}`;
+      return `Conexión ${event.from} -> ${event.to}`;
     case 'EdgeRemoved':
-      return `Edge ${event.from} -> ${event.to} removed`;
+      return `Conexión ${event.from} -> ${event.to} eliminada`;
     case 'ApprovalRequested':
       return event.question;
     default:
-      return 'Event received';
+      return 'Evento recibido';
   }
 }
 
@@ -108,11 +108,11 @@ export function AgentLog({ events, onSelectSubtask }: AgentLogProps) {
         <div className="flex items-center gap-2 border-b border-[rgba(92,212,202,0.08)] px-4 py-3">
           <TerminalSquare size={14} className="text-[#F6C27C]" />
           <div className="font-['IBM_Plex_Mono',monospace] text-[11px] uppercase tracking-[0.24em] text-[#9A8A74]">
-            Agent Log
+            Log de Agentes
           </div>
           {recent.length > 0 && (
             <div className="ml-auto rounded-full bg-[rgba(0,229,229,0.06)] px-2 py-0.5 font-mono text-[9px] text-[#5CD4CA]">
-              {recent.length} events
+              {recent.length} eventos
             </div>
           )}
         </div>
@@ -121,7 +121,7 @@ export function AgentLog({ events, onSelectSubtask }: AgentLogProps) {
       <div className="flex-1 overflow-y-auto px-4 py-3 font-['IBM_Plex_Mono',monospace] text-[11px] leading-5">
         {recent.length === 0 ? (
             <div className="py-6 text-center text-[#7E948D]">
-              Mission activity will stream here in real time.
+              La actividad de la misión se transmitirá acá en tiempo real.
             </div>
         ) : (
           <div className="space-y-1.5">

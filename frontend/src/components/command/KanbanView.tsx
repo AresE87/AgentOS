@@ -18,11 +18,11 @@ interface KanbanViewProps {
 }
 
 const columns = [
-  { id: 'queued', label: 'Queued', color: '#3D4F5F' },
-  { id: 'running', label: 'In Progress', color: '#00E5E5' },
-  { id: 'review', label: 'Review', color: '#F39C12' },
-  { id: 'done', label: 'Done', color: '#2ECC71' },
-  { id: 'failed', label: 'Failed', color: '#E74C3C' },
+  { id: 'queued', label: 'En Cola', color: '#3D4F5F' },
+  { id: 'running', label: 'En Progreso', color: '#00E5E5' },
+  { id: 'review', label: 'Revisión', color: '#F39C12' },
+  { id: 'done', label: 'Completado', color: '#2ECC71' },
+  { id: 'failed', label: 'Fallido', color: '#E74C3C' },
 ] as const;
 
 const statusForColumn: Record<(typeof columns)[number]['id'], SubtaskStatus> = {

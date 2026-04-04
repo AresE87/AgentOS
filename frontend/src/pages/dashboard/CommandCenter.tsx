@@ -100,22 +100,22 @@ function validateDag(dag: TaskDAG): { errors: string[]; warnings: string[] } {
   const errors: string[] = [];
 
   if (Object.keys(dag.nodes).length === 0) {
-    errors.push('Add at least one node before running the mission.');
+    errors.push('Agregá al menos un nodo antes de ejecutar la misión.');
     return { errors, warnings };
   }
 
   if (hasCycle(dag)) {
-    errors.push('The graph contains a dependency cycle.');
+    errors.push('El grafo contiene un ciclo de dependencias.');
   }
 
   if (Object.keys(dag.nodes).length > 1) {
     Object.values(dag.nodes).forEach((node) => {
       const linked = dag.edges.some((edge) => edge.from === node.id || edge.to === node.id);
       if (!linked) {
-        warnings.push(`${node.title} is isolated from the rest of the graph.`);
+        warnings.push(`${node.title} está aislado del resto del grafo.`);
       }
       if (!node.assignment.specialist) {
-        warnings.push(`${node.title} does not have a specialist assigned yet.`);
+        warnings.push(`${node.title} no tiene especialista asignado.`);
       }
     });
   }
@@ -155,7 +155,7 @@ function createNodeFromProfile(
 ) {
   return createDraftNode({
     title: specialist.name,
-    description: `Use ${specialist.name} to contribute to the mission.`,
+    description: `Usar ${specialist.name} para contribuir a la misión.`,
     assignment: {
       level: specialist.level,
       specialist: specialist.id,
@@ -329,7 +329,7 @@ export default function CommandCenter() {
       const copy = createDraftNode({
         ...selectedNode,
         id: undefined,
-        title: `${selectedNode.title} Copy`,
+        title: `${selectedNode.title} Copia`,
         position: selectedNode.position
           ? { x: selectedNode.position.x + 48, y: selectedNode.position.y + 48 }
           : { x: 240, y: 220 },
@@ -698,21 +698,21 @@ export default function CommandCenter() {
                   <div className="space-y-4">
                     <div className="inline-flex items-center gap-2 rounded-full border border-[rgba(255,190,112,0.24)] bg-[rgba(255,190,112,0.10)] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.24em] text-[#F6C27C]">
                       <Wand2 size={12} />
-                      Mission Preview
+                      Vista Previa de Misión
                     </div>
                     <div className="space-y-2">
                       <div className="text-3xl font-semibold tracking-[-0.05em] text-[#F7F0E4]">
-                        The coordinator has staged your operation.
+                        El coordinador preparó tu operación.
                       </div>
                       <div className="max-w-2xl text-sm leading-7 text-[#D5C9B7]">
-                        Inspect the graph, switch to Commander if you want to reshape it, or launch the mission exactly as planned.
+                        Inspeccioná el grafo, cambiá a Commander si querés reestructurarlo o lanzá la misión tal como fue planificada.
                       </div>
                     </div>
                     <div className="grid gap-3 sm:grid-cols-3">
                       {[
-                        { label: 'Agents', value: `${missionStats?.agents ?? 0}` },
-                        { label: 'Dependencies', value: `${missionStats?.dependencies ?? 0}` },
-                        { label: 'Projected Progress', value: `${missionStats?.progress ?? 0}%` },
+                        { label: 'Agentes', value: `${missionStats?.agents ?? 0}` },
+                        { label: 'Dependencias', value: `${missionStats?.dependencies ?? 0}` },
+                        { label: 'Progreso estimado', value: `${missionStats?.progress ?? 0}%` },
                       ].map((metric) => (
                         <div
                           key={metric.label}
@@ -732,7 +732,7 @@ export default function CommandCenter() {
                   <div className="space-y-4 rounded-[28px] border border-[rgba(92,212,202,0.16)] bg-[rgba(7,11,16,0.62)] p-5">
                     <div className="flex items-center gap-2 text-[10px] font-mono uppercase tracking-[0.24em] text-[#8DCFC7]">
                       <Radar size={12} />
-                      Execution Deck
+                      Panel de Ejecución
                     </div>
                     <div className="space-y-3">
                       {Object.values(mission.dag.nodes).map((node) => (
@@ -747,7 +747,7 @@ export default function CommandCenter() {
                             </div>
                           </div>
                           <div className="text-[10px] font-mono uppercase tracking-[0.2em] text-[#8DCFC7]">
-                            {node.allowed_tools.length} tools
+                            {node.allowed_tools.length} herramientas
                           </div>
                         </div>
                       ))}
@@ -759,7 +759,7 @@ export default function CommandCenter() {
                         className="inline-flex items-center gap-2 rounded-full border border-[rgba(255,190,112,0.24)] bg-[rgba(255,190,112,0.14)] px-4 py-2 text-xs font-semibold text-[#F6C27C]"
                       >
                         <Play size={12} />
-                        Execute plan
+                        Ejecutar plan
                       </button>
                       <button
                         type="button"
@@ -773,14 +773,14 @@ export default function CommandCenter() {
                         }}
                         className="rounded-full border border-[rgba(92,212,202,0.16)] px-4 py-2 text-xs font-semibold text-[#9FDED5]"
                       >
-                        Edit in Commander
+                        Editar en Commander
                       </button>
                       <button
                         type="button"
                         onClick={() => void cancelMission(mission.id)}
                         className="rounded-full border border-[rgba(255,116,116,0.18)] px-4 py-2 text-xs font-semibold text-[#F3A2A2]"
                       >
-                        Cancel
+                        Cancelar
                       </button>
                     </div>
                   </div>
@@ -802,7 +802,7 @@ export default function CommandCenter() {
                   <div className="space-y-1">
                     <div className="flex items-center gap-2 text-[10px] font-mono uppercase tracking-[0.24em] text-[#F0B76A]">
                       <AlertTriangle size={12} />
-                      Approval Required
+                      Aprobación requerida
                     </div>
                     <div className="text-sm leading-6 text-[#F7E5CB]">
                       {approvalRequest.question}
@@ -814,14 +814,14 @@ export default function CommandCenter() {
                       onClick={() => void handleApproveRequest(true)}
                       className="rounded-full border border-[rgba(92,212,202,0.22)] bg-[rgba(92,212,202,0.12)] px-4 py-2 text-xs font-semibold text-[#9FDED5]"
                     >
-                      Approve
+                      Aprobar
                     </button>
                     <button
                       type="button"
                       onClick={() => void handleApproveRequest(false)}
                       className="rounded-full border border-[rgba(255,120,120,0.18)] px-4 py-2 text-xs font-semibold text-[#F3A2A2]"
                     >
-                      Reject
+                      Rechazar
                     </button>
                   </div>
                 </div>
@@ -843,7 +843,7 @@ export default function CommandCenter() {
                     <CheckCircle2 size={16} />
                   </div>
                   <div className="text-sm leading-6">
-                    Mission complete. Open any node to inspect the final output or spin up the next operation.
+                    Misión completada. Abrí cualquier nodo para ver el output final o lanzá la siguiente operación.
                   </div>
                 </div>
               </motion.div>
@@ -855,7 +855,7 @@ export default function CommandCenter() {
               {validation.errors.length > 0 && (
                 <div className="rounded-[24px] border border-[rgba(255,120,120,0.2)] bg-[rgba(255,120,120,0.08)] px-4 py-3 text-[12px] leading-6 text-[#F1B2B2]">
                   <div className="mb-1 text-[10px] font-mono uppercase tracking-[0.24em] text-[#F39B9B]">
-                    Validation Errors
+                    Errores de Validación
                   </div>
                   {validation.errors.join(' ')}
                 </div>
@@ -863,7 +863,7 @@ export default function CommandCenter() {
               {validation.warnings.length > 0 && (
                 <div className="rounded-[24px] border border-[rgba(255,190,112,0.18)] bg-[rgba(255,190,112,0.08)] px-4 py-3 text-[12px] leading-6 text-[#F4D0A3]">
                   <div className="mb-1 text-[10px] font-mono uppercase tracking-[0.24em] text-[#F0B76A]">
-                    Commander Warnings
+                    Advertencias de Commander
                   </div>
                   {validation.warnings.slice(0, 3).join(' ')}
                 </div>
@@ -894,12 +894,12 @@ export default function CommandCenter() {
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <div className="text-[10px] font-mono uppercase tracking-[0.24em] text-[#8BC9C1]">
-                      Commander Deck
+                      Panel Commander
                     </div>
                     <div className="mt-1 text-sm leading-6 text-[#D5E5E0]">
                       {mode === 'Commander'
-                        ? 'Shape the graph, use the palette, and right-click the canvas for precise control.'
-                        : 'Watch the team operate in real time, then step in only when you need to redirect the mission.'}
+                        ? 'Diseñá el grafo, usá la paleta y hacé clic derecho en el canvas para control preciso.'
+                        : 'Observá al equipo operar en tiempo real e intervenís solo cuando necesites redirigir la misión.'}
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -909,7 +909,7 @@ export default function CommandCenter() {
                       disabled={undoStack.length === 0}
                       className="rounded-full border border-[rgba(92,212,202,0.16)] px-3 py-2 text-xs font-semibold text-[#9FDED5] disabled:opacity-40"
                     >
-                      Undo
+                      Deshacer
                     </button>
                     <button
                       type="button"
@@ -917,7 +917,7 @@ export default function CommandCenter() {
                       disabled={redoStack.length === 0}
                       className="rounded-full border border-[rgba(92,212,202,0.16)] px-3 py-2 text-xs font-semibold text-[#9FDED5] disabled:opacity-40"
                     >
-                      Redo
+                      Rehacer
                     </button>
                   </div>
                 </div>
@@ -962,7 +962,7 @@ export default function CommandCenter() {
                   className="command-menu-action"
                 >
                   <Command size={14} />
-                  Edit node
+                  Editar nodo
                 </button>
                 <button
                   type="button"
@@ -974,7 +974,7 @@ export default function CommandCenter() {
                   className="command-menu-action"
                 >
                   <Copy size={14} />
-                  Duplicate
+                  Duplicar
                 </button>
                 <button
                   type="button"
@@ -992,7 +992,7 @@ export default function CommandCenter() {
                   className="command-menu-action"
                 >
                   <Trash2 size={14} />
-                  Delete
+                  Eliminar
                 </button>
                 <button
                   type="button"
@@ -1004,7 +1004,7 @@ export default function CommandCenter() {
                   className="command-menu-action"
                 >
                   <RotateCcw size={14} />
-                  Retry
+                  Reintentar
                 </button>
                 <button
                   type="button"
@@ -1021,7 +1021,7 @@ export default function CommandCenter() {
                   className="command-menu-action"
                 >
                   <GitBranch size={14} />
-                  Disconnect all
+                  Desconectar todo
                 </button>
               </div>
             )}
@@ -1029,7 +1029,7 @@ export default function CommandCenter() {
             {contextMenu.kind === 'edge' && mission && edgeMenu && (
               <div className="space-y-2">
                 <div className="px-2 text-[10px] font-mono uppercase tracking-[0.24em] text-[#8BC9C1]">
-                  Edge Type
+                  Tipo de Conexión
                 </div>
                 {(['DataFlow', 'Dependency', 'Conditional'] as const).map((edgeType) => (
                   <button
@@ -1069,7 +1069,7 @@ export default function CommandCenter() {
                   className="command-menu-action"
                 >
                   <Trash2 size={14} />
-                  Delete edge
+                  Eliminar conexión
                 </button>
               </div>
             )}
@@ -1087,7 +1087,7 @@ export default function CommandCenter() {
                   className="command-menu-action"
                 >
                   <Sparkles size={14} />
-                  Add agent
+                  Agregar agente
                 </button>
                 <button
                   type="button"
@@ -1099,7 +1099,7 @@ export default function CommandCenter() {
                   className="command-menu-action"
                 >
                   <Command size={14} />
-                  Select first node
+                  Seleccionar primer nodo
                 </button>
               </div>
             )}
@@ -1125,13 +1125,13 @@ export default function CommandCenter() {
               <div className="mb-5 flex items-start justify-between gap-4">
                 <div className="space-y-2">
                   <div className="text-[10px] font-mono uppercase tracking-[0.24em] text-[#8BC9C1]">
-                    Commander Onboarding
+                    Introducción a Commander
                   </div>
                   <div className="text-3xl font-semibold tracking-[-0.05em] text-[#F5F0E8]">
-                    Build the graph like a mission architect.
+                    Construí el grafo como un arquitecto de misiones.
                   </div>
                   <div className="max-w-2xl text-sm leading-7 text-[#BFD2CC]">
-                    Drop specialists onto the canvas, wire outputs into inputs, then launch a graph that feels deliberate rather than improvised.
+                    Arrastrá especialistas al canvas, conectá salidas con entradas y lanzá un grafo diseñado con precisión.
                   </div>
                 </div>
                 <button
@@ -1145,16 +1145,16 @@ export default function CommandCenter() {
 
               <div className="grid gap-3 md:grid-cols-3">
                 {[
-                  'Drag agents from the palette or right-click the canvas to seed a new node.',
-                  'Connect ports to define which outputs feed the next part of the mission.',
-                  'Use undo, redo, and the properties panel to refine the graph before launch.',
+                  'Arrastrá agentes de la paleta o hacé clic derecho en el canvas para crear un nodo.',
+                  'Conectá los puertos para definir qué salidas alimentan la siguiente parte de la misión.',
+                  'Usá deshacer, rehacer y el panel de propiedades para refinar el grafo antes de lanzar.',
                 ].map((step, index) => (
                   <div
                     key={step}
                     className="rounded-[28px] border border-[rgba(92,212,202,0.10)] bg-[rgba(10,16,22,0.78)] p-5"
                   >
                     <div className="mb-3 inline-flex rounded-full border border-[rgba(255,190,112,0.18)] bg-[rgba(255,190,112,0.08)] px-3 py-1 text-[10px] font-mono uppercase tracking-[0.22em] text-[#F0B76A]">
-                      Step {index + 1}
+                      Paso {index + 1}
                     </div>
                     <div className="text-sm leading-6 text-[#D9E5E1]">{step}</div>
                   </div>
@@ -1173,7 +1173,7 @@ export default function CommandCenter() {
                       }
                     }}
                   />
-                  Don’t show this again
+                  No mostrar de nuevo
                 </label>
                 <button
                   type="button"
@@ -1183,7 +1183,7 @@ export default function CommandCenter() {
                   }}
                   className="rounded-full border border-[rgba(255,190,112,0.20)] bg-[rgba(255,190,112,0.10)] px-4 py-2 text-xs font-semibold text-[#F6C27C]"
                 >
-                  Understood
+                  Entendido
                 </button>
               </div>
             </motion.div>

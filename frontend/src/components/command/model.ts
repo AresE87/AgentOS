@@ -180,12 +180,12 @@ export function timeAgo(dateString: string | null): string {
   if (!dateString) return '';
   const delta = Date.now() - new Date(dateString).getTime();
   const minutes = Math.floor(delta / 60_000);
-  if (minutes <= 0) return 'just now';
-  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes <= 0) return 'ahora';
+  if (minutes < 60) return `hace ${minutes}m`;
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
+  if (hours < 24) return `hace ${hours}h`;
   const days = Math.floor(hours / 24);
-  return `${days}d ago`;
+  return `hace ${days}d`;
 }
 
 export function statusGroup(status: SubtaskStatus): 'queued' | 'running' | 'review' | 'done' | 'failed' {
@@ -213,8 +213,8 @@ export function createDraftNode(partial?: Partial<DAGNode>): DAGNode {
   const now = partial?.position ?? { x: 120, y: 120 };
   return {
     id: partial?.id ?? `node_${crypto.randomUUID().slice(0, 8)}`,
-    title: partial?.title ?? 'New Task',
-    description: partial?.description ?? 'Describe what this agent should do.',
+    title: partial?.title ?? 'Nueva Tarea',
+    description: partial?.description ?? 'Describí qué debe hacer este agente.',
     assignment: partial?.assignment ?? {
       level: 'Specialist',
       specialist: null,

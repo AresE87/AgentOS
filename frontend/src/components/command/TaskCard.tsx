@@ -120,17 +120,17 @@ export function TaskCard({
           <span className="text-[#8A9E97]">
             {specialistIcon(node.assignment.specialist, 11)}
           </span>
-          {node.assignment.specialist_name ?? node.assignment.specialist ?? 'Generalist'}
+          {node.assignment.specialist_name ?? node.assignment.specialist ?? 'Generalista'}
         </span>
         <span className="font-mono">
-          {node.assignment.model_override ?? 'auto-tier'}
+          {node.assignment.model_override ?? 'auto'}
         </span>
       </div>
 
       <div className="mb-3">
         <div className="mb-1 flex items-center justify-between text-[10px] uppercase tracking-[0.18em] text-[#60768B]">
           <span className="flex items-center gap-1.5">
-            Progress
+            Progreso
             {/* Streaming dots indicator when running */}
             {isRunning && (
               <span className="inline-flex items-center gap-[3px]">
@@ -167,7 +167,7 @@ export function TaskCard({
             <span className="ml-0.5 inline-block h-3 w-[2px] bg-[#00E5E5] align-middle animate-blink" />
           </span>
         ) : (
-          node.last_message ?? node.result?.slice(0, 120) ?? 'Awaiting assignment details.'
+          node.last_message ?? node.result?.slice(0, 120) ?? 'Esperando asignación...'
         )}
       </div>
 

@@ -93,7 +93,7 @@ export function KanbanColumn({
           {nodes.length === 0 && (
             <div className="ghost-card flex items-center justify-center rounded-[20px] bg-[rgba(0,229,229,0.02)] p-6">
               <span className="text-[11px] font-mono text-[#3D4F5F]">
-                {mode === 'Commander' ? 'Drag tasks here' : 'No tasks'}
+                {mode === 'Commander' ? 'Arrastrá tareas acá' : 'Sin tareas'}
               </span>
             </div>
           )}

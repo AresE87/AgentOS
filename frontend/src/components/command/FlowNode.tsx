@@ -93,7 +93,7 @@ export function FlowNode({ data: rawData, selected }: NodeProps) {
           <div className="min-w-0">
             <div className="mb-1 font-['Sora'] text-sm font-semibold text-[#F4EEE5]">{node.title}</div>
             <div className="text-[11px] text-[#AABCB5]">
-              {node.assignment.specialist_name ?? node.assignment.specialist ?? 'Unassigned specialist'}
+              {node.assignment.specialist_name ?? node.assignment.specialist ?? 'Sin especialista'}
             </div>
           </div>
         </div>
@@ -111,7 +111,7 @@ export function FlowNode({ data: rawData, selected }: NodeProps) {
 
       <div className="relative mb-3 flex items-center gap-2 font-mono text-[10px] text-[#92A59E]">
         <Cpu size={11} />
-        <span>{node.assignment.model_override ?? 'auto-tier'}</span>
+        <span>{node.assignment.model_override ?? 'auto'}</span>
       </div>
 
       <div className="relative mb-3">
@@ -147,7 +147,7 @@ export function FlowNode({ data: rawData, selected }: NodeProps) {
       <div className="relative mb-3 min-h-[66px] overflow-hidden rounded-[20px] border border-[rgba(92,212,202,0.08)] bg-[rgba(8,11,16,0.82)] px-3 py-2 font-['IBM_Plex_Mono',monospace] text-[11px] leading-5 text-[#D6E2DD]">
         {isRunning ? (
           <span>
-            {node.liveOutput || node.last_message || 'Waiting for stream...'}
+            {node.liveOutput || node.last_message || 'Procesando...'}
             <span className="ml-0.5 inline-block h-3 w-[2px] bg-[#00E5E5] align-middle animate-blink" />
           </span>
         ) : (
@@ -167,7 +167,7 @@ export function FlowNode({ data: rawData, selected }: NodeProps) {
       {node.awaiting_approval && (
         <div className="relative mt-3 inline-flex items-center gap-2 rounded-full border border-[rgba(255,186,104,0.18)] bg-[rgba(255,186,104,0.08)] px-3 py-1 text-[10px] font-mono uppercase tracking-[0.22em] text-[#F0B76A]">
           <ShieldAlert size={11} />
-          Awaiting approval
+          Esperando aprobación
         </div>
       )}
 

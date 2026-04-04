@@ -42,9 +42,9 @@ export function SpecialistSelector({
         <div className="flex items-center justify-between border-b border-[rgba(0,229,229,0.08)] px-5 py-4">
           <div>
             <div className="text-[10px] font-mono uppercase tracking-[0.24em] text-[#68829A]">
-              Specialist Selector
+              Elegir Especialista
             </div>
-            <div className="text-lg font-semibold text-[#E6EDF3]">Pick the right agent for this node</div>
+            <div className="text-lg font-semibold text-[#E6EDF3]">Elegí el agente ideal para este nodo</div>
           </div>
           <button
             type="button"
@@ -61,7 +61,7 @@ export function SpecialistSelector({
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search specialists"
+              placeholder="Buscar especialistas"
               className="w-full bg-transparent text-sm text-[#E6EDF3] outline-none"
             />
           </label>
@@ -110,7 +110,7 @@ export function SpecialistSelector({
               </div>
               <div className="mb-3 text-sm leading-6 text-[#8FA5BA]">{profile.description}</div>
               <div className="text-xs text-[#AFC1D0]">
-                Tools: {profile.default_tools.join(', ') || 'No default tools'}
+                Herramientas: {profile.default_tools.join(', ') || 'Sin herramientas predeterminadas'}
               </div>
             </button>
           ))}

@@ -72,7 +72,7 @@ export function PropertiesPanel({
   if (!node) {
     return (
       <div className="rounded-[24px] border border-[rgba(0,229,229,0.08)] bg-[#0D1117] p-5 text-sm text-[#8FA5BA]">
-        Select a node to inspect assignment, dependencies, tools, and live output.
+        Seleccioná un nodo para inspeccionar asignación, dependencias, herramientas y output en vivo.
       </div>
     );
   }
@@ -92,7 +92,7 @@ export function PropertiesPanel({
         <div className="mb-4 flex items-start justify-between gap-3">
           <div>
             <div className="text-[10px] font-mono uppercase tracking-[0.24em] text-[#68829A]">
-              Properties
+              Propiedades
             </div>
             <div className="mt-1 text-lg font-semibold text-[#E6EDF3]">{node.title}</div>
           </div>
@@ -108,7 +108,7 @@ export function PropertiesPanel({
         <div className="space-y-4">
           <label className="grid gap-1">
             <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-[#68829A]">
-              Title
+              Título
             </span>
             <input
               value={title}
@@ -120,7 +120,7 @@ export function PropertiesPanel({
 
           <label className="grid gap-1">
             <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-[#68829A]">
-              Description
+              Descripción
             </span>
             <textarea
               value={description}
@@ -134,7 +134,7 @@ export function PropertiesPanel({
           <div className="grid gap-3 lg:grid-cols-2">
             <label className="grid gap-1">
               <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-[#68829A]">
-                Level
+                Nivel
               </span>
               <select
                 value={node.assignment.level}
@@ -159,7 +159,7 @@ export function PropertiesPanel({
 
             <label className="grid gap-1">
               <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-[#68829A]">
-                Status
+                Estado
               </span>
               <select
                 value={node.status}
@@ -182,7 +182,7 @@ export function PropertiesPanel({
 
           <div className="rounded-[20px] border border-[rgba(0,229,229,0.08)] bg-[#080B10] p-3">
             <div className="mb-2 text-[10px] font-mono uppercase tracking-[0.2em] text-[#68829A]">
-              Assignment
+              Asignación
             </div>
             <div className="mb-2 flex items-center gap-2">
               <div
@@ -200,22 +200,22 @@ export function PropertiesPanel({
                 disabled={!editableAssignment}
                 className="rounded-full border border-[rgba(0,229,229,0.08)] px-3 py-1 text-xs text-[#C5D0DC] disabled:opacity-45"
               >
-                {node.assignment.specialist_name ?? node.assignment.specialist ?? 'Choose specialist'}
+                {node.assignment.specialist_name ?? node.assignment.specialist ?? 'Elegir especialista'}
               </button>
             </div>
             <div className="font-mono text-[11px] text-[#7E95AB]">
-              Model: {node.assignment.model_override ?? 'auto-tier'}
+              Modelo: {node.assignment.model_override ?? 'auto'}
             </div>
             {node.awaiting_approval && (
               <div className="mt-2 rounded-full border border-[rgba(255,190,112,0.18)] bg-[rgba(255,190,112,0.08)] px-3 py-1 text-[10px] font-mono uppercase tracking-[0.2em] text-[#F0B76A]">
-                Awaiting approval
+                Esperando aprobación
               </div>
             )}
           </div>
 
           <div>
             <div className="mb-2 text-[10px] font-mono uppercase tracking-[0.2em] text-[#68829A]">
-              Tools
+              Herramientas
             </div>
             <ToolSelector
               tools={tools}
@@ -227,19 +227,19 @@ export function PropertiesPanel({
 
           <div className="rounded-[20px] border border-[rgba(0,229,229,0.08)] bg-[#080B10] p-3">
             <div className="mb-2 text-[10px] font-mono uppercase tracking-[0.2em] text-[#68829A]">
-              Live Output
+              Output en vivo
             </div>
             <div className="max-h-40 overflow-y-auto whitespace-pre-wrap text-sm leading-6 text-[#D8E4EF]">
-              {node.liveOutput || node.result || node.last_message || 'No output yet.'}
+              {node.liveOutput || node.result || node.last_message || 'Sin output aún.'}
             </div>
           </div>
 
           <div className="rounded-[20px] border border-[rgba(0,229,229,0.08)] bg-[#080B10] p-3">
             <div className="mb-2 text-[10px] font-mono uppercase tracking-[0.2em] text-[#68829A]">
-              Dependencies
+              Dependencias
             </div>
             {dependencies.length === 0 ? (
-              <div className="text-sm text-[#8FA5BA]">No incoming dependencies.</div>
+              <div className="text-sm text-[#8FA5BA]">Sin dependencias entrantes.</div>
             ) : (
               <div className="space-y-2">
                 {dependencies.map((dependency) => (
@@ -258,10 +258,10 @@ export function PropertiesPanel({
           </div>
 
           <div className="grid gap-2 rounded-[20px] border border-[rgba(0,229,229,0.08)] bg-[#080B10] p-3 text-[12px] text-[#B7C9D7]">
-            <div>Cost: {formatCurrency(node.cost)}</div>
-            <div>Elapsed: {formatDuration(node.elapsed_ms)}</div>
+            <div>Costo: {formatCurrency(node.cost)}</div>
+            <div>Tiempo: {formatDuration(node.elapsed_ms)}</div>
             <div>Tokens: {node.tokens_in + node.tokens_out}</div>
-            <div>Retries: {node.retry_count}/{node.max_retries}</div>
+            <div>Reintentos: {node.retry_count}/{node.max_retries}</div>
           </div>
 
           <div className="flex flex-wrap gap-2">
@@ -271,7 +271,7 @@ export function PropertiesPanel({
               className="inline-flex items-center gap-2 rounded-full border border-[rgba(0,229,229,0.18)] bg-[rgba(0,229,229,0.08)] px-4 py-2 text-xs font-semibold text-[#00E5E5]"
             >
               <Save size={12} />
-              Save
+              Guardar
             </button>
             <button
               type="button"
@@ -279,14 +279,14 @@ export function PropertiesPanel({
               className="inline-flex items-center gap-2 rounded-full border border-[rgba(243,156,18,0.18)] px-4 py-2 text-xs font-semibold text-[#F6B24E]"
             >
               <RotateCcw size={12} />
-              Retry
+              Reintentar
             </button>
             <button
               type="button"
               onClick={() => onCancel(node.id)}
               className="rounded-full border border-[rgba(231,76,60,0.18)] px-4 py-2 text-xs font-semibold text-[#F07F76]"
             >
-              Cancel
+              Cancelar
             </button>
           </div>
         </div>
