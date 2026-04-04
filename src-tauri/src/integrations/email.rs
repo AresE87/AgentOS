@@ -148,6 +148,12 @@ impl GmailProvider {
         self.access_token.is_some()
     }
 
+    /// J1: Disconnect — clear all tokens
+    pub fn disconnect(&mut self) {
+        self.access_token = None;
+        self.refresh_token = None;
+    }
+
     // ── Gmail API methods ──────────────────────────────────────────
 
     /// List messages from Gmail

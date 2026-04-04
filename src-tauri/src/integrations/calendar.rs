@@ -178,6 +178,12 @@ impl GoogleCalendarProvider {
         }
     }
 
+    pub fn set_access_token(&mut self, token: &str) {
+        if !token.is_empty() {
+            self.access_token = Some(token.to_string());
+        }
+    }
+
     pub fn get_refresh_token(&self) -> Option<&str> {
         self.refresh_token.as_deref()
     }
@@ -186,13 +192,28 @@ impl GoogleCalendarProvider {
         self.access_token.is_some()
     }
 
-    /// List events from Google Calendar
+    /// J1: Disconnect — clear all tokens
+    pub fn disconnect(&mut self) {
+        self.access_token = None;
+        self.refresh_token = None;
+    }
+
+    /// J1: Get current scopes (based on what was requested during auth)
+    pub fn auth_scopes(&self) -> Vec<&str> {
+        if self.access_token.is_some() {
+            vec!["calendar", "calendar.events"]
+        } else {
+            vec![]
+        }
+    }
+
+    /// List events from Google Calendar (with automatic 401 retry via token refresh)
     pub async fn list_events_google(
-        &self,
+        &mut self,
         time_min: &str,
         time_max: &str,
     ) -> Result<Vec<CalendarEvent>, String> {
-        let token = self.access_token.as_ref().ok_or("Not authenticated")?;
+        let token = self.access_token.as_ref().ok_or("Not authenticated")?.clone();
         let url = format!(
             "{}/calendars/primary/events?timeMin={}&timeMax={}&singleEvents=true&orderBy=startTime&maxResults=50",
             GOOGLE_CALENDAR_API,
@@ -203,12 +224,26 @@ impl GoogleCalendarProvider {
         let response = self
             .client
             .get(&url)
-            .bearer_auth(token)
+            .bearer_auth(&token)
             .send()
             .await
             .map_err(|e| e.to_string())?;
 
-        let body: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+        // J1: If 401 Unauthorized, try refreshing the token and retry
+        let body: serde_json::Value = if response.status().as_u16() == 401 {
+            self.refresh_access_token().await?;
+            let new_token = self.access_token.as_ref().ok_or("Token refresh failed")?;
+            let retry_response = self
+                .client
+                .get(&url)
+                .bearer_auth(new_token)
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+            retry_response.json().await.map_err(|e| e.to_string())?
+        } else {
+            response.json().await.map_err(|e| e.to_string())?
+        };
 
         if let Some(err) = body.get("error") {
             return Err(format!("Google API error: {}", err));
@@ -276,12 +311,12 @@ impl GoogleCalendarProvider {
             .collect())
     }
 
-    /// Create event on Google Calendar
+    /// Create event on Google Calendar (with automatic 401 retry via token refresh)
     pub async fn create_event_google(
-        &self,
+        &mut self,
         event: &NewCalendarEvent,
     ) -> Result<CalendarEvent, String> {
-        let token = self.access_token.as_ref().ok_or("Not authenticated")?;
+        let token = self.access_token.as_ref().ok_or("Not authenticated")?.clone();
         let all_day = event.all_day.unwrap_or(false);
 
         let (start_body, end_body) = if all_day {
@@ -307,16 +342,32 @@ impl GoogleCalendarProvider {
                 .collect::<Vec<_>>()
         });
 
+        let create_url = format!("{}/calendars/primary/events", GOOGLE_CALENDAR_API);
         let response = self
             .client
-            .post(&format!("{}/calendars/primary/events", GOOGLE_CALENDAR_API))
-            .bearer_auth(token)
+            .post(&create_url)
+            .bearer_auth(&token)
             .json(&body)
             .send()
             .await
             .map_err(|e| e.to_string())?;
 
-        let result: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+        // J1: If 401, refresh token and retry
+        let result: serde_json::Value = if response.status().as_u16() == 401 {
+            self.refresh_access_token().await?;
+            let new_token = self.access_token.as_ref().ok_or("Token refresh failed")?;
+            let retry = self
+                .client
+                .post(&create_url)
+                .bearer_auth(new_token)
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+            retry.json().await.map_err(|e| e.to_string())?
+        } else {
+            response.json().await.map_err(|e| e.to_string())?
+        };
 
         if let Some(err) = result.get("error") {
             return Err(format!("Google API error: {}", err));
@@ -341,13 +392,13 @@ impl GoogleCalendarProvider {
         })
     }
 
-    /// Update event on Google Calendar
+    /// Update event on Google Calendar (with automatic 401 retry via token refresh)
     pub async fn update_event_google(
-        &self,
+        &mut self,
         event_id: &str,
         update: &UpdateCalendarEvent,
     ) -> Result<serde_json::Value, String> {
-        let token = self.access_token.as_ref().ok_or("Not authenticated")?;
+        let token = self.access_token.as_ref().ok_or("Not authenticated")?.clone();
 
         // Build a PATCH body with only the fields that are set
         let mut body = serde_json::Map::new();
@@ -382,19 +433,35 @@ impl GoogleCalendarProvider {
             );
         }
 
+        let patch_url = format!(
+            "{}/calendars/primary/events/{}",
+            GOOGLE_CALENDAR_API, event_id
+        );
         let response = self
             .client
-            .patch(&format!(
-                "{}/calendars/primary/events/{}",
-                GOOGLE_CALENDAR_API, event_id
-            ))
-            .bearer_auth(token)
-            .json(&serde_json::Value::Object(body))
+            .patch(&patch_url)
+            .bearer_auth(&token)
+            .json(&serde_json::Value::Object(body.clone()))
             .send()
             .await
             .map_err(|e| e.to_string())?;
 
-        let result: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+        // J1: If 401, refresh token and retry
+        let result: serde_json::Value = if response.status().as_u16() == 401 {
+            self.refresh_access_token().await?;
+            let new_token = self.access_token.as_ref().ok_or("Token refresh failed")?;
+            let retry = self
+                .client
+                .patch(&patch_url)
+                .bearer_auth(new_token)
+                .json(&serde_json::Value::Object(body))
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+            retry.json().await.map_err(|e| e.to_string())?
+        } else {
+            response.json().await.map_err(|e| e.to_string())?
+        };
 
         if let Some(err) = result.get("error") {
             return Err(format!("Google API error: {}", err));
@@ -403,19 +470,39 @@ impl GoogleCalendarProvider {
         Ok(result)
     }
 
-    /// Delete event from Google Calendar
-    pub async fn delete_event_google(&self, event_id: &str) -> Result<(), String> {
-        let token = self.access_token.as_ref().ok_or("Not authenticated")?;
+    /// Delete event from Google Calendar (with automatic 401 retry via token refresh)
+    pub async fn delete_event_google(&mut self, event_id: &str) -> Result<(), String> {
+        let token = self.access_token.as_ref().ok_or("Not authenticated")?.clone();
+        let delete_url = format!(
+            "{}/calendars/primary/events/{}",
+            GOOGLE_CALENDAR_API, event_id
+        );
         let response = self
             .client
-            .delete(&format!(
-                "{}/calendars/primary/events/{}",
-                GOOGLE_CALENDAR_API, event_id
-            ))
-            .bearer_auth(token)
+            .delete(&delete_url)
+            .bearer_auth(&token)
             .send()
             .await
             .map_err(|e| e.to_string())?;
+
+        // J1: If 401, refresh token and retry
+        if response.status().as_u16() == 401 {
+            self.refresh_access_token().await?;
+            let new_token = self.access_token.as_ref().ok_or("Token refresh failed")?;
+            let retry = self
+                .client
+                .delete(&delete_url)
+                .bearer_auth(new_token)
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+            let status = retry.status();
+            if !status.is_success() && status.as_u16() != 204 {
+                let body = retry.text().await.unwrap_or_default();
+                return Err(format!("Delete failed ({}): {}", status, body));
+            }
+            return Ok(());
+        }
 
         let status = response.status();
         if !status.is_success() && status.as_u16() != 204 {
@@ -630,9 +717,14 @@ impl CalendarManager {
 
     // ── Async Google-backed methods (called from Tauri commands) ────
 
+    /// J1: Disconnect Google Calendar — clear all tokens
+    pub fn disconnect_google(&mut self) {
+        self.google.disconnect();
+    }
+
     /// List events — prefers Google when authenticated, falls back to in-memory
     pub async fn list_events_async(
-        &self,
+        &mut self,
         from: NaiveDateTime,
         to: NaiveDateTime,
     ) -> Result<Vec<CalendarEvent>, String> {
@@ -723,13 +815,23 @@ impl CalendarManager {
         CalendarProvider::update_event(self, id, update)
     }
 
-    /// Delete event — prefers Google when authenticated
+    /// Delete event — prefers Google when authenticated (J1: with 401 retry)
     pub async fn delete_event_async(&mut self, id: &str) -> Result<bool, String> {
         if self.google.is_authenticated() {
             self.google.delete_event_google(id).await?;
             return Ok(true);
         }
         CalendarProvider::delete_event(self, id)
+    }
+
+    /// J1: Get authentication status with provider and scope details
+    pub fn auth_status_detailed(&self) -> serde_json::Value {
+        serde_json::json!({
+            "authenticated": self.google.is_authenticated(),
+            "provider": "google",
+            "has_refresh_token": self.google.get_refresh_token().is_some(),
+            "scopes": self.google.auth_scopes(),
+        })
     }
 }
 
