@@ -342,6 +342,10 @@ async fn cmd_process_message(
     app_handle: tauri::AppHandle,
     text: String,
 ) -> Result<serde_json::Value, String> {
+    // ── H2: Trace ID — correlate all events for this request ──────
+    let trace_id = uuid::Uuid::new_v4().to_string();
+    tracing::info!(trace_id = %trace_id, "Processing message");
+
     // ── H3: Input length cap — reject excessively large messages ──
     if text.len() > 100_000 {
         return Err("Message too long (max 100KB)".into());
@@ -350,7 +354,7 @@ async fn cmd_process_message(
     // ── R36: Security — sanitize input & rate-limit ──────────────
     let text = security::sanitizer::sanitize_input(&text, 10_000);
     if let Some(threat) = security::sanitizer::detect_injection(&text) {
-        tracing::warn!("Injection attempt detected: {}", threat);
+        tracing::warn!(trace_id = %trace_id, "Injection attempt detected: {}", threat);
         // Don't block — just log. The sandbox will catch dangerous commands.
     }
     state.rate_limiter.check("default").await.map_err(|e| user_friendly_error(&e))?;
@@ -475,6 +479,7 @@ async fn cmd_process_message(
 
         return Ok(serde_json::json!({
             "task_id": chain_id,
+            "trace_id": trace_id,
             "status": "running",
             "output": "Complex task started — check the Board for progress...",
             "model": "chain",
@@ -559,6 +564,7 @@ async fn cmd_process_message(
 
         return Ok(serde_json::json!({
             "task_id": task_id,
+            "trace_id": trace_id,
             "status": "running",
             "output": "Task started — the agent is working on it...",
             "model": "anthropic/sonnet",
@@ -694,6 +700,7 @@ Always be helpful, precise, and use tools judiciously.";
                 "tool_calls": tool_calls,
                 "iterations": turn.iterations,
                 "stop_reason": turn.stop_reason,
+                "trace_id": trace_id,
                 // Legacy compat fields
                 "task_id": ctx.task_id,
                 "status": "completed",
