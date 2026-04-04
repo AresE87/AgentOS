@@ -15,11 +15,22 @@ pub enum HookResult {
 // ── Hook traits ────────────────────────────────────────────────────
 
 pub trait PreToolHook: Send + Sync {
-    fn before_tool(&self, tool_name: &str, input: &serde_json::Value, ctx: &ToolContext) -> HookResult;
+    fn before_tool(
+        &self,
+        tool_name: &str,
+        input: &serde_json::Value,
+        ctx: &ToolContext,
+    ) -> HookResult;
 }
 
 pub trait PostToolHook: Send + Sync {
-    fn after_tool(&self, tool_name: &str, input: &serde_json::Value, output: &ToolOutput, ctx: &ToolContext);
+    fn after_tool(
+        &self,
+        tool_name: &str,
+        input: &serde_json::Value,
+        output: &ToolOutput,
+        ctx: &ToolContext,
+    );
 }
 
 // ── Hook registry ──────────────────────────────────────────────────
@@ -54,7 +65,12 @@ impl HookRegistry {
         self.post_hooks.push(hook);
     }
 
-    pub fn run_pre_hooks(&self, tool_name: &str, input: &serde_json::Value, ctx: &ToolContext) -> HookResult {
+    pub fn run_pre_hooks(
+        &self,
+        tool_name: &str,
+        input: &serde_json::Value,
+        ctx: &ToolContext,
+    ) -> HookResult {
         for hook in &self.pre_hooks {
             match hook.before_tool(tool_name, input, ctx) {
                 HookResult::Continue => continue,
@@ -64,7 +80,13 @@ impl HookRegistry {
         HookResult::Continue
     }
 
-    pub fn run_post_hooks(&self, tool_name: &str, input: &serde_json::Value, output: &ToolOutput, ctx: &ToolContext) {
+    pub fn run_post_hooks(
+        &self,
+        tool_name: &str,
+        input: &serde_json::Value,
+        output: &ToolOutput,
+        ctx: &ToolContext,
+    ) {
         for hook in &self.post_hooks {
             hook.after_tool(tool_name, input, output, ctx);
         }
@@ -76,7 +98,13 @@ impl HookRegistry {
 pub struct AuditHook;
 
 impl PostToolHook for AuditHook {
-    fn after_tool(&self, tool_name: &str, _input: &serde_json::Value, output: &ToolOutput, ctx: &ToolContext) {
+    fn after_tool(
+        &self,
+        tool_name: &str,
+        _input: &serde_json::Value,
+        output: &ToolOutput,
+        ctx: &ToolContext,
+    ) {
         let success = !output.is_error;
         info!(
             tool = tool_name,
@@ -107,7 +135,12 @@ impl PostToolHook for AuditHook {
 pub struct SafetyHook;
 
 impl PreToolHook for SafetyHook {
-    fn before_tool(&self, tool_name: &str, input: &serde_json::Value, _ctx: &ToolContext) -> HookResult {
+    fn before_tool(
+        &self,
+        tool_name: &str,
+        input: &serde_json::Value,
+        _ctx: &ToolContext,
+    ) -> HookResult {
         if tool_name == "bash" || tool_name == "execute_command" {
             if let Some(cmd) = input.get("command").and_then(|v| v.as_str()) {
                 // 6-layer bash validator (supersedes simple sandbox pattern check)
@@ -120,15 +153,11 @@ impl PreToolHook for SafetyHook {
                             reason
                         );
                         return HookResult::Block(reason);
-                    },
+                    }
                     crate::security::bash_validator::ValidationResult::Warn { message } => {
-                        warn!(
-                            tool = tool_name,
-                            "bash validator warning: {}",
-                            message
-                        );
-                    },
-                    crate::security::bash_validator::ValidationResult::Allow => {},
+                        warn!(tool = tool_name, "bash validator warning: {}", message);
+                    }
+                    crate::security::bash_validator::ValidationResult::Allow => {}
                 }
 
                 // Also run legacy sandbox patterns for defense-in-depth
@@ -165,7 +194,13 @@ impl CostHook {
 }
 
 impl PostToolHook for CostHook {
-    fn after_tool(&self, tool_name: &str, _input: &serde_json::Value, _output: &ToolOutput, ctx: &ToolContext) {
+    fn after_tool(
+        &self,
+        tool_name: &str,
+        _input: &serde_json::Value,
+        _output: &ToolOutput,
+        ctx: &ToolContext,
+    ) {
         if let Ok(mut map) = self.counters.lock() {
             let count = map.entry(ctx.task_id.clone()).or_insert(0);
             *count += 1;

@@ -61,7 +61,8 @@ impl Benchmarks {
         });
 
         // Benchmark: SQLite task insert on the real schema
-        let bench_dir = std::env::temp_dir().join(format!("agentos-bench-{}", uuid::Uuid::new_v4()));
+        let bench_dir =
+            std::env::temp_dir().join(format!("agentos-bench-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&bench_dir).expect("bench dir");
         let db_path = bench_dir.join("bench.db");
         let db = Database::new(&db_path).expect("db");
@@ -133,7 +134,8 @@ impl Benchmarks {
         });
 
         // Benchmark: structured logger append
-        let logger_dir = std::env::temp_dir().join(format!("agentos-bench-logs-{}", uuid::Uuid::new_v4()));
+        let logger_dir =
+            std::env::temp_dir().join(format!("agentos-bench-logs-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&logger_dir).expect("logger dir");
         let logger = StructuredLogger::new(logger_dir.clone());
         let start = Instant::now();

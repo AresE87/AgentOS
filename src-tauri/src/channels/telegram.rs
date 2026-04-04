@@ -281,8 +281,14 @@ pub async fn run_bot_loop(token: &str, settings: &crate::config::Settings) {
                 let error_str = e.to_string();
 
                 // J2: Detect invalid token (401/403 from Telegram API)
-                if error_str.contains("401") || error_str.contains("Unauthorized") || error_str.contains("403") {
-                    warn!("Telegram bot token appears invalid — stopping polling. Error: {}", error_str);
+                if error_str.contains("401")
+                    || error_str.contains("Unauthorized")
+                    || error_str.contains("403")
+                {
+                    warn!(
+                        "Telegram bot token appears invalid — stopping polling. Error: {}",
+                        error_str
+                    );
                     TELEGRAM_RUNNING.store(false, Ordering::Relaxed);
                     break;
                 }

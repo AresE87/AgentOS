@@ -191,7 +191,11 @@ impl OrgMarketplace {
             .transpose()
     }
 
-    pub fn set_branding(&self, org_id: &str, config: &BrandingConfig) -> Result<BrandingConfig, String> {
+    pub fn set_branding(
+        &self,
+        org_id: &str,
+        config: &BrandingConfig,
+    ) -> Result<BrandingConfig, String> {
         let conn = self.open()?;
         let now = chrono::Utc::now().to_rfc3339();
         conn.execute(
@@ -211,8 +215,11 @@ impl OrgMarketplace {
 
     pub fn reset_branding(&self, org_id: &str) -> Result<(), String> {
         let conn = self.open()?;
-        conn.execute("DELETE FROM org_branding WHERE org_id = ?1", params![org_id])
-            .map_err(|e| format!("Failed to reset org branding: {}", e))?;
+        conn.execute(
+            "DELETE FROM org_branding WHERE org_id = ?1",
+            params![org_id],
+        )
+        .map_err(|e| format!("Failed to reset org branding: {}", e))?;
         Ok(())
     }
 

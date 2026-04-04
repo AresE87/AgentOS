@@ -87,9 +87,11 @@ impl ComplianceReporter {
         let conn = Connection::open(&self.db_path)
             .map_err(|e| format!("Failed to open compliance DB: {}", e))?;
 
-        let approval_evidence = filter_approvals(approvals, &filters, &period_start_str, &period_end_str);
+        let approval_evidence =
+            filter_approvals(approvals, &filters, &period_start_str, &period_end_str);
         let handoff_evidence = query_handoffs(&conn, &filters, &period_start_str, &period_end_str)?;
-        let execution_evidence = query_execution_traces(&conn, &filters, &period_start_str, &period_end_str)?;
+        let execution_evidence =
+            query_execution_traces(&conn, &filters, &period_start_str, &period_end_str)?;
 
         let mut evidence = Vec::new();
         evidence.extend(approval_evidence.clone());
@@ -102,7 +104,8 @@ impl ComplianceReporter {
             .map(|_| true)
             .unwrap_or(false);
 
-        let checks = vec![
+        let checks =
+            vec![
             make_check(
                 framework,
                 "Approval evidence captured",
@@ -230,13 +233,17 @@ fn filter_approvals(
                 .unwrap_or(true)
         })
         .filter(|approval| {
-            filters.user.as_deref().map(|user| {
-                approval
-                    .response_by
-                    .as_deref()
-                    .map(|value| value.eq_ignore_ascii_case(user))
-                    .unwrap_or(false)
-            }).unwrap_or(true)
+            filters
+                .user
+                .as_deref()
+                .map(|user| {
+                    approval
+                        .response_by
+                        .as_deref()
+                        .map(|value| value.eq_ignore_ascii_case(user))
+                        .unwrap_or(false)
+                })
+                .unwrap_or(true)
         })
         .map(|approval| ComplianceEvidence {
             id: approval.id.clone(),
@@ -245,11 +252,7 @@ fn filter_approvals(
             actor: approval.response_by.clone(),
             agent_name: None,
             status: format!("{:?}", approval.status).to_lowercase(),
-            summary: format!(
-                "{} ({})",
-                approval.action_description,
-                approval.risk_level
-            ),
+            summary: format!("{} ({})", approval.action_description, approval.risk_level),
         })
         .collect()
 }
@@ -297,12 +300,16 @@ fn query_handoffs(
                 .unwrap_or(true)
         })
         .filter(|row| {
-            filters.user.as_deref().map(|user| {
-                row.actor
-                    .as_deref()
-                    .map(|actor| actor.eq_ignore_ascii_case(user))
-                    .unwrap_or(false)
-            }).unwrap_or(true)
+            filters
+                .user
+                .as_deref()
+                .map(|user| {
+                    row.actor
+                        .as_deref()
+                        .map(|actor| actor.eq_ignore_ascii_case(user))
+                        .unwrap_or(false)
+                })
+                .unwrap_or(true)
         })
         .collect())
 }
@@ -361,8 +368,8 @@ fn query_execution_traces(
 }
 
 fn build_artifacts(report: &ComplianceReport) -> Result<Vec<ComplianceArtifact>, String> {
-    let json_content =
-        serde_json::to_string_pretty(report).map_err(|e| format!("Failed to export JSON report: {}", e))?;
+    let json_content = serde_json::to_string_pretty(report)
+        .map_err(|e| format!("Failed to export JSON report: {}", e))?;
 
     let mut csv = String::from("source,id,occurred_at,status,actor,agent_name,summary\n");
     for item in &report.evidence {
@@ -386,7 +393,10 @@ fn build_artifacts(report: &ComplianceReport) -> Result<Vec<ComplianceArtifact>,
         },
         ComplianceArtifact {
             format: "csv".to_string(),
-            filename: format!("compliance-{}-evidence.csv", report.framework.to_lowercase()),
+            filename: format!(
+                "compliance-{}-evidence.csv",
+                report.framework.to_lowercase()
+            ),
             content: csv,
         },
     ])
@@ -467,7 +477,10 @@ mod tests {
         assert_eq!(report.artifacts.len(), 2);
         assert!(report.evidence.iter().any(|item| item.source == "approval"));
         assert!(report.evidence.iter().any(|item| item.source == "handoff"));
-        assert!(report.evidence.iter().any(|item| item.source == "execution"));
+        assert!(report
+            .evidence
+            .iter()
+            .any(|item| item.source == "execution"));
     }
 
     #[test]
@@ -550,6 +563,9 @@ mod tests {
         assert_eq!(report.summary.handoffs_count, 0);
         assert_eq!(report.summary.executions_count, 1);
         assert_eq!(report.evidence.len(), 1);
-        assert_eq!(report.evidence[0].agent_name.as_deref(), Some("PC Controller"));
+        assert_eq!(
+            report.evidence[0].agent_name.as_deref(),
+            Some("PC Controller")
+        );
     }
 }

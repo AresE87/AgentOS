@@ -695,10 +695,7 @@ pub async fn refresh_google_token(
 }
 
 /// Trash a Gmail message by ID.
-pub async fn gmail_trash_message(
-    access_token: &str,
-    msg_id: &str,
-) -> Result<(), String> {
+pub async fn gmail_trash_message(access_token: &str, msg_id: &str) -> Result<(), String> {
     let client = Client::new();
     let resp = client
         .post(format!("{}/messages/{}/trash", GMAIL_API, msg_id))
@@ -714,9 +711,7 @@ pub async fn gmail_trash_message(
 }
 
 /// List Gmail labels for the authenticated user.
-pub async fn gmail_list_labels(
-    access_token: &str,
-) -> Result<Vec<serde_json::Value>, String> {
+pub async fn gmail_list_labels(access_token: &str) -> Result<Vec<serde_json::Value>, String> {
     let client = Client::new();
     let resp = client
         .get(format!("{}/labels", GMAIL_API))

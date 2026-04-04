@@ -4,7 +4,9 @@ pub struct MemorySearchTool;
 
 #[async_trait::async_trait]
 impl Tool for MemorySearchTool {
-    fn name(&self) -> &str { "memory_search" }
+    fn name(&self) -> &str {
+        "memory_search"
+    }
 
     fn description(&self) -> &str {
         "Search the agent's long-term memory store. Returns matching memories ordered by importance."
@@ -20,10 +22,18 @@ impl Tool for MemorySearchTool {
         })
     }
 
-    fn permission_level(&self) -> PermissionLevel { PermissionLevel::ReadOnly }
+    fn permission_level(&self) -> PermissionLevel {
+        PermissionLevel::ReadOnly
+    }
 
-    async fn execute(&self, input: serde_json::Value, ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
-        let query = input.get("query").and_then(|v| v.as_str())
+    async fn execute(
+        &self,
+        input: serde_json::Value,
+        ctx: &ToolContext,
+    ) -> Result<ToolOutput, ToolError> {
+        let query = input
+            .get("query")
+            .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError("Missing 'query' parameter".into()))?;
 
         let conn = rusqlite::Connection::open(&ctx.db_path)
@@ -39,9 +49,15 @@ impl Tool for MemorySearchTool {
             });
         }
 
-        let formatted: Vec<String> = memories.iter().map(|m| {
-            format!("[{}] (importance: {:.2}) {}", m.category, m.importance, m.content)
-        }).collect();
+        let formatted: Vec<String> = memories
+            .iter()
+            .map(|m| {
+                format!(
+                    "[{}] (importance: {:.2}) {}",
+                    m.category, m.importance, m.content
+                )
+            })
+            .collect();
 
         Ok(ToolOutput {
             content: formatted.join("\n\n"),

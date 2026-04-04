@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use super::trait_def::{Tool, ToolDefinition};
+use std::collections::HashMap;
 
 pub struct ToolRegistry {
     tools: HashMap<String, Box<dyn Tool>>,
@@ -7,7 +7,9 @@ pub struct ToolRegistry {
 
 impl ToolRegistry {
     pub fn new() -> Self {
-        Self { tools: HashMap::new() }
+        Self {
+            tools: HashMap::new(),
+        }
     }
 
     pub fn register(&mut self, tool: Box<dyn Tool>) {
@@ -19,21 +21,27 @@ impl ToolRegistry {
     }
 
     pub fn definitions(&self) -> Vec<ToolDefinition> {
-        self.tools.values().map(|t| ToolDefinition {
-            name: t.name().to_string(),
-            description: t.description().to_string(),
-            input_schema: t.input_schema(),
-        }).collect()
-    }
-
-    pub fn definitions_for_tools(&self, tool_names: &[String]) -> Vec<ToolDefinition> {
-        tool_names.iter().filter_map(|name| {
-            self.tools.get(name).map(|t| ToolDefinition {
+        self.tools
+            .values()
+            .map(|t| ToolDefinition {
                 name: t.name().to_string(),
                 description: t.description().to_string(),
                 input_schema: t.input_schema(),
             })
-        }).collect()
+            .collect()
+    }
+
+    pub fn definitions_for_tools(&self, tool_names: &[String]) -> Vec<ToolDefinition> {
+        tool_names
+            .iter()
+            .filter_map(|name| {
+                self.tools.get(name).map(|t| ToolDefinition {
+                    name: t.name().to_string(),
+                    description: t.description().to_string(),
+                    input_schema: t.input_schema(),
+                })
+            })
+            .collect()
     }
 
     pub fn tool_names(&self) -> Vec<String> {

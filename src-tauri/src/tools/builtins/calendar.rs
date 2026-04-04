@@ -4,7 +4,9 @@ pub struct CalendarTool;
 
 #[async_trait::async_trait]
 impl Tool for CalendarTool {
-    fn name(&self) -> &str { "calendar" }
+    fn name(&self) -> &str {
+        "calendar"
+    }
 
     fn description(&self) -> &str {
         "Manage calendar events. Actions: list (upcoming events), create (new event), delete (remove event by id). Uses local SQLite-backed event store."
@@ -24,10 +26,18 @@ impl Tool for CalendarTool {
         })
     }
 
-    fn permission_level(&self) -> PermissionLevel { PermissionLevel::Write }
+    fn permission_level(&self) -> PermissionLevel {
+        PermissionLevel::Write
+    }
 
-    async fn execute(&self, input: serde_json::Value, ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
-        let action = input.get("action").and_then(|v| v.as_str())
+    async fn execute(
+        &self,
+        input: serde_json::Value,
+        ctx: &ToolContext,
+    ) -> Result<ToolOutput, ToolError> {
+        let action = input
+            .get("action")
+            .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError("Missing 'action' parameter".into()))?;
 
         let conn = rusqlite::Connection::open(&ctx.db_path)
@@ -41,8 +51,9 @@ impl Tool for CalendarTool {
                 start_time TEXT NOT NULL,
                 end_time TEXT NOT NULL,
                 created_at TEXT DEFAULT (datetime('now'))
-            );"
-        ).map_err(|e| ToolError(format!("Table init failed: {}", e)))?;
+            );",
+        )
+        .map_err(|e| ToolError(format!("Table init failed: {}", e)))?;
 
         match action {
             "list" => {
@@ -50,25 +61,33 @@ impl Tool for CalendarTool {
                     "SELECT id, title, start_time, end_time FROM tool_calendar_events ORDER BY start_time ASC LIMIT 50"
                 ).map_err(|e| ToolError(format!("Query failed: {}", e)))?;
 
-                let rows: Vec<String> = stmt.query_map([], |row| {
-                    let id: String = row.get(0)?;
-                    let title: String = row.get(1)?;
-                    let start: String = row.get(2)?;
-                    let end: String = row.get(3)?;
-                    Ok(format!("[{}] {} ({} - {})", id, title, start, end))
-                }).map_err(|e| ToolError(format!("Query failed: {}", e)))?
-                .filter_map(|r| r.ok())
-                .collect();
+                let rows: Vec<String> = stmt
+                    .query_map([], |row| {
+                        let id: String = row.get(0)?;
+                        let title: String = row.get(1)?;
+                        let start: String = row.get(2)?;
+                        let end: String = row.get(3)?;
+                        Ok(format!("[{}] {} ({} - {})", id, title, start, end))
+                    })
+                    .map_err(|e| ToolError(format!("Query failed: {}", e)))?
+                    .filter_map(|r| r.ok())
+                    .collect();
 
                 let content = if rows.is_empty() {
                     "No calendar events found.".to_string()
                 } else {
                     rows.join("\n")
                 };
-                Ok(ToolOutput { content, is_error: false })
+                Ok(ToolOutput {
+                    content,
+                    is_error: false,
+                })
             }
             "create" => {
-                let title = input.get("title").and_then(|v| v.as_str()).unwrap_or("Untitled");
+                let title = input
+                    .get("title")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Untitled");
                 let start = input.get("start").and_then(|v| v.as_str()).unwrap_or("");
                 let end = input.get("end").and_then(|v| v.as_str()).unwrap_or("");
                 let id = uuid::Uuid::new_v4().to_string();
@@ -84,18 +103,28 @@ impl Tool for CalendarTool {
                 })
             }
             "delete" => {
-                let event_id = input.get("event_id").and_then(|v| v.as_str())
+                let event_id = input
+                    .get("event_id")
+                    .and_then(|v| v.as_str())
                     .ok_or_else(|| ToolError("Missing 'event_id' for delete".into()))?;
 
-                let deleted = conn.execute(
-                    "DELETE FROM tool_calendar_events WHERE id = ?1",
-                    rusqlite::params![event_id],
-                ).map_err(|e| ToolError(format!("Delete failed: {}", e)))?;
+                let deleted = conn
+                    .execute(
+                        "DELETE FROM tool_calendar_events WHERE id = ?1",
+                        rusqlite::params![event_id],
+                    )
+                    .map_err(|e| ToolError(format!("Delete failed: {}", e)))?;
 
                 if deleted == 0 {
-                    Ok(ToolOutput { content: format!("No event found with id: {}", event_id), is_error: true })
+                    Ok(ToolOutput {
+                        content: format!("No event found with id: {}", event_id),
+                        is_error: true,
+                    })
                 } else {
-                    Ok(ToolOutput { content: format!("Deleted event: {}", event_id), is_error: false })
+                    Ok(ToolOutput {
+                        content: format!("Deleted event: {}", event_id),
+                        is_error: false,
+                    })
                 }
             }
             _ => Ok(ToolOutput {

@@ -1,6 +1,6 @@
+use crate::enterprise::AuditLog;
 use crate::enterprise::OrgManager;
 use crate::users::UserManager;
-use crate::enterprise::AuditLog;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -346,7 +346,9 @@ impl ApprovalManager {
     pub fn seed_default_permissions(conn: &Connection) -> Result<(), String> {
         Self::ensure_permission_tables(conn)?;
         let existing: i64 = conn
-            .query_row("SELECT COUNT(*) FROM permission_grants", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM permission_grants", [], |row| {
+                row.get(0)
+            })
             .map_err(|e| e.to_string())?;
         if existing > 0 {
             return Ok(());
@@ -442,11 +444,16 @@ impl ApprovalManager {
                         org_id: row.get(2)?,
                         agent_name: row.get(3)?,
                         capability: PermissionCapability::from_str(&capability_raw).map_err(
-                            |e| rusqlite::Error::FromSqlConversionFailure(
-                                4,
-                                rusqlite::types::Type::Text,
-                                Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
-                            ),
+                            |e| {
+                                rusqlite::Error::FromSqlConversionFailure(
+                                    4,
+                                    rusqlite::types::Type::Text,
+                                    Box::new(std::io::Error::new(
+                                        std::io::ErrorKind::InvalidData,
+                                        e,
+                                    )),
+                                )
+                            },
                         )?,
                         allow: row.get::<_, i64>(5)? != 0,
                         reason: row.get(6)?,
@@ -589,7 +596,8 @@ impl ApprovalManager {
             org_id,
             enforced: true,
             notes: if vault_unlocked {
-                "Vault is unlocked and sensitive operations still require explicit capabilities".to_string()
+                "Vault is unlocked and sensitive operations still require explicit capabilities"
+                    .to_string()
             } else {
                 "Vault is locked; secret reads and writes remain blocked at runtime".to_string()
             },
@@ -598,7 +606,9 @@ impl ApprovalManager {
         Ok(boundaries)
     }
 
-    pub fn audit_permission_enforcement(conn: &Connection) -> Result<PermissionAuditReport, String> {
+    pub fn audit_permission_enforcement(
+        conn: &Connection,
+    ) -> Result<PermissionAuditReport, String> {
         Self::seed_default_permissions(conn)?;
         AuditLog::ensure_table(conn)?;
         let (user_id, org_id) = Self::current_scope(conn)?;
@@ -613,7 +623,12 @@ impl ApprovalManager {
                 .filter(|entry| {
                     serde_json::from_str::<serde_json::Value>(&entry.details)
                         .ok()
-                        .and_then(|value| value.get("capability").and_then(|v| v.as_str()).map(str::to_string))
+                        .and_then(|value| {
+                            value
+                                .get("capability")
+                                .and_then(|v| v.as_str())
+                                .map(str::to_string)
+                        })
                         .map(|value| value == capability.as_str())
                         .unwrap_or(false)
                 })
@@ -641,7 +656,9 @@ impl ApprovalManager {
 
         let enforced_capabilities = findings
             .iter()
-            .filter(|finding| finding.status == "enforced" || finding.status == "granted_not_exercised")
+            .filter(|finding| {
+                finding.status == "enforced" || finding.status == "granted_not_exercised"
+            })
             .count();
         let denied_capabilities = findings
             .iter()
@@ -799,7 +816,9 @@ mod tests {
         let audit = ApprovalManager::audit_permission_enforcement(&conn).unwrap();
 
         assert!(boundaries.iter().any(|item| item.name == "Vault Read"));
-        assert!(boundaries.iter().any(|item| item.id == "boundary-api-surface"));
+        assert!(boundaries
+            .iter()
+            .any(|item| item.id == "boundary-api-surface"));
         assert!(audit
             .findings
             .iter()

@@ -259,7 +259,11 @@ impl WhatsAppChannel {
             ));
         }
 
-        Err(format!("WhatsApp API returned HTTP {}: {}", status.as_u16(), body))
+        Err(format!(
+            "WhatsApp API returned HTTP {}: {}",
+            status.as_u16(),
+            body
+        ))
     }
 }
 

@@ -6,7 +6,7 @@ pub mod retention;
 pub use gdpr::GDPRManager;
 pub use privacy::PrivacySettings;
 pub use reporter::{
-    ComplianceArtifact, ComplianceCheck, ComplianceEvidence, ComplianceFilters,
-    ComplianceReport, ComplianceReporter, ComplianceSummary,
+    ComplianceArtifact, ComplianceCheck, ComplianceEvidence, ComplianceFilters, ComplianceReport,
+    ComplianceReporter, ComplianceSummary,
 };
 pub use retention::RetentionPolicy;

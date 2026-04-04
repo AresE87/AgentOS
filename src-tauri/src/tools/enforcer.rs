@@ -89,7 +89,10 @@ mod tests {
     #[test]
     fn allows_workspace_writes() {
         assert!(matches!(
-            check_file_write("C:\\Users\\me\\project\\src\\main.rs", "C:\\Users\\me\\project"),
+            check_file_write(
+                "C:\\Users\\me\\project\\src\\main.rs",
+                "C:\\Users\\me\\project"
+            ),
             EnforcementResult::Allowed
         ));
         assert!(matches!(
@@ -152,7 +155,10 @@ mod tests {
     #[test]
     fn blocks_program_files() {
         assert!(matches!(
-            check_file_write("C:\\Program Files\\app\\config.ini", "C:\\Users\\me\\project"),
+            check_file_write(
+                "C:\\Program Files\\app\\config.ini",
+                "C:\\Users\\me\\project"
+            ),
             EnforcementResult::Denied { .. }
         ));
     }
@@ -160,7 +166,10 @@ mod tests {
     #[test]
     fn blocks_program_files_x86() {
         assert!(matches!(
-            check_file_write("C:\\Program Files (x86)\\app\\config.ini", "C:\\Users\\me\\project"),
+            check_file_write(
+                "C:\\Program Files (x86)\\app\\config.ini",
+                "C:\\Users\\me\\project"
+            ),
             EnforcementResult::Denied { .. }
         ));
     }

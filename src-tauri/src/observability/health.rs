@@ -121,7 +121,11 @@ impl HealthDashboard {
 
         components.push(ComponentHealth {
             name: "API Server".into(),
-            status: if api_enabled { "ok".into() } else { "warning".into() },
+            status: if api_enabled {
+                "ok".into()
+            } else {
+                "warning".into()
+            },
             details: if api_enabled {
                 "Public API enabled".into()
             } else {
@@ -132,7 +136,11 @@ impl HealthDashboard {
 
         components.push(ComponentHealth {
             name: "Vault".into(),
-            status: if vault_unlocked { "ok".into() } else { "warning".into() },
+            status: if vault_unlocked {
+                "ok".into()
+            } else {
+                "warning".into()
+            },
             details: if vault_unlocked {
                 "Secrets loaded from secure vault".into()
             } else {
@@ -216,11 +224,7 @@ impl HealthDashboard {
         } else {
             (2000.0 / p95_latency_ms * 100.0).min(100.0)
         };
-        let handoff_sli = if open_handoffs == 0 {
-            100.0
-        } else {
-            0.0
-        };
+        let handoff_sli = if open_handoffs == 0 { 100.0 } else { 0.0 };
 
         let objectives = vec![
             build_objective("task_success_rate", success_sli, 99.0),
@@ -367,8 +371,12 @@ mod tests {
             [],
         )
         .unwrap();
-        AuditLog::log(&conn, "reliability_alert", serde_json::json!({ "component": "tasks" }))
-            .unwrap();
+        AuditLog::log(
+            &conn,
+            "reliability_alert",
+            serde_json::json!({ "component": "tasks" }),
+        )
+        .unwrap();
 
         let report = HealthDashboard::reliability_report(&conn, 30);
 

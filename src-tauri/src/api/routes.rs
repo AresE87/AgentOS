@@ -13,7 +13,11 @@ use super::server::ApiState;
 
 type ApiResult = Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)>;
 
-fn api_error(status: StatusCode, code: &str, message: impl Into<String>) -> (StatusCode, Json<serde_json::Value>) {
+fn api_error(
+    status: StatusCode,
+    code: &str,
+    message: impl Into<String>,
+) -> (StatusCode, Json<serde_json::Value>) {
     (
         status,
         Json(serde_json::json!({
@@ -29,15 +33,33 @@ fn extract_bearer(headers: &HeaderMap) -> Option<String> {
     Some(token.to_string())
 }
 
-fn validate_auth(state: &ApiState, headers: &HeaderMap) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
-    let token = extract_bearer(headers)
-        .ok_or_else(|| api_error(StatusCode::UNAUTHORIZED, "missing_authorization", "Missing Authorization header"))?;
+fn validate_auth(
+    state: &ApiState,
+    headers: &HeaderMap,
+) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
+    let token = extract_bearer(headers).ok_or_else(|| {
+        api_error(
+            StatusCode::UNAUTHORIZED,
+            "missing_authorization",
+            "Missing Authorization header",
+        )
+    })?;
 
-    let conn = rusqlite::Connection::open(&state.db_path)
-        .map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, "db_open_failed", e.to_string()))?;
+    let conn = rusqlite::Connection::open(&state.db_path).map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "db_open_failed",
+            e.to_string(),
+        )
+    })?;
 
-    let valid = auth::validate_api_key(&conn, &token)
-        .map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, "api_key_validation_failed", e))?;
+    let valid = auth::validate_api_key(&conn, &token).map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "api_key_validation_failed",
+            e,
+        )
+    })?;
 
     if valid {
         Ok(())
@@ -119,11 +141,13 @@ pub async fn post_message(
         text: body.text.clone(),
     };
 
-    state
-        .task_sender
-        .send(api_task)
-        .await
-        .map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, "task_queue_failed", e.to_string()))?;
+    state.task_sender.send(api_task).await.map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "task_queue_failed",
+            e.to_string(),
+        )
+    })?;
 
     Ok(Json(serde_json::json!({
         "task_id": task_id,
@@ -165,11 +189,7 @@ pub async fn list_tasks(
             })
         })
         .collect();
-    tasks.sort_by(|a, b| {
-        b["created_at"]
-            .as_str()
-            .cmp(&a["created_at"].as_str())
-    });
+    tasks.sort_by(|a, b| b["created_at"].as_str().cmp(&a["created_at"].as_str()));
     tasks.truncate(limit);
 
     Ok(Json(serde_json::json!({
@@ -234,8 +254,13 @@ pub async fn stripe_webhook(
 
     if let Some(new_plan) = plan_change {
         tracing::info!("Stripe webhook: updating plan to '{}'", new_plan);
-        let conn = rusqlite::Connection::open(&state.db_path)
-            .map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, "db_open_failed", e.to_string()))?;
+        let conn = rusqlite::Connection::open(&state.db_path).map_err(|e| {
+            api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_open_failed",
+                e.to_string(),
+            )
+        })?;
 
         conn.execute(
             "INSERT INTO daily_usage (date, tasks_count, tokens_used, plan_type) VALUES (date('now'), 0, 0, ?1)
@@ -275,8 +300,8 @@ pub async fn stripe_webhook(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::http::HeaderValue;
     use crate::api::server;
+    use axum::http::HeaderValue;
     use tempfile::tempdir;
 
     fn make_headers(token: Option<&str>) -> HeaderMap {
@@ -321,7 +346,9 @@ mod tests {
     #[tokio::test]
     async fn status_requires_authorization() {
         let (state, _key, _dir, _rx) = test_state();
-        let error = get_status(HeaderMap::new(), State(state)).await.unwrap_err();
+        let error = get_status(HeaderMap::new(), State(state))
+            .await
+            .unwrap_err();
         assert_eq!(error.0, StatusCode::UNAUTHORIZED);
         assert_eq!(error.1 .0["error"], "missing_authorization");
     }

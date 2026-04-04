@@ -4,7 +4,9 @@ pub struct TypeTextTool;
 
 #[async_trait::async_trait]
 impl Tool for TypeTextTool {
-    fn name(&self) -> &str { "type_text" }
+    fn name(&self) -> &str {
+        "type_text"
+    }
 
     fn description(&self) -> &str {
         "Type text using simulated keyboard input. The text is typed character by character at the current cursor position."
@@ -20,10 +22,18 @@ impl Tool for TypeTextTool {
         })
     }
 
-    fn permission_level(&self) -> PermissionLevel { PermissionLevel::Execute }
+    fn permission_level(&self) -> PermissionLevel {
+        PermissionLevel::Execute
+    }
 
-    async fn execute(&self, input: serde_json::Value, _ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
-        let text = input.get("text").and_then(|v| v.as_str())
+    async fn execute(
+        &self,
+        input: serde_json::Value,
+        _ctx: &ToolContext,
+    ) -> Result<ToolOutput, ToolError> {
+        let text = input
+            .get("text")
+            .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError("Missing 'text' parameter".into()))?;
 
         crate::hands::input::type_text(text)

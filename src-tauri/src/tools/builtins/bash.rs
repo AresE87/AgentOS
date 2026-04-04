@@ -4,7 +4,9 @@ pub struct BashTool;
 
 #[async_trait::async_trait]
 impl Tool for BashTool {
-    fn name(&self) -> &str { "bash" }
+    fn name(&self) -> &str {
+        "bash"
+    }
 
     fn description(&self) -> &str {
         "Execute a shell command (PowerShell on Windows, bash on Linux/macOS). Returns stdout, stderr, and exit code."
@@ -20,22 +22,33 @@ impl Tool for BashTool {
         })
     }
 
-    fn permission_level(&self) -> PermissionLevel { PermissionLevel::Execute }
+    fn permission_level(&self) -> PermissionLevel {
+        PermissionLevel::Execute
+    }
 
-    async fn execute(&self, input: serde_json::Value, _ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
-        let command = input.get("command").and_then(|v| v.as_str())
+    async fn execute(
+        &self,
+        input: serde_json::Value,
+        _ctx: &ToolContext,
+    ) -> Result<ToolOutput, ToolError> {
+        let command = input
+            .get("command")
+            .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError("Missing 'command' parameter".into()))?;
 
         // 6-layer bash validation
         let validation = crate::security::bash_validator::validate_command(command, false);
         match validation {
             crate::security::bash_validator::ValidationResult::Block { reason } => {
-                return Ok(ToolOutput { content: format!("BLOCKED: {}", reason), is_error: true });
-            },
+                return Ok(ToolOutput {
+                    content: format!("BLOCKED: {}", reason),
+                    is_error: true,
+                });
+            }
             crate::security::bash_validator::ValidationResult::Warn { message } => {
                 tracing::warn!("Bash warning: {}", message);
-            },
-            crate::security::bash_validator::ValidationResult::Allow => {},
+            }
+            crate::security::bash_validator::ValidationResult::Allow => {}
         }
 
         let output = if cfg!(windows) {
@@ -59,7 +72,12 @@ impl Tool for BashTool {
         let result = if stderr.is_empty() {
             stdout.trim().to_string()
         } else {
-            format!("stdout:\n{}\nstderr:\n{}\nexit_code: {}", stdout.trim(), stderr.trim(), exit_code)
+            format!(
+                "stdout:\n{}\nstderr:\n{}\nexit_code: {}",
+                stdout.trim(),
+                stderr.trim(),
+                exit_code
+            )
         };
 
         // Truncate to 50KB
@@ -69,6 +87,9 @@ impl Tool for BashTool {
             result
         };
 
-        Ok(ToolOutput { content: truncated, is_error: exit_code != 0 })
+        Ok(ToolOutput {
+            content: truncated,
+            is_error: exit_code != 0,
+        })
     }
 }

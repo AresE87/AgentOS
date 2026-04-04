@@ -5,7 +5,9 @@ pub struct SearchFilesTool;
 
 #[async_trait::async_trait]
 impl Tool for SearchFilesTool {
-    fn name(&self) -> &str { "search_files" }
+    fn name(&self) -> &str {
+        "search_files"
+    }
 
     fn description(&self) -> &str {
         "Search for files matching a pattern (substring match on file names). Walks the directory tree and returns matching file paths."
@@ -22,10 +24,18 @@ impl Tool for SearchFilesTool {
         })
     }
 
-    fn permission_level(&self) -> PermissionLevel { PermissionLevel::ReadOnly }
+    fn permission_level(&self) -> PermissionLevel {
+        PermissionLevel::ReadOnly
+    }
 
-    async fn execute(&self, input: serde_json::Value, _ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
-        let pattern = input.get("pattern").and_then(|v| v.as_str())
+    async fn execute(
+        &self,
+        input: serde_json::Value,
+        _ctx: &ToolContext,
+    ) -> Result<ToolOutput, ToolError> {
+        let pattern = input
+            .get("pattern")
+            .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError("Missing 'pattern' parameter".into()))?;
         let search_path = input.get("path").and_then(|v| v.as_str()).unwrap_or(".");
 
@@ -75,9 +85,17 @@ impl Tool for SearchFilesTool {
             } else {
                 String::new()
             };
-            format!("Found {} files:\n{}{}", matches.len(), matches.join("\n"), truncated)
+            format!(
+                "Found {} files:\n{}{}",
+                matches.len(),
+                matches.join("\n"),
+                truncated
+            )
         };
 
-        Ok(ToolOutput { content: result, is_error: false })
+        Ok(ToolOutput {
+            content: result,
+            is_error: false,
+        })
     }
 }

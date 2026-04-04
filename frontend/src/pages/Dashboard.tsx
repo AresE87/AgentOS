@@ -23,7 +23,7 @@ import { useAgent } from '../hooks/useAgent';
 import HomePg from './dashboard/Home';
 import Playbooks from './dashboard/Playbooks';
 import Chat from './dashboard/Chat';
-import Board from './dashboard/Board';
+import CommandCenter from './dashboard/CommandCenter';
 import SettingsPg from './dashboard/Settings';
 import Mesh from './dashboard/Mesh';
 import Analytics from './dashboard/Analytics';
@@ -60,7 +60,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { id: 'home', label: 'Home', icon: Home, section: 'main', shortcut: '1' },
   { id: 'chat', label: 'Chat', icon: MessageSquare, section: 'main', shortcut: '2' },
-  { id: 'board', label: 'Board', icon: LayoutDashboard, section: 'main', shortcut: '3' },
+  { id: 'board', label: 'Command', icon: LayoutDashboard, section: 'main', shortcut: '3' },
   { id: 'playbooks', label: 'Playbooks', icon: BookOpen, section: 'main', shortcut: '4' },
   { id: 'mesh', label: 'Mesh', icon: Network, section: 'main', shortcut: '5' },
   { id: 'analytics', label: 'Analytics', icon: BarChart3, section: 'main', shortcut: '6' },
@@ -74,7 +74,7 @@ const NAV_ITEMS: NavItem[] = [
 const TAB_LABELS: Record<Tab, string> = {
   home: 'Home',
   chat: 'Chat',
-  board: 'Task Board',
+  board: 'Command Center',
   playbooks: 'Playbooks',
   mesh: 'Agent Mesh',
   analytics: 'Analytics',
@@ -423,7 +423,7 @@ export default function Dashboard({ onResetWizard }: DashboardProps) {
           {activeTab === 'home' && <HomePg />}
           {activeTab === 'playbooks' && <Playbooks />}
           {activeTab === 'chat' && <Chat />}
-          {activeTab === 'board' && <Board />}
+          {activeTab === 'board' && <CommandCenter />}
           {activeTab === 'mesh' && <Mesh />}
           {activeTab === 'analytics' && <Analytics />}
           {activeTab === 'developer' && <Developer />}

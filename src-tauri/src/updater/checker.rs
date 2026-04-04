@@ -153,10 +153,7 @@ impl UpdateChecker {
     /// Launch the downloaded installer and optionally exit the current process
     pub fn install_update(installer_path: &Path) -> Result<(), String> {
         if !installer_path.exists() {
-            return Err(format!(
-                "Installer not found: {}",
-                installer_path.display()
-            ));
+            return Err(format!("Installer not found: {}", installer_path.display()));
         }
 
         info!(path = %installer_path.display(), "Launching update installer...");

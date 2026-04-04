@@ -1,20 +1,58 @@
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tauri::Emitter;
 
 use super::types::*;
-use crate::tools::{ToolRegistry, ToolContext, check_tool_permission, PermissionDecision};
-use crate::tools::hooks::{HookRegistry, HookResult};
 use crate::brain::Gateway;
 use crate::config::Settings;
+use crate::tools::hooks::{HookRegistry, HookResult};
+use crate::tools::{check_tool_permission, PermissionDecision, ToolContext, ToolRegistry};
 
+#[derive(Clone)]
 pub struct AgentRuntime {
     config: AgentLoopConfig,
+    restricted_system_prompt: Option<String>,
+    restricted_tools: Option<Vec<String>>,
+    model_tier_override: Option<String>,
 }
 
 impl AgentRuntime {
     pub fn new(config: AgentLoopConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            restricted_system_prompt: None,
+            restricted_tools: None,
+            model_tier_override: None,
+        }
+    }
+
+    pub fn new_with_restrictions(
+        system_prompt: String,
+        allowed_tools: Vec<String>,
+        model_tier: String,
+        max_iterations: u32,
+    ) -> Self {
+        Self {
+            config: AgentLoopConfig {
+                max_iterations,
+                ..AgentLoopConfig::default()
+            },
+            restricted_system_prompt: Some(system_prompt),
+            restricted_tools: Some(allowed_tools),
+            model_tier_override: Some(model_tier),
+        }
+    }
+
+    pub fn restricted_system_prompt(&self) -> Option<&str> {
+        self.restricted_system_prompt.as_deref()
+    }
+
+    pub fn restricted_tools(&self) -> Option<&[String]> {
+        self.restricted_tools.as_deref()
+    }
+
+    pub fn model_tier_override(&self) -> Option<&str> {
+        self.model_tier_override.as_deref()
     }
 
     /// The core agent loop: calls LLM, executes tool_use blocks, feeds results back,
@@ -32,6 +70,7 @@ impl AgentRuntime {
         event_emitter: Option<&tauri::AppHandle>,
         session_store: Option<&crate::agent_loop::session::SessionStore>,
         session_id: Option<&str>,
+        coordinator_scope: Option<(&str, &str)>,
     ) -> Result<AgentTurnResult, String> {
         // Create hook registry with default hooks
         let hook_registry = HookRegistry::with_defaults();
@@ -49,6 +88,7 @@ impl AgentRuntime {
             &hook_registry,
             session_store,
             session_id,
+            coordinator_scope,
         )
         .await
     }
@@ -68,6 +108,7 @@ impl AgentRuntime {
         hook_registry: &HookRegistry,
         session_store: Option<&crate::agent_loop::session::SessionStore>,
         session_id: Option<&str>,
+        coordinator_scope: Option<(&str, &str)>,
     ) -> Result<AgentTurnResult, String> {
         let user_msg = serde_json::json!({
             "role": "user",
@@ -108,10 +149,14 @@ impl AgentRuntime {
 
             // Extract usage
             if let Some(usage) = response.get("usage") {
-                total_input +=
-                    usage.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-                total_output +=
-                    usage.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                total_input += usage
+                    .get("input_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as u32;
+                total_output += usage
+                    .get("output_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as u32;
             }
 
             let stop_reason = response
@@ -153,16 +198,44 @@ impl AgentRuntime {
                             "text": text,
                         }),
                     );
+
+                    if let Some((mission_id, subtask_id)) = coordinator_scope {
+                        let _ = handle.emit(
+                            "coordinator:event",
+                            serde_json::json!({
+                                "type": "SubtaskStreaming",
+                                "mission_id": mission_id,
+                                "subtask_id": subtask_id,
+                                "text_delta": text,
+                            }),
+                        );
+                    }
                 }
                 for tool_block in &tool_uses {
+                    let tool_name = tool_block
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
                     let _ = handle.emit(
                         "agent:token",
                         serde_json::json!({
                             "delta_type": "tool_use_start",
-                            "tool_name": tool_block.get("name").and_then(|v| v.as_str()).unwrap_or(""),
+                            "tool_name": tool_name,
                             "tool_id": tool_block.get("id").and_then(|v| v.as_str()).unwrap_or(""),
                         }),
                     );
+
+                    if let Some((mission_id, subtask_id)) = coordinator_scope {
+                        let _ = handle.emit(
+                            "coordinator:event",
+                            serde_json::json!({
+                                "type": "SubtaskToolUse",
+                                "mission_id": mission_id,
+                                "subtask_id": subtask_id,
+                                "tool_name": tool_name,
+                            }),
+                        );
+                    }
                 }
             }
 
@@ -344,6 +417,19 @@ impl AgentRuntime {
                             "iteration": iteration,
                         }),
                     );
+
+                    if let Some((mission_id, subtask_id)) = coordinator_scope {
+                        let _ = handle.emit(
+                            "coordinator:event",
+                            serde_json::json!({
+                                "type": "SubtaskToolResult",
+                                "mission_id": mission_id,
+                                "subtask_id": subtask_id,
+                                "tool_name": tool_name,
+                                "success": !result.is_error,
+                            }),
+                        );
+                    }
                 }
 
                 tool_results.push(serde_json::json!({

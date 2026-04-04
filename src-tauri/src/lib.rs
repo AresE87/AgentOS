@@ -1,6 +1,7 @@
 #![recursion_limit = "256"]
 
 pub mod accessibility;
+pub mod agent_loop;
 pub mod agents;
 pub mod analytics;
 pub mod api;
@@ -15,6 +16,7 @@ mod channels;
 pub mod compliance;
 pub mod config;
 pub mod conversations;
+pub mod coordinator;
 pub mod debugger;
 pub mod enterprise;
 pub mod escalation;
@@ -44,6 +46,7 @@ pub mod teams;
 pub mod templates;
 pub mod terminal;
 pub mod testing;
+pub mod tools;
 pub mod training;
 pub mod types;
 pub mod updater;
@@ -52,9 +55,16 @@ pub mod vault;
 pub mod web;
 pub mod webhooks;
 pub mod workflows;
-pub mod tools;
-pub mod agent_loop;
 
+use crate::coordinator::runtime::{
+    cmd_activate_mission, cmd_add_subtask, cmd_approve_step, cmd_assign_agent,
+    cmd_cancel_mission, cmd_connect_subtasks, cmd_create_mission,
+    cmd_create_mission_from_template, cmd_create_mission_manual, cmd_disconnect_subtasks,
+    cmd_get_available_specialists, cmd_get_available_tools, cmd_get_mission,
+    cmd_get_mission_history, cmd_inject_mission_message, cmd_pause_mission,
+    cmd_remove_subtask, cmd_replace_mission_dag, cmd_retry_subtask, cmd_start_mission,
+    cmd_update_subtask, cmd_update_subtask_position,
+};
 use base64::Engine as _;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -158,17 +168,39 @@ fn hydrate_settings_from_vault(
     }
     // Only overwrite settings with vault values if vault actually has them.
     // This preserves API keys from config.json when vault is empty (first run).
-    if let Some(v) = load_secret_from_vault(vault, "ANTHROPIC_API_KEY") { settings.anthropic_api_key = v; }
-    if let Some(v) = load_secret_from_vault(vault, "OPENAI_API_KEY") { settings.openai_api_key = v; }
-    if let Some(v) = load_secret_from_vault(vault, "GOOGLE_API_KEY") { settings.google_api_key = v; }
-    if let Some(v) = load_secret_from_vault(vault, "TELEGRAM_BOT_TOKEN") { settings.telegram_bot_token = v; }
-    if let Some(v) = load_secret_from_vault(vault, "WHATSAPP_ACCESS_TOKEN") { settings.whatsapp_access_token = v; }
-    if let Some(v) = load_secret_from_vault(vault, "RELAY_AUTH_TOKEN") { settings.relay_auth_token = v; }
-    if let Some(v) = load_secret_from_vault(vault, "STRIPE_SECRET_KEY") { settings.stripe_secret_key = v; }
-    if let Some(v) = load_secret_from_vault(vault, "STRIPE_WEBHOOK_SECRET") { settings.stripe_webhook_secret = v; }
-    if let Some(v) = load_secret_from_vault(vault, "GOOGLE_CLIENT_SECRET") { settings.google_client_secret = v; }
-    if let Some(v) = load_secret_from_vault(vault, "GOOGLE_REFRESH_TOKEN") { settings.google_refresh_token = v; }
-    if let Some(v) = load_secret_from_vault(vault, "DISCORD_BOT_TOKEN") { settings.discord_bot_token = v; }
+    if let Some(v) = load_secret_from_vault(vault, "ANTHROPIC_API_KEY") {
+        settings.anthropic_api_key = v;
+    }
+    if let Some(v) = load_secret_from_vault(vault, "OPENAI_API_KEY") {
+        settings.openai_api_key = v;
+    }
+    if let Some(v) = load_secret_from_vault(vault, "GOOGLE_API_KEY") {
+        settings.google_api_key = v;
+    }
+    if let Some(v) = load_secret_from_vault(vault, "TELEGRAM_BOT_TOKEN") {
+        settings.telegram_bot_token = v;
+    }
+    if let Some(v) = load_secret_from_vault(vault, "WHATSAPP_ACCESS_TOKEN") {
+        settings.whatsapp_access_token = v;
+    }
+    if let Some(v) = load_secret_from_vault(vault, "RELAY_AUTH_TOKEN") {
+        settings.relay_auth_token = v;
+    }
+    if let Some(v) = load_secret_from_vault(vault, "STRIPE_SECRET_KEY") {
+        settings.stripe_secret_key = v;
+    }
+    if let Some(v) = load_secret_from_vault(vault, "STRIPE_WEBHOOK_SECRET") {
+        settings.stripe_webhook_secret = v;
+    }
+    if let Some(v) = load_secret_from_vault(vault, "GOOGLE_CLIENT_SECRET") {
+        settings.google_client_secret = v;
+    }
+    if let Some(v) = load_secret_from_vault(vault, "GOOGLE_REFRESH_TOKEN") {
+        settings.google_refresh_token = v;
+    }
+    if let Some(v) = load_secret_from_vault(vault, "DISCORD_BOT_TOKEN") {
+        settings.discord_bot_token = v;
+    }
     Ok(())
 }
 
@@ -188,7 +220,7 @@ fn audit_vault_event(
 
 pub struct AppState {
     pub db: std::sync::Mutex<memory::Database>,
-    pub gateway: tokio::sync::Mutex<brain::Gateway>,
+    pub gateway: Arc<tokio::sync::Mutex<brain::Gateway>>,
     pub settings: std::sync::Mutex<config::Settings>,
     pub kill_switch: Arc<AtomicBool>,
     pub screenshots_dir: PathBuf,
@@ -262,6 +294,8 @@ pub struct AppState {
     pub tool_registry: Arc<tools::ToolRegistry>,
     /// P4: Session persistence store (JSONL)
     pub session_store: Arc<agent_loop::session::SessionStore>,
+    /// Coordinator runtime for multi-agent missions
+    pub coordinator_runtime: Arc<coordinator::runtime::CoordinatorRuntime>,
 }
 
 #[tauri::command]
@@ -305,7 +339,8 @@ async fn cmd_get_status(state: tauri::State<'_, AppState>) -> Result<serde_json:
 fn user_friendly_error(error: &str) -> String {
     let e = error.to_lowercase();
     if e.contains("api key") || e.contains("api_key") || e.contains("x-api-key") {
-        return "No API key configured. Go to Settings and add your Anthropic or OpenAI key.".into();
+        return "No API key configured. Go to Settings and add your Anthropic or OpenAI key."
+            .into();
     }
     if e.contains("rate limit") || e.contains("429") {
         return "Rate limit reached. Please wait a moment and try again.".into();
@@ -330,10 +365,7 @@ fn user_friendly_error(error: &str) -> String {
         return "API quota exceeded or billing issue. Check your AI provider account.".into();
     }
     // Don't expose raw errors to users
-    format!(
-        "Something went wrong: {}",
-        &error[..error.len().min(200)]
-    )
+    format!("Something went wrong: {}", &error[..error.len().min(200)])
 }
 
 #[tauri::command]
@@ -357,7 +389,11 @@ async fn cmd_process_message(
         tracing::warn!(trace_id = %trace_id, "Injection attempt detected: {}", threat);
         // Don't block — just log. The sandbox will catch dangerous commands.
     }
-    state.rate_limiter.check("default").await.map_err(|e| user_friendly_error(&e))?;
+    state
+        .rate_limiter
+        .check("default")
+        .await
+        .map_err(|e| user_friendly_error(&e))?;
 
     let settings = {
         let s = state.settings.lock().map_err(|e| e.to_string())?;
@@ -530,7 +566,8 @@ async fn cmd_process_message(
             match result {
                 Ok(r) => {
                     let dbg = debugger.lock().await;
-                    let _ = dbg.record_task_execution(&tid, "PC Controller", "anthropic/sonnet", &r);
+                    let _ =
+                        dbg.record_task_execution(&tid, "PC Controller", "anthropic/sonnet", &r);
                     let _ = app_handle.emit(
                         "agent:task_completed",
                         serde_json::json!({
@@ -541,12 +578,7 @@ async fn cmd_process_message(
                 }
                 Err(e) => {
                     let dbg = debugger.lock().await;
-                    let _ = dbg.record_runtime_error(
-                        &tid,
-                        "PC Controller",
-                        "anthropic/sonnet",
-                        &e,
-                    );
+                    let _ = dbg.record_runtime_error(&tid, "PC Controller", "anthropic/sonnet", &e);
                     let friendly = user_friendly_error(&e);
                     let _ = app_handle.emit(
                         "agent:error",
@@ -645,6 +677,7 @@ Always be helpful, precise, and use tools judiciously.";
             Some(&app_handle),
             Some(state.session_store.as_ref()),
             Some(&task_id_for_session),
+            None,
         )
         .await;
 
@@ -665,7 +698,11 @@ Always be helpful, precise, and use tools judiciously.";
 
             // R29: Audit log
             {
-                let preview = if text.len() > 120 { &text[..120] } else { &text };
+                let preview = if text.len() > 120 {
+                    &text[..120]
+                } else {
+                    &text
+                };
                 if let Ok(conn) = rusqlite::Connection::open(&state.db_path) {
                     let _ = enterprise::AuditLog::ensure_table(&conn);
                     let _ = enterprise::AuditLog::log(
@@ -739,7 +776,11 @@ Always be helpful, precise, and use tools judiciously.";
 
             // R29: Audit log
             {
-                let preview = if text.len() > 120 { &text[..120] } else { &text };
+                let preview = if text.len() > 120 {
+                    &text[..120]
+                } else {
+                    &text
+                };
                 if let Ok(conn) = rusqlite::Connection::open(&state.db_path) {
                     let _ = enterprise::AuditLog::ensure_table(&conn);
                     let _ = enterprise::AuditLog::log(
@@ -1521,12 +1562,7 @@ async fn cmd_run_pc_task(
             }
             Err(e) => {
                 let dbg = debugger.lock().await;
-                let _ = dbg.record_runtime_error(
-                    &tid,
-                    "PC Controller",
-                    "anthropic/sonnet",
-                    &e,
-                );
+                let _ = dbg.record_runtime_error(&tid, "PC Controller", "anthropic/sonnet", &e);
                 let _ = app_handle.emit(
                     "agent:task_completed",
                     serde_json::json!({
@@ -1682,14 +1718,12 @@ Always be helpful, precise, and use tools judiciously.";
             Some(&app),
             Some(state.session_store.as_ref()),
             Some(&task_id),
+            None,
         )
         .await
         .map_err(|e| {
             let friendly = user_friendly_error(&e);
-            let _ = app.emit(
-                "agent:error",
-                serde_json::json!({"message": &friendly}),
-            );
+            let _ = app.emit("agent:error", serde_json::json!({"message": &friendly}));
             friendly
         })?;
 
@@ -2190,7 +2224,8 @@ async fn cmd_vault_delete(
 
 #[tauri::command]
 async fn cmd_vault_migrate(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
-    let _decision = enforce_permission(&state, approvals::PermissionCapability::VaultMigrate, None)?;
+    let _decision =
+        enforce_permission(&state, approvals::PermissionCapability::VaultMigrate, None)?;
     let settings = {
         let s = state.settings.lock().map_err(|e| e.to_string())?;
         s.clone()
@@ -2976,7 +3011,8 @@ async fn cmd_plugin_install(
     path: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let _decision = enforce_permission(&state, approvals::PermissionCapability::PluginManage, None)?;
+    let _decision =
+        enforce_permission(&state, approvals::PermissionCapability::PluginManage, None)?;
     let mut mgr = state.plugin_manager.lock().await;
     let source = std::path::PathBuf::from(&path);
     let manifest = mgr.install(&source)?;
@@ -2993,8 +3029,11 @@ async fn cmd_plugin_update(
     path: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let _decision =
-        enforce_permission(&state, approvals::PermissionCapability::PluginManage, Some(&name))?;
+    let _decision = enforce_permission(
+        &state,
+        approvals::PermissionCapability::PluginManage,
+        Some(&name),
+    )?;
     let mut mgr = state.plugin_manager.lock().await;
     let manifest = mgr.update(&name, &std::path::PathBuf::from(path))?;
     Ok(serde_json::json!({
@@ -3010,8 +3049,11 @@ async fn cmd_plugin_rollback(
     name: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let _decision =
-        enforce_permission(&state, approvals::PermissionCapability::PluginManage, Some(&name))?;
+    let _decision = enforce_permission(
+        &state,
+        approvals::PermissionCapability::PluginManage,
+        Some(&name),
+    )?;
     let mut mgr = state.plugin_manager.lock().await;
     let manifest = mgr.rollback(&name)?;
     Ok(serde_json::json!({
@@ -3027,8 +3069,11 @@ async fn cmd_plugin_uninstall(
     name: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let _decision =
-        enforce_permission(&state, approvals::PermissionCapability::PluginManage, Some(&name))?;
+    let _decision = enforce_permission(
+        &state,
+        approvals::PermissionCapability::PluginManage,
+        Some(&name),
+    )?;
     let mut mgr = state.plugin_manager.lock().await;
     mgr.uninstall(&name)?;
     Ok(serde_json::json!({ "ok": true, "name": name }))
@@ -3040,8 +3085,11 @@ async fn cmd_plugin_toggle(
     enabled: bool,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let _decision =
-        enforce_permission(&state, approvals::PermissionCapability::PluginManage, Some(&name))?;
+    let _decision = enforce_permission(
+        &state,
+        approvals::PermissionCapability::PluginManage,
+        Some(&name),
+    )?;
     let mut mgr = state.plugin_manager.lock().await;
     mgr.set_enabled(&name, enabled)?;
     Ok(serde_json::json!({ "ok": true, "name": name, "enabled": enabled }))
@@ -3053,8 +3101,11 @@ async fn cmd_plugin_execute(
     input: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let _decision =
-        enforce_permission(&state, approvals::PermissionCapability::PluginExecute, Some(&name))?;
+    let _decision = enforce_permission(
+        &state,
+        approvals::PermissionCapability::PluginExecute,
+        Some(&name),
+    )?;
     let mgr = state.plugin_manager.lock().await;
     let output = mgr.execute(&name, &input).await?;
     Ok(serde_json::json!({ "ok": true, "output": output }))
@@ -3086,7 +3137,11 @@ async fn cmd_plugin_discover(
 async fn cmd_run_benchmarks() -> Result<serde_json::Value, String> {
     let results = cache::benchmarks::Benchmarks::run_all();
     let mut hot_paths = results.clone();
-    hot_paths.sort_by(|a, b| b.duration_ms.partial_cmp(&a.duration_ms).unwrap_or(std::cmp::Ordering::Equal));
+    hot_paths.sort_by(|a, b| {
+        b.duration_ms
+            .partial_cmp(&a.duration_ms)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     let hot_paths: Vec<_> = hot_paths.into_iter().take(3).collect();
     Ok(serde_json::json!({
         "benchmarks": results,
@@ -4192,13 +4247,20 @@ async fn cmd_search_semantic(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let settings = state.settings.lock().map_err(|e| e.to_string())?.clone();
-    let openai_key = if settings.openai_api_key.is_empty() { None } else { Some(settings.openai_api_key.as_str()) };
-    let ollama_url = if settings.use_local_llm { Some(settings.local_llm_url.as_str()) } else { None };
+    let openai_key = if settings.openai_api_key.is_empty() {
+        None
+    } else {
+        Some(settings.openai_api_key.as_str())
+    };
+    let ollama_url = if settings.use_local_llm {
+        Some(settings.local_llm_url.as_str())
+    } else {
+        None
+    };
 
     // Get query embedding
-    let (query_emb, model) = memory::embeddings::get_embedding(
-        &query, openai_key, ollama_url,
-    ).await?;
+    let (query_emb, model) =
+        memory::embeddings::get_embedding(&query, openai_key, ollama_url).await?;
 
     // Search
     let db_path = &state.db_path;
@@ -4210,13 +4272,16 @@ async fn cmd_search_semantic(
         top_k.unwrap_or(5),
     )?;
 
-    let items: Vec<serde_json::Value> = results.iter().map(|(id, content, score)| {
-        serde_json::json!({
-            "id": id,
-            "content": content,
-            "score": score,
+    let items: Vec<serde_json::Value> = results
+        .iter()
+        .map(|(id, content, score)| {
+            serde_json::json!({
+                "id": id,
+                "content": content,
+                "score": score,
+            })
         })
-    }).collect();
+        .collect();
 
     Ok(serde_json::json!({
         "results": items,
@@ -4233,16 +4298,28 @@ async fn cmd_index_content(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let settings = state.settings.lock().map_err(|e| e.to_string())?.clone();
-    let openai_key = if settings.openai_api_key.is_empty() { None } else { Some(settings.openai_api_key.as_str()) };
-    let ollama_url = if settings.use_local_llm { Some(settings.local_llm_url.as_str()) } else { None };
+    let openai_key = if settings.openai_api_key.is_empty() {
+        None
+    } else {
+        Some(settings.openai_api_key.as_str())
+    };
+    let ollama_url = if settings.use_local_llm {
+        Some(settings.local_llm_url.as_str())
+    } else {
+        None
+    };
 
-    let (embedding, model) = memory::embeddings::get_embedding(
-        &content, openai_key, ollama_url,
-    ).await?;
+    let (embedding, model) =
+        memory::embeddings::get_embedding(&content, openai_key, ollama_url).await?;
 
     let conn = rusqlite::Connection::open(&state.db_path).map_err(|e| e.to_string())?;
     let id = memory::embeddings::store_embedding(
-        &conn, &content, &source, source_id.as_deref(), &embedding, &model,
+        &conn,
+        &content,
+        &source,
+        source_id.as_deref(),
+        &embedding,
+        &model,
     )?;
 
     Ok(serde_json::json!({ "ok": true, "id": id, "dimensions": embedding.len() }))
@@ -4774,11 +4851,8 @@ async fn cmd_permission_list(
     let db = state.db.lock().map_err(|e| e.to_string())?;
     approvals::ApprovalManager::ensure_permission_tables(db.conn())?;
     approvals::ApprovalManager::seed_default_permissions(db.conn())?;
-    let grants = approvals::ApprovalManager::list_permissions(
-        db.conn(),
-        user_id.as_deref(),
-        capability,
-    )?;
+    let grants =
+        approvals::ApprovalManager::list_permissions(db.conn(), user_id.as_deref(), capability)?;
     Ok(serde_json::json!({ "grants": grants }))
 }
 
@@ -5300,7 +5374,8 @@ async fn cmd_sandbox_run(
     command: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let _decision = enforce_permission(&state, approvals::PermissionCapability::SandboxManage, None)?;
+    let _decision =
+        enforce_permission(&state, approvals::PermissionCapability::SandboxManage, None)?;
     let cfg: sandbox::SandboxConfig = serde_json::from_value(config).map_err(|e| e.to_string())?;
     let result = sandbox::SandboxManager::create_sandbox(&cfg, &command).await?;
     serde_json::to_value(&result).map_err(|e| e.to_string())
@@ -5308,7 +5383,8 @@ async fn cmd_sandbox_run(
 
 #[tauri::command]
 async fn cmd_sandbox_list(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
-    let _decision = enforce_permission(&state, approvals::PermissionCapability::SandboxManage, None)?;
+    let _decision =
+        enforce_permission(&state, approvals::PermissionCapability::SandboxManage, None)?;
     let containers = sandbox::SandboxManager::list_running().await?;
     serde_json::to_value(&containers).map_err(|e| e.to_string())
 }
@@ -5318,7 +5394,8 @@ async fn cmd_sandbox_kill(
     id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let _decision = enforce_permission(&state, approvals::PermissionCapability::SandboxManage, None)?;
+    let _decision =
+        enforce_permission(&state, approvals::PermissionCapability::SandboxManage, None)?;
     sandbox::SandboxManager::kill_sandbox(&id).await?;
     Ok(serde_json::json!({ "ok": true }))
 }
@@ -5817,8 +5894,11 @@ async fn cmd_terminal_execute(
     command: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let _decision =
-        enforce_permission(&state, approvals::PermissionCapability::TerminalExecute, None)?;
+    let _decision = enforce_permission(
+        &state,
+        approvals::PermissionCapability::TerminalExecute,
+        None,
+    )?;
     let mut terminal = state.smart_terminal.lock().await;
     let output = terminal.execute(&command).await?;
     serde_json::to_value(&output).map_err(|e| e.to_string())
@@ -5875,8 +5955,11 @@ async fn cmd_plugin_invoke_method(
     args: serde_json::Value,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let _decision =
-        enforce_permission(&state, approvals::PermissionCapability::PluginExecute, Some(&name))?;
+    let _decision = enforce_permission(
+        &state,
+        approvals::PermissionCapability::PluginExecute,
+        Some(&name),
+    )?;
     let api = state.extension_api_v2.lock().await;
     api.invoke_plugin_method(&name, &method, &args)
 }
@@ -5899,8 +5982,11 @@ async fn cmd_plugin_storage_set(
     value: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let _decision =
-        enforce_permission(&state, approvals::PermissionCapability::PluginExecute, Some(&name))?;
+    let _decision = enforce_permission(
+        &state,
+        approvals::PermissionCapability::PluginExecute,
+        Some(&name),
+    )?;
     let api = state.extension_api_v2.lock().await;
     api.plugin_storage_set(&name, &key, &value)?;
     Ok(serde_json::json!({ "ok": true, "plugin": name, "key": key }))
@@ -6144,10 +6230,8 @@ fn cmd_reliability_report(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    let report = observability::HealthDashboard::reliability_report(
-        db.conn(),
-        window_days.unwrap_or(30),
-    );
+    let report =
+        observability::HealthDashboard::reliability_report(db.conn(), window_days.unwrap_or(30));
     serde_json::to_value(&report).map_err(|e| e.to_string())
 }
 
@@ -6303,12 +6387,14 @@ async fn cmd_process_file_action(
     state: tauri::State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<serde_json::Value, String> {
-    let _decision = enforce_permission(&state, approvals::PermissionCapability::ShellExecute, None)?;
+    let _decision =
+        enforce_permission(&state, approvals::PermissionCapability::ShellExecute, None)?;
     let action = {
         let si = state.shell_integration.lock().map_err(|e| e.to_string())?;
         si.process_file_action(&file_path, &action_id)?
     };
-    let agent_response = cmd_process_message(state.clone(), app_handle, action.output.clone()).await?;
+    let agent_response =
+        cmd_process_message(state.clone(), app_handle, action.output.clone()).await?;
     Ok(serde_json::json!({
         "action": action,
         "agent_response": agent_response,
@@ -6322,12 +6408,14 @@ async fn cmd_process_text_action(
     state: tauri::State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<serde_json::Value, String> {
-    let _decision = enforce_permission(&state, approvals::PermissionCapability::ShellExecute, None)?;
+    let _decision =
+        enforce_permission(&state, approvals::PermissionCapability::ShellExecute, None)?;
     let action = {
         let si = state.shell_integration.lock().map_err(|e| e.to_string())?;
         si.process_text_action(&text, &action_id)?
     };
-    let agent_response = cmd_process_message(state.clone(), app_handle, action.output.clone()).await?;
+    let agent_response =
+        cmd_process_message(state.clone(), app_handle, action.output.clone()).await?;
     Ok(serde_json::json!({
         "action": action,
         "agent_response": agent_response,
@@ -6355,7 +6443,8 @@ async fn cmd_consume_pending_shell_invocation(
         si.process_file_action(&invocation.target_path, &invocation.action_id)?
     };
 
-    let agent_response = cmd_process_message(state.clone(), app_handle, action.output.clone()).await?;
+    let agent_response =
+        cmd_process_message(state.clone(), app_handle, action.output.clone()).await?;
     let record = os_integration::ShellExecutionRecord {
         invocation,
         context_summary: action.context_summary.clone(),
@@ -6841,7 +6930,8 @@ pub fn run() {
                     tracing::warn!("Failed to hydrate settings from vault: {}", e);
                 }
             }
-            let gateway = brain::Gateway::new(&settings);
+            let gateway = Arc::new(tokio::sync::Mutex::new(brain::Gateway::new(&settings)));
+            let kill_switch = Arc::new(AtomicBool::new(false));
 
             let api_port: u16 = 8080;
 
@@ -6866,11 +6956,29 @@ pub fn run() {
                 platform_provider.os_version()
             );
 
+            let tool_registry = {
+                let mut registry = tools::ToolRegistry::new();
+                tools::builtins::register_all(&mut registry);
+                Arc::new(registry)
+            };
+            let session_store = Arc::new(agent_loop::session::SessionStore::new(
+                app_dir.join("sessions"),
+            ));
+            let coordinator_runtime = Arc::new(coordinator::runtime::CoordinatorRuntime::new(
+                gateway.clone(),
+                tool_registry.clone(),
+                session_store.clone(),
+                db_path.clone(),
+                app_dir.clone(),
+                kill_switch.clone(),
+                app.handle().clone(),
+            ));
+
             app.manage(AppState {
                 db: std::sync::Mutex::new(db),
-                gateway: tokio::sync::Mutex::new(gateway),
+                gateway,
                 settings: std::sync::Mutex::new(settings.clone()),
-                kill_switch: Arc::new(AtomicBool::new(false)),
+                kill_switch,
                 screenshots_dir,
                 db_path: db_path.clone(),
                 playbooks_dir,
@@ -6962,15 +7070,10 @@ pub fn run() {
                         .expect("failed to init knowledge graph"),
                 )),
                 // P1: Tool Registry — register all builtin tools
-                tool_registry: {
-                    let mut registry = tools::ToolRegistry::new();
-                    tools::builtins::register_all(&mut registry);
-                    Arc::new(registry)
-                },
+                tool_registry,
                 // P4: Session persistence store
-                session_store: Arc::new(agent_loop::session::SessionStore::new(
-                    app_dir.join("sessions"),
-                )),
+                session_store,
+                coordinator_runtime,
             });
 
             // ── R35: Deferred startup — plugin discovery in background ────
@@ -7745,6 +7848,29 @@ pub fn run() {
             cmd_list_sessions,
             cmd_load_session,
             cmd_delete_session,
+            // Coordinator Mode
+            cmd_create_mission,
+            cmd_create_mission_manual,
+            cmd_create_mission_from_template,
+            cmd_start_mission,
+            cmd_pause_mission,
+            cmd_cancel_mission,
+            cmd_retry_subtask,
+            cmd_add_subtask,
+            cmd_remove_subtask,
+            cmd_connect_subtasks,
+            cmd_disconnect_subtasks,
+            cmd_assign_agent,
+            cmd_update_subtask_position,
+            cmd_update_subtask,
+            cmd_inject_mission_message,
+            cmd_approve_step,
+            cmd_get_mission,
+            cmd_activate_mission,
+            cmd_replace_mission_dag,
+            cmd_get_mission_history,
+            cmd_get_available_specialists,
+            cmd_get_available_tools,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");
@@ -7774,7 +7900,9 @@ mod tests {
         let mut vault = vault::SecureVault::new(dir.path());
         vault.create("pw").unwrap();
         vault.store("ANTHROPIC_API_KEY", "sk-ant").unwrap();
-        vault.store("GOOGLE_REFRESH_TOKEN", "refresh-token").unwrap();
+        vault
+            .store("GOOGLE_REFRESH_TOKEN", "refresh-token")
+            .unwrap();
 
         let mut settings = config::Settings::default();
         hydrate_settings_from_vault(&mut settings, &vault).unwrap();

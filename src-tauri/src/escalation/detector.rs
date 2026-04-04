@@ -422,13 +422,7 @@ impl EscalationManager {
         .map_err(|e| format!("Failed to assign handoff: {}", e))?;
 
         if let Some(note) = note.filter(|value| !value.trim().is_empty()) {
-            self.insert_note(
-                &conn,
-                id,
-                actor,
-                note,
-                HandoffStatus::AssignedToHuman,
-            )?;
+            self.insert_note(&conn, id, actor, note, HandoffStatus::AssignedToHuman)?;
         }
         self.record_event(
             &conn,
@@ -599,7 +593,12 @@ impl EscalationManager {
         conn.query_row(
             "SELECT task_id, chain_id FROM human_handoffs WHERE id = ?1",
             params![id],
-            |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, Option<String>>(1)?)),
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                ))
+            },
         )
         .map_err(|e| format!("Failed to load linked runtime ids: {}", e))
     }
@@ -809,7 +808,11 @@ mod tests {
         assert_eq!(assigned.assigned_to.as_deref(), Some("alice@example.com"));
 
         let noted = manager
-            .add_note(&created.id, "alice@example.com", "Credentials were refreshed.")
+            .add_note(
+                &created.id,
+                "alice@example.com",
+                "Credentials were refreshed.",
+            )
             .unwrap();
         assert_eq!(noted.human_notes.len(), 2);
 
@@ -842,11 +845,9 @@ mod tests {
 
         let conn = Connection::open(&db_path).unwrap();
         let task_status: String = conn
-            .query_row(
-                "SELECT status FROM tasks WHERE id = 'task-1'",
-                [],
-                |row| row.get(0),
-            )
+            .query_row("SELECT status FROM tasks WHERE id = 'task-1'", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         let chain_status: String = conn
             .query_row(

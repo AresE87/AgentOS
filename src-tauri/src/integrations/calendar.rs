@@ -213,7 +213,11 @@ impl GoogleCalendarProvider {
         time_min: &str,
         time_max: &str,
     ) -> Result<Vec<CalendarEvent>, String> {
-        let token = self.access_token.as_ref().ok_or("Not authenticated")?.clone();
+        let token = self
+            .access_token
+            .as_ref()
+            .ok_or("Not authenticated")?
+            .clone();
         let url = format!(
             "{}/calendars/primary/events?timeMin={}&timeMax={}&singleEvents=true&orderBy=startTime&maxResults=50",
             GOOGLE_CALENDAR_API,
@@ -316,7 +320,11 @@ impl GoogleCalendarProvider {
         &mut self,
         event: &NewCalendarEvent,
     ) -> Result<CalendarEvent, String> {
-        let token = self.access_token.as_ref().ok_or("Not authenticated")?.clone();
+        let token = self
+            .access_token
+            .as_ref()
+            .ok_or("Not authenticated")?
+            .clone();
         let all_day = event.all_day.unwrap_or(false);
 
         let (start_body, end_body) = if all_day {
@@ -398,7 +406,11 @@ impl GoogleCalendarProvider {
         event_id: &str,
         update: &UpdateCalendarEvent,
     ) -> Result<serde_json::Value, String> {
-        let token = self.access_token.as_ref().ok_or("Not authenticated")?.clone();
+        let token = self
+            .access_token
+            .as_ref()
+            .ok_or("Not authenticated")?
+            .clone();
 
         // Build a PATCH body with only the fields that are set
         let mut body = serde_json::Map::new();
@@ -472,7 +484,11 @@ impl GoogleCalendarProvider {
 
     /// Delete event from Google Calendar (with automatic 401 retry via token refresh)
     pub async fn delete_event_google(&mut self, event_id: &str) -> Result<(), String> {
-        let token = self.access_token.as_ref().ok_or("Not authenticated")?.clone();
+        let token = self
+            .access_token
+            .as_ref()
+            .ok_or("Not authenticated")?
+            .clone();
         let delete_url = format!(
             "{}/calendars/primary/events/{}",
             GOOGLE_CALENDAR_API, event_id
@@ -560,10 +576,7 @@ pub async fn calendar_create_event(
         "description": description.unwrap_or("")
     });
     let resp = client
-        .post(format!(
-            "{}/calendars/primary/events",
-            GOOGLE_CALENDAR_API
-        ))
+        .post(format!("{}/calendars/primary/events", GOOGLE_CALENDAR_API))
         .header("Authorization", format!("Bearer {}", access_token))
         .json(&body)
         .send()
@@ -623,10 +636,7 @@ pub async fn calendar_update_event(
 }
 
 /// Delete an event from Google Calendar.
-pub async fn calendar_delete_event(
-    access_token: &str,
-    event_id: &str,
-) -> Result<(), String> {
+pub async fn calendar_delete_event(access_token: &str, event_id: &str) -> Result<(), String> {
     let client = Client::new();
     let resp = client
         .delete(format!(
@@ -646,9 +656,7 @@ pub async fn calendar_delete_event(
 }
 
 /// List all calendars for the authenticated user.
-pub async fn calendar_list_calendars(
-    access_token: &str,
-) -> Result<Vec<serde_json::Value>, String> {
+pub async fn calendar_list_calendars(access_token: &str) -> Result<Vec<serde_json::Value>, String> {
     let client = Client::new();
     let resp = client
         .get(format!("{}/users/me/calendarList", GOOGLE_CALENDAR_API))

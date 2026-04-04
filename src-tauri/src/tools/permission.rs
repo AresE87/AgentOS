@@ -1,4 +1,4 @@
-use super::trait_def::{Tool, ToolContext, PermissionLevel};
+use super::trait_def::{PermissionLevel, Tool, ToolContext};
 
 #[derive(Debug, Clone)]
 pub enum PermissionDecision {
@@ -7,13 +7,18 @@ pub enum PermissionDecision {
     NeedsApproval(String),
 }
 
-pub fn check_tool_permission(tool: &dyn Tool, _input: &serde_json::Value, _ctx: &ToolContext) -> PermissionDecision {
+pub fn check_tool_permission(
+    tool: &dyn Tool,
+    _input: &serde_json::Value,
+    _ctx: &ToolContext,
+) -> PermissionDecision {
     match tool.permission_level() {
         PermissionLevel::ReadOnly => PermissionDecision::Allowed,
         PermissionLevel::Write => PermissionDecision::Allowed,
         PermissionLevel::Execute => PermissionDecision::Allowed,
-        PermissionLevel::Dangerous => PermissionDecision::NeedsApproval(
-            format!("Tool '{}' requires approval (dangerous operation)", tool.name())
-        ),
+        PermissionLevel::Dangerous => PermissionDecision::NeedsApproval(format!(
+            "Tool '{}' requires approval (dangerous operation)",
+            tool.name()
+        )),
     }
 }

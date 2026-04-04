@@ -121,16 +121,22 @@ fn parse_action_response(response: &str) -> Result<AgentAction, String> {
         // Strip those and re-serialize just the action fields
         let action_type = val.get("type").and_then(|v| v.as_str()).unwrap_or("");
         let mut clean = serde_json::Map::new();
-        clean.insert("type".to_string(), serde_json::Value::String(action_type.to_string()));
+        clean.insert(
+            "type".to_string(),
+            serde_json::Value::String(action_type.to_string()),
+        );
 
         // Copy relevant fields based on action type
-        for key in ["x", "y", "text", "keys", "delta", "command", "shell", "ms", "summary"] {
+        for key in [
+            "x", "y", "text", "keys", "delta", "command", "shell", "ms", "summary",
+        ] {
             if let Some(v) = val.get(key) {
                 clean.insert(key.to_string(), v.clone());
             }
         }
 
-        if let Ok(action) = serde_json::from_value::<AgentAction>(serde_json::Value::Object(clean)) {
+        if let Ok(action) = serde_json::from_value::<AgentAction>(serde_json::Value::Object(clean))
+        {
             return Ok(action);
         }
     }

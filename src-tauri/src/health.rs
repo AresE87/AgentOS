@@ -18,46 +18,61 @@ pub struct HealthReport {
     pub features: HashMap<String, FeatureStatus>,
 }
 
-pub fn check_health(
-    settings: &crate::config::Settings,
-    db_path: &std::path::Path,
-) -> HealthReport {
+pub fn check_health(settings: &crate::config::Settings, db_path: &std::path::Path) -> HealthReport {
     let mut features = HashMap::new();
 
     // Check database
-    features.insert("database".to_string(), match rusqlite::Connection::open(db_path) {
-        Ok(_) => FeatureStatus::Working,
-        Err(e) => FeatureStatus::Unavailable(format!("SQLite error: {}", e)),
-    });
+    features.insert(
+        "database".to_string(),
+        match rusqlite::Connection::open(db_path) {
+            Ok(_) => FeatureStatus::Working,
+            Err(e) => FeatureStatus::Unavailable(format!("SQLite error: {}", e)),
+        },
+    );
 
     // Check AI providers
     let has_anthropic = !settings.anthropic_api_key.is_empty();
     let has_openai = !settings.openai_api_key.is_empty();
     let has_google = !settings.google_api_key.is_empty();
-    let provider_count = [has_anthropic, has_openai, has_google].iter().filter(|&&x| x).count();
+    let provider_count = [has_anthropic, has_openai, has_google]
+        .iter()
+        .filter(|&&x| x)
+        .count();
 
-    features.insert("ai_gateway".to_string(), match provider_count {
-        0 => FeatureStatus::Unavailable("No API keys configured".into()),
-        1 => FeatureStatus::Degraded("Only 1 provider (no fallback)".into()),
-        _ => FeatureStatus::Working,
-    });
+    features.insert(
+        "ai_gateway".to_string(),
+        match provider_count {
+            0 => FeatureStatus::Unavailable("No API keys configured".into()),
+            1 => FeatureStatus::Degraded("Only 1 provider (no fallback)".into()),
+            _ => FeatureStatus::Working,
+        },
+    );
 
     // Check vision (Windows only)
     #[cfg(target_os = "windows")]
     features.insert("vision_capture".to_string(), FeatureStatus::Working);
     #[cfg(not(target_os = "windows"))]
-    features.insert("vision_capture".to_string(), FeatureStatus::Unavailable("Windows only".into()));
+    features.insert(
+        "vision_capture".to_string(),
+        FeatureStatus::Unavailable("Windows only".into()),
+    );
 
     // Mesh module removed in F1 cleanup
-    features.insert("mesh".to_string(), FeatureStatus::Unavailable("Removed in v5.0.0".into()));
+    features.insert(
+        "mesh".to_string(),
+        FeatureStatus::Unavailable("Removed in v5.0.0".into()),
+    );
 
     // Check vault
     let vault_path = db_path.parent().unwrap_or(db_path).join("vault.enc");
-    features.insert("vault".to_string(), if vault_path.exists() {
-        FeatureStatus::Working
-    } else {
-        FeatureStatus::Degraded("Vault not initialized".into())
-    });
+    features.insert(
+        "vault".to_string(),
+        if vault_path.exists() {
+            FeatureStatus::Working
+        } else {
+            FeatureStatus::Degraded("Vault not initialized".into())
+        },
+    );
 
     HealthReport {
         version: "0.1.0".to_string(),

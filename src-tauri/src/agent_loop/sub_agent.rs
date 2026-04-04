@@ -3,8 +3,8 @@ use super::types::{AgentLoopConfig, AgentTurnResult};
 use crate::brain::Gateway;
 use crate::config::Settings;
 use crate::tools::{ToolContext, ToolRegistry};
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use tauri::Emitter;
 use tracing::{info, warn};
 
@@ -104,6 +104,7 @@ impl SubAgentManager {
             settings,
             &parent_ctx.kill_switch,
             event_emitter,
+            None,
             None,
             None,
         ))

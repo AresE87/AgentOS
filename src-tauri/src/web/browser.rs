@@ -448,7 +448,12 @@ pub async fn fetch_with_browser(url: &str) -> Result<PageContent, String> {
             .output(),
     )
     .await
-    .map_err(|_| format!("Headless browser timed out after {}s for '{}'", PAGE_TIMEOUT_SECS, url))?
+    .map_err(|_| {
+        format!(
+            "Headless browser timed out after {}s for '{}'",
+            PAGE_TIMEOUT_SECS, url
+        )
+    })?
     .map_err(|e| format!("Failed to launch headless browser: {}", e))?;
 
     let output = result;
@@ -508,7 +513,12 @@ pub async fn screenshot_url(url: &str, output_path: &Path) -> Result<PathBuf, St
             .output(),
     )
     .await
-    .map_err(|_| format!("Screenshot timed out after {}s for '{}'", PAGE_TIMEOUT_SECS, url))?
+    .map_err(|_| {
+        format!(
+            "Screenshot timed out after {}s for '{}'",
+            PAGE_TIMEOUT_SECS, url
+        )
+    })?
     .map_err(|e| format!("Failed to launch headless browser for screenshot: {}", e))?;
 
     let output = result;

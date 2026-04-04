@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolDefinition {
@@ -49,5 +49,9 @@ pub trait Tool: Send + Sync {
     fn description(&self) -> &str;
     fn input_schema(&self) -> serde_json::Value;
     fn permission_level(&self) -> PermissionLevel;
-    async fn execute(&self, input: serde_json::Value, ctx: &ToolContext) -> Result<ToolOutput, ToolError>;
+    async fn execute(
+        &self,
+        input: serde_json::Value,
+        ctx: &ToolContext,
+    ) -> Result<ToolOutput, ToolError>;
 }

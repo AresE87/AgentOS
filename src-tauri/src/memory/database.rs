@@ -141,7 +141,41 @@ impl Database {
                 model TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
-            CREATE INDEX IF NOT EXISTS idx_embeddings_source ON embeddings(source, source_id);",
+            CREATE INDEX IF NOT EXISTS idx_embeddings_source ON embeddings(source, source_id);
+
+            CREATE TABLE IF NOT EXISTS missions (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL,
+                mode TEXT NOT NULL,
+                autonomy TEXT NOT NULL DEFAULT 'ask_on_error',
+                status TEXT NOT NULL DEFAULT 'planning',
+                dag_json TEXT NOT NULL,
+                total_cost REAL NOT NULL DEFAULT 0,
+                total_tokens INTEGER NOT NULL DEFAULT 0,
+                total_elapsed_ms INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                started_at TEXT,
+                completed_at TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_missions_status ON missions(status);
+            CREATE INDEX IF NOT EXISTS idx_missions_created ON missions(created_at DESC);
+
+            CREATE TABLE IF NOT EXISTS mission_log (
+                id TEXT PRIMARY KEY,
+                mission_id TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                agent_name TEXT NOT NULL,
+                agent_level TEXT NOT NULL,
+                subtask_id TEXT,
+                message TEXT NOT NULL,
+                metadata TEXT,
+                FOREIGN KEY (mission_id) REFERENCES missions(id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_missionlog_mission ON mission_log(mission_id, timestamp);",
         )
     }
 
@@ -1196,5 +1230,58 @@ mod tests {
             triggers[0].last_run,
             Some("2026-03-29T10:00:00Z".to_string())
         );
+    }
+
+    #[test]
+    fn mission_tables_accept_rows() {
+        let (db, _) = temp_db();
+        let dag_json = json!({
+            "nodes": {},
+            "edges": []
+        })
+        .to_string();
+
+        db.conn()
+            .execute(
+                "INSERT INTO missions (id, title, description, mode, autonomy, status, dag_json, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now'))",
+                params![
+                    "mission_1",
+                    "Mission",
+                    "Coordinator smoke test",
+                    "autopilot",
+                    "ask_on_error",
+                    "planning",
+                    dag_json,
+                ],
+            )
+            .unwrap();
+
+        db.conn()
+            .execute(
+                "INSERT INTO mission_log (id, mission_id, timestamp, event_type, agent_name, agent_level, message)
+                 VALUES (?1, ?2, datetime('now'), ?3, ?4, ?5, ?6)",
+                params![
+                    "log_1",
+                    "mission_1",
+                    "info",
+                    "Coordinator",
+                    "orchestrator",
+                    "Mission created",
+                ],
+            )
+            .unwrap();
+
+        let mission_count: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM missions", [], |row| row.get(0))
+            .unwrap();
+        let log_count: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM mission_log", [], |row| row.get(0))
+            .unwrap();
+
+        assert_eq!(mission_count, 1);
+        assert_eq!(log_count, 1);
     }
 }

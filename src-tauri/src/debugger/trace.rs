@@ -232,8 +232,9 @@ impl AgentDebugger {
         for id in ids.flatten() {
             if let Some(trace) = self.get_trace(&id)? {
                 let matches_task = task_id.map(|value| trace.task_id == value).unwrap_or(true);
-                let matches_agent =
-                    agent_name.map(|value| trace.agent_name == value).unwrap_or(true);
+                let matches_agent = agent_name
+                    .map(|value| trace.agent_name == value)
+                    .unwrap_or(true);
                 let matches_status = status.map(|value| trace.status == value).unwrap_or(true);
                 if matches_task && matches_agent && matches_status {
                     traces.push(trace);
@@ -255,11 +256,18 @@ impl AgentDebugger {
     ) -> Result<ExecutionTrace, String> {
         let trace_id = self.start_trace(task_id, Some(agent_name), Some(model))?;
         for step in &result.steps {
-            self.add_step(&trace_id, Self::trace_step_from_record(&trace_id, step, agent_name, model))?;
+            self.add_step(
+                &trace_id,
+                Self::trace_step_from_record(&trace_id, step, agent_name, model),
+            )?;
         }
         self.finish_trace(
             &trace_id,
-            if result.success { "completed" } else { "failed" },
+            if result.success {
+                "completed"
+            } else {
+                "failed"
+            },
         )?;
         self.get_trace(&trace_id)?
             .ok_or_else(|| format!("Trace not found after recording: {}", trace_id))
@@ -373,7 +381,10 @@ impl AgentDebugger {
         {
             evidence.push(path);
         }
-        evidence.push(format!("execution_method={}", method_label(record.result.method.clone())));
+        evidence.push(format!(
+            "execution_method={}",
+            method_label(record.result.method.clone())
+        ));
 
         TraceStep {
             id: uuid::Uuid::new_v4().to_string(),
@@ -383,7 +394,10 @@ impl AgentDebugger {
             planned_action: planned_action.clone(),
             agent_name: agent_name.to_string(),
             model: model.to_string(),
-            input_summary: format!("Step {} planned action {}", record.step_number, planned_action),
+            input_summary: format!(
+                "Step {} planned action {}",
+                record.step_number, planned_action
+            ),
             output_summary,
             status: if record.result.success {
                 "completed".to_string()
@@ -433,7 +447,7 @@ fn trim_text(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{ExecutionResult, ExecutionMethod, StepRecord, TaskExecutionResult};
+    use crate::types::{ExecutionMethod, ExecutionResult, StepRecord, TaskExecutionResult};
 
     fn sample_result(success: bool) -> TaskExecutionResult {
         TaskExecutionResult {
@@ -529,7 +543,12 @@ mod tests {
         let debugger = AgentDebugger::new(db_path.clone()).unwrap();
 
         let trace = debugger
-            .record_task_execution("task-debug", "PC Controller", "anthropic/sonnet", &sample_result(true))
+            .record_task_execution(
+                "task-debug",
+                "PC Controller",
+                "anthropic/sonnet",
+                &sample_result(true),
+            )
             .unwrap();
 
         assert_eq!(trace.task_id, "task-debug");
@@ -537,7 +556,12 @@ mod tests {
         assert_eq!(trace.status, "completed");
 
         let listed = debugger
-            .list_traces(10, Some("task-debug"), Some("PC Controller"), Some("completed"))
+            .list_traces(
+                10,
+                Some("task-debug"),
+                Some("PC Controller"),
+                Some("completed"),
+            )
             .unwrap();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].steps.len(), 5);
@@ -550,11 +574,19 @@ mod tests {
         let debugger = AgentDebugger::new(db_path).unwrap();
 
         let trace = debugger
-            .record_runtime_error("task-error", "PC Controller", "anthropic/sonnet", "Browser launch failed")
+            .record_runtime_error(
+                "task-error",
+                "PC Controller",
+                "anthropic/sonnet",
+                "Browser launch failed",
+            )
             .unwrap();
 
         assert_eq!(trace.status, "failed");
         assert_eq!(trace.steps.len(), 1);
-        assert_eq!(trace.steps[0].error.as_deref(), Some("Browser launch failed"));
+        assert_eq!(
+            trace.steps[0].error.as_deref(),
+            Some("Browser launch failed")
+        );
     }
 }

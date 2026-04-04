@@ -152,7 +152,9 @@ impl AlertManager {
         let rule = self
             .get_rule(rule_id)?
             .ok_or_else(|| format!("Alert rule not found: {}", rule_id))?;
-        let runbook_id = self.get_runbook_for_rule(rule_id)?.map(|runbook| runbook.id);
+        let runbook_id = self
+            .get_runbook_for_rule(rule_id)?
+            .map(|runbook| runbook.id);
         let alert = Alert {
             id: uuid::Uuid::new_v4().to_string(),
             rule_id: rule.id.clone(),
@@ -236,7 +238,8 @@ impl AlertManager {
                  ORDER BY triggered_at DESC",
             )
             .map_err(|e| e.to_string())?;
-        let alerts = stmt.query_map([], map_alert)
+        let alerts = stmt
+            .query_map([], map_alert)
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())?;
@@ -252,7 +255,8 @@ impl AlertManager {
                  ORDER BY triggered_at DESC",
             )
             .map_err(|e| e.to_string())?;
-        let alerts = stmt.query_map([], map_alert)
+        let alerts = stmt
+            .query_map([], map_alert)
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())?;
@@ -268,25 +272,26 @@ impl AlertManager {
                  ORDER BY name ASC",
             )
             .map_err(|e| e.to_string())?;
-        let rules = stmt.query_map([], |row| {
-            let condition_json: String = row.get(2)?;
-            Ok(AlertRule {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                condition: serde_json::from_str(&condition_json).map_err(|err| {
-                    rusqlite::Error::FromSqlConversionFailure(
-                        2,
-                        rusqlite::types::Type::Text,
-                        Box::new(err),
-                    )
-                })?,
-                severity: row.get(3)?,
-                enabled: row.get::<_, i64>(4)? != 0,
+        let rules = stmt
+            .query_map([], |row| {
+                let condition_json: String = row.get(2)?;
+                Ok(AlertRule {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    condition: serde_json::from_str(&condition_json).map_err(|err| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            2,
+                            rusqlite::types::Type::Text,
+                            Box::new(err),
+                        )
+                    })?,
+                    severity: row.get(3)?,
+                    enabled: row.get::<_, i64>(4)? != 0,
+                })
             })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
         Ok(rules)
     }
 
@@ -299,25 +304,26 @@ impl AlertManager {
                  ORDER BY title ASC",
             )
             .map_err(|e| e.to_string())?;
-        let runbooks = stmt.query_map([], |row| {
-            let steps_json: String = row.get(4)?;
-            Ok(IncidentRunbook {
-                id: row.get(0)?,
-                rule_id: row.get(1)?,
-                title: row.get(2)?,
-                summary: row.get(3)?,
-                steps: serde_json::from_str(&steps_json).map_err(|err| {
-                    rusqlite::Error::FromSqlConversionFailure(
-                        4,
-                        rusqlite::types::Type::Text,
-                        Box::new(err),
-                    )
-                })?,
+        let runbooks = stmt
+            .query_map([], |row| {
+                let steps_json: String = row.get(4)?;
+                Ok(IncidentRunbook {
+                    id: row.get(0)?,
+                    rule_id: row.get(1)?,
+                    title: row.get(2)?,
+                    summary: row.get(3)?,
+                    steps: serde_json::from_str(&steps_json).map_err(|err| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            4,
+                            rusqlite::types::Type::Text,
+                            Box::new(err),
+                        )
+                    })?,
+                })
             })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
         Ok(runbooks)
     }
 
@@ -429,7 +435,8 @@ fn default_runbooks() -> Vec<IncidentRunbook> {
             id: "runbook-err-rate".to_string(),
             rule_id: "err-rate".to_string(),
             title: "High Error Rate".to_string(),
-            summary: "Investigate recent failures, provider outages and permission denials.".to_string(),
+            summary: "Investigate recent failures, provider outages and permission denials."
+                .to_string(),
             steps: vec![
                 "Open observability summary and review recent errors.".to_string(),
                 "Check reliability report and failure concentration by capability.".to_string(),
@@ -440,7 +447,8 @@ fn default_runbooks() -> Vec<IncidentRunbook> {
             id: "runbook-disk-low".to_string(),
             rule_id: "disk-low".to_string(),
             title: "Low Disk Space".to_string(),
-            summary: "Protect local-first state before disk exhaustion causes data loss.".to_string(),
+            summary: "Protect local-first state before disk exhaustion causes data loss."
+                .to_string(),
             steps: vec![
                 "Export logs and prune non-essential artifacts.".to_string(),
                 "Verify SQLite, screenshots and recordings directories.".to_string(),
@@ -451,11 +459,13 @@ fn default_runbooks() -> Vec<IncidentRunbook> {
             id: "runbook-fail-streak".to_string(),
             rule_id: "fail-streak".to_string(),
             title: "Task Failure Streak".to_string(),
-            summary: "Use retry, rollback and debugger traces to recover the failing path.".to_string(),
+            summary: "Use retry, rollback and debugger traces to recover the failing path."
+                .to_string(),
             steps: vec![
                 "Inspect the last failed execution traces.".to_string(),
                 "Retry a single task from the recovery surface.".to_string(),
-                "If the issue came from a deployment, roll back the affected plugin or config.".to_string(),
+                "If the issue came from a deployment, roll back the affected plugin or config."
+                    .to_string(),
             ],
         },
     ]

@@ -4,7 +4,9 @@ pub struct EditFileTool;
 
 #[async_trait::async_trait]
 impl Tool for EditFileTool {
-    fn name(&self) -> &str { "edit_file" }
+    fn name(&self) -> &str {
+        "edit_file"
+    }
 
     fn description(&self) -> &str {
         "Edit a file by replacing a specific text span with new text. Reads the file, performs the replacement, and writes it back."
@@ -22,23 +24,36 @@ impl Tool for EditFileTool {
         })
     }
 
-    fn permission_level(&self) -> PermissionLevel { PermissionLevel::Write }
+    fn permission_level(&self) -> PermissionLevel {
+        PermissionLevel::Write
+    }
 
-    async fn execute(&self, input: serde_json::Value, ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
-        let path = input.get("path").and_then(|v| v.as_str())
+    async fn execute(
+        &self,
+        input: serde_json::Value,
+        ctx: &ToolContext,
+    ) -> Result<ToolOutput, ToolError> {
+        let path = input
+            .get("path")
+            .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError("Missing 'path' parameter".into()))?;
-        let old_text = input.get("old_text").and_then(|v| v.as_str())
+        let old_text = input
+            .get("old_text")
+            .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError("Missing 'old_text' parameter".into()))?;
-        let new_text = input.get("new_text").and_then(|v| v.as_str())
+        let new_text = input
+            .get("new_text")
+            .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError("Missing 'new_text' parameter".into()))?;
 
         // Workspace boundary enforcement
-        let enforcement = crate::tools::enforcer::check_file_write(
-            path,
-            &ctx.app_data_dir.to_string_lossy(),
-        );
+        let enforcement =
+            crate::tools::enforcer::check_file_write(path, &ctx.app_data_dir.to_string_lossy());
         if let crate::tools::enforcer::EnforcementResult::Denied { reason } = enforcement {
-            return Ok(ToolOutput { content: format!("BLOCKED: {}", reason), is_error: true });
+            return Ok(ToolOutput {
+                content: format!("BLOCKED: {}", reason),
+                is_error: true,
+            });
         }
 
         let content = std::fs::read_to_string(path)
@@ -56,7 +71,12 @@ impl Tool for EditFileTool {
             .map_err(|e| ToolError(format!("Failed to write '{}': {}", path, e)))?;
 
         Ok(ToolOutput {
-            content: format!("Edited {} — replaced {} bytes with {} bytes", path, old_text.len(), new_text.len()),
+            content: format!(
+                "Edited {} — replaced {} bytes with {} bytes",
+                path,
+                old_text.len(),
+                new_text.len()
+            ),
             is_error: false,
         })
     }

@@ -84,7 +84,13 @@ impl PluginManager {
         }
 
         copy_dir_recursive(source_path, &dest)?;
-        let plugin = Self::plugin_from_install(manifest.clone(), dest, true, None, PluginLifecycleState::Enabled);
+        let plugin = Self::plugin_from_install(
+            manifest.clone(),
+            dest,
+            true,
+            None,
+            PluginLifecycleState::Enabled,
+        );
         Self::persist_plugin_state(&plugin)?;
         self.plugins.insert(manifest.name.clone(), plugin);
         Ok(manifest)
@@ -326,7 +332,10 @@ impl PluginManager {
         }
     }
 
-    fn load_plugin_state(path: &Path, manifest: &PluginManifest) -> Result<PluginLifecycle, String> {
+    fn load_plugin_state(
+        path: &Path,
+        manifest: &PluginManifest,
+    ) -> Result<PluginLifecycle, String> {
         let state_path = path.join(STATE_FILE);
         if !state_path.exists() {
             return Ok(Self::plugin_from_install(
@@ -361,7 +370,10 @@ impl PluginManager {
         let root = self.backups_root().join(name);
         let mut candidates = vec![];
         if root.exists() {
-            for entry in std::fs::read_dir(&root).map_err(|e| e.to_string())?.flatten() {
+            for entry in std::fs::read_dir(&root)
+                .map_err(|e| e.to_string())?
+                .flatten()
+            {
                 let path = entry.path();
                 if path.is_dir() {
                     let modified = entry
@@ -446,7 +458,12 @@ mod tests {
             PluginLifecycleState::Updated
         );
         assert_eq!(
-            manager.get("demo").unwrap().lifecycle.rollback_version.as_deref(),
+            manager
+                .get("demo")
+                .unwrap()
+                .lifecycle
+                .rollback_version
+                .as_deref(),
             Some("1.0.0")
         );
 

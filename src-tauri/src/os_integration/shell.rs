@@ -225,7 +225,10 @@ impl ShellIntegration {
                 installed: false,
                 menu_label: "Ask AgentOS".to_string(),
                 command_preview: None,
-                issues: vec!["OS context menu integration is currently implemented for Windows only.".to_string()],
+                issues: vec![
+                    "OS context menu integration is currently implemented for Windows only."
+                        .to_string(),
+                ],
             })
         }
     }
@@ -296,8 +299,12 @@ pub fn parse_shell_invocation(args: &[String]) -> Option<ShellInvocation> {
     }
 
     let action_id = action_id?;
-    let canonical = canonicalize_target(&target_path?) .ok()?;
-    let target_kind = if canonical.is_dir() { "directory" } else { "file" };
+    let canonical = canonicalize_target(&target_path?).ok()?;
+    let target_kind = if canonical.is_dir() {
+        "directory"
+    } else {
+        "file"
+    };
 
     Some(ShellInvocation {
         action_id,
@@ -504,7 +511,9 @@ mod tests {
 
         assert_eq!(result.target_kind, "file");
         assert!(result.context_summary.contains("Weekly report"));
-        assert!(result.output.contains("triggered AgentOS from the Windows context menu"));
+        assert!(result
+            .output
+            .contains("triggered AgentOS from the Windows context menu"));
     }
 
     #[test]

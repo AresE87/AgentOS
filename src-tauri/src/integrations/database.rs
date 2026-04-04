@@ -108,7 +108,10 @@ impl DatabaseManager {
                 }
                 Ok(true)
             }
-            other => Err(format!("Unsupported database type: '{}'. Only SQLite is supported.", other)),
+            other => Err(format!(
+                "Unsupported database type: '{}'. Only SQLite is supported.",
+                other
+            )),
         }
     }
 
@@ -167,7 +170,10 @@ impl DatabaseManager {
 
                 Ok(tables)
             }
-            other => Err(format!("Unsupported database type: '{}'. Only SQLite is supported.", other)),
+            other => Err(format!(
+                "Unsupported database type: '{}'. Only SQLite is supported.",
+                other
+            )),
         }
     }
 
@@ -225,7 +231,10 @@ impl DatabaseManager {
                     duration_ms,
                 })
             }
-            other => Err(format!("Unsupported database type: '{}'. Only SQLite is supported.", other)),
+            other => Err(format!(
+                "Unsupported database type: '{}'. Only SQLite is supported.",
+                other
+            )),
         }
     }
 }

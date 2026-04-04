@@ -30,7 +30,10 @@ fn scale_action_coords(
     let scale = |x: i32, y: i32| -> (i32, i32) {
         let real_x = (x as f64 * capture_w as f64 / img_w as f64) as i32;
         let real_y = (y as f64 * capture_h as f64 / img_h as f64) as i32;
-        (real_x.clamp(0, capture_w as i32 - 1), real_y.clamp(0, capture_h as i32 - 1))
+        (
+            real_x.clamp(0, capture_w as i32 - 1),
+            real_y.clamp(0, capture_h as i32 - 1),
+        )
     };
 
     match action {
@@ -698,7 +701,14 @@ pub async fn run_task(
                         step_num,
                         "Screen interaction",
                     );
-                    emit_vision_step(app_handle, task_id, step_num, "Screen interaction", &b64, "capture");
+                    emit_vision_step(
+                        app_handle,
+                        task_id,
+                        step_num,
+                        "Screen interaction",
+                        &b64,
+                        "capture",
+                    );
 
                     // Check for action repetition (before LLM call so warning fires on 2nd repeat)
                     let repeat_count = {
@@ -707,7 +717,11 @@ pub async fn run_task(
                         if len >= 2 {
                             let last = &recent_actions[len - 1];
                             for i in (0..len - 1).rev() {
-                                if &recent_actions[i] == last { count += 1; } else { break; }
+                                if &recent_actions[i] == last {
+                                    count += 1;
+                                } else {
+                                    break;
+                                }
                             }
                         }
                         count
@@ -736,10 +750,20 @@ pub async fn run_task(
                         let mut result = None;
                         for attempt in 0..3u32 {
                             match vision::plan_next_action(
-                                &b64, &effective_task, &step_history, settings, &gateway,
-                                Some((img_w, img_h)), dedup_warning,
-                            ).await {
-                                Ok(a) => { result = Some(a); break; }
+                                &b64,
+                                &effective_task,
+                                &step_history,
+                                settings,
+                                &gateway,
+                                Some((img_w, img_h)),
+                                dedup_warning,
+                            )
+                            .await
+                            {
+                                Ok(a) => {
+                                    result = Some(a);
+                                    break;
+                                }
                                 Err(e) => {
                                     last_err = e;
                                     if attempt < 2 {
@@ -870,7 +894,14 @@ pub async fn run_task(
                     .map_err(|e| e.to_string())??;
 
                     let (sp, b64, img_w, img_h, cap_w, cap_h) = screenshot;
-                    emit_vision_step(app_handle, task_id, 10 + vs, "Screen interaction", &b64, "capture");
+                    emit_vision_step(
+                        app_handle,
+                        task_id,
+                        10 + vs,
+                        "Screen interaction",
+                        &b64,
+                        "capture",
+                    );
 
                     // Check for action repetition (before LLM call so warning fires on 2nd repeat)
                     let repeat_count = {
@@ -879,7 +910,11 @@ pub async fn run_task(
                         if len >= 2 {
                             let last = &recent_actions[len - 1];
                             for i in (0..len - 1).rev() {
-                                if &recent_actions[i] == last { count += 1; } else { break; }
+                                if &recent_actions[i] == last {
+                                    count += 1;
+                                } else {
+                                    break;
+                                }
                             }
                         }
                         count
@@ -908,10 +943,20 @@ pub async fn run_task(
                         let mut result = None;
                         for attempt in 0..3u32 {
                             match vision::plan_next_action(
-                                &b64, &effective_task, &step_history, settings, &gateway,
-                                Some((img_w, img_h)), dedup_warning,
-                            ).await {
-                                Ok(a) => { result = Some(a); break; }
+                                &b64,
+                                &effective_task,
+                                &step_history,
+                                settings,
+                                &gateway,
+                                Some((img_w, img_h)),
+                                dedup_warning,
+                            )
+                            .await
+                            {
+                                Ok(a) => {
+                                    result = Some(a);
+                                    break;
+                                }
                                 Err(e) => {
                                     last_err = e;
                                     if attempt < 2 {
@@ -924,7 +969,8 @@ pub async fn run_task(
                             Some(a) => a,
                             None => {
                                 warn!(task_id, error = %last_err, "Vision failed after 3 retries");
-                                accumulated_output = format!("Vision error after retries: {}", last_err);
+                                accumulated_output =
+                                    format!("Vision error after retries: {}", last_err);
                                 break;
                             }
                         }
@@ -1266,8 +1312,10 @@ async fn execute_with_retry(
                                     cmds.iter().filter_map(|v| v.as_str()).collect();
                                 if !new.is_empty() {
                                     current = new.join("; ");
-                                    tokio::time::sleep(std::time::Duration::from_millis(backoff_ms))
-                                        .await;
+                                    tokio::time::sleep(std::time::Duration::from_millis(
+                                        backoff_ms,
+                                    ))
+                                    .await;
                                     continue;
                                 }
                             }
@@ -1398,7 +1446,14 @@ fn emit(app: &tauri::AppHandle, event: &str, task_id: &str, step: u32, desc: &st
     );
 }
 
-fn emit_vision_step(app: &tauri::AppHandle, task_id: &str, step: u32, desc: &str, screenshot_b64: &str, action_type: &str) {
+fn emit_vision_step(
+    app: &tauri::AppHandle,
+    task_id: &str,
+    step: u32,
+    desc: &str,
+    screenshot_b64: &str,
+    action_type: &str,
+) {
     let _ = app.emit(
         "agent:vision_step",
         serde_json::json!({
@@ -1481,8 +1536,12 @@ mod tests {
         assert!(is_recoverable_failure("network timeout while fetching"));
         assert!(is_recoverable_failure("429 rate limit"));
         assert!(is_recoverable_failure("service unavailable"));
-        assert!(!is_recoverable_failure("syntax error near unexpected token"));
-        assert!(!is_recoverable_failure("The term 'foo' is not recognized as the name of a cmdlet"));
+        assert!(!is_recoverable_failure(
+            "syntax error near unexpected token"
+        ));
+        assert!(!is_recoverable_failure(
+            "The term 'foo' is not recognized as the name of a cmdlet"
+        ));
         assert!(!is_recoverable_failure("wrong password or corrupted vault"));
     }
 }

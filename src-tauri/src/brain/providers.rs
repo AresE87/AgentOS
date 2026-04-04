@@ -77,12 +77,19 @@ impl Providers {
         let tokens_out = data["usage"]["output_tokens"].as_u64().unwrap_or(0) as u32;
 
         // Log prompt cache performance
-        let cache_creation = data["usage"]["cache_creation_input_tokens"].as_u64().unwrap_or(0);
-        let cache_read = data["usage"]["cache_read_input_tokens"].as_u64().unwrap_or(0);
+        let cache_creation = data["usage"]["cache_creation_input_tokens"]
+            .as_u64()
+            .unwrap_or(0);
+        let cache_read = data["usage"]["cache_read_input_tokens"]
+            .as_u64()
+            .unwrap_or(0);
         if cache_read > 0 {
             info!("Prompt cache hit: {} tokens read from cache", cache_read);
         } else if cache_creation > 0 {
-            info!("Prompt cache miss: {} tokens written to cache", cache_creation);
+            info!(
+                "Prompt cache miss: {} tokens written to cache",
+                cache_creation
+            );
         }
 
         Ok((content, tokens_in, tokens_out))
@@ -239,12 +246,21 @@ impl Providers {
 
                     // Log prompt cache performance
                     if let Some(usage) = response_json.get("usage") {
-                        let cache_creation = usage.get("cache_creation_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-                        let cache_read = usage.get("cache_read_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let cache_creation = usage
+                            .get("cache_creation_input_tokens")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0);
+                        let cache_read = usage
+                            .get("cache_read_input_tokens")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0);
                         if cache_read > 0 {
                             info!("Prompt cache hit: {} tokens read from cache", cache_read);
                         } else if cache_creation > 0 {
-                            info!("Prompt cache miss: {} tokens written to cache", cache_creation);
+                            info!(
+                                "Prompt cache miss: {} tokens written to cache",
+                                cache_creation
+                            );
                         }
                     }
 
@@ -262,10 +278,7 @@ impl Providers {
                         .json()
                         .await
                         .map_err(|e| format!("Failed to parse response: {}", e))?;
-                    return Err(format!(
-                        "Anthropic API error {}: {}",
-                        status, response_json
-                    ));
+                    return Err(format!("Anthropic API error {}: {}", status, response_json));
                 }
                 Err(e) if attempt < max_retries && (e.is_connect() || e.is_timeout()) => {
                     last_error = e.to_string();
@@ -277,7 +290,10 @@ impl Providers {
             }
         }
 
-        Err(format!("Anthropic API: max retries exhausted: {}", last_error))
+        Err(format!(
+            "Anthropic API: max retries exhausted: {}",
+            last_error
+        ))
     }
 
     /// Streaming variant of call_anthropic_with_tools.

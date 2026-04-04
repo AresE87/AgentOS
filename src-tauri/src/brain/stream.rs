@@ -26,7 +26,10 @@ pub fn parse_anthropic_sse_event(data: &str) -> Option<ContentDelta> {
             match delta_type {
                 "text_delta" => Some(ContentDelta {
                     delta_type: "text_delta".into(),
-                    text: delta.get("text").and_then(|t| t.as_str()).map(|s| s.to_string()),
+                    text: delta
+                        .get("text")
+                        .and_then(|t| t.as_str())
+                        .map(|s| s.to_string()),
                     tool_name: None,
                     tool_id: None,
                     tool_input_json: None,

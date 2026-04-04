@@ -333,8 +333,14 @@ mod tests {
         // Re-open and verify all values survive roundtrip
         let mut vault2 = SecureVault::new(dir.path());
         vault2.unlock("roundtrip-pw").unwrap();
-        assert_eq!(vault2.retrieve("KEY_A").unwrap(), Some("value-alpha".to_string()));
-        assert_eq!(vault2.retrieve("KEY_B").unwrap(), Some("value-bravo".to_string()));
+        assert_eq!(
+            vault2.retrieve("KEY_A").unwrap(),
+            Some("value-alpha".to_string())
+        );
+        assert_eq!(
+            vault2.retrieve("KEY_B").unwrap(),
+            Some("value-bravo".to_string())
+        );
     }
 
     // ── H3: Verify encrypted data is not plaintext ───────────────

@@ -20,8 +20,7 @@ impl PromptCacheStats {
     pub fn record(&self, creation: u64, read: u64) {
         self.cache_creation_tokens
             .fetch_add(creation, Ordering::Relaxed);
-        self.cache_read_tokens
-            .fetch_add(read, Ordering::Relaxed);
+        self.cache_read_tokens.fetch_add(read, Ordering::Relaxed);
         self.total_requests.fetch_add(1, Ordering::Relaxed);
     }
 

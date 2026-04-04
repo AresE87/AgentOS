@@ -341,19 +341,20 @@ impl OfflineManager {
                  LIMIT ?1",
             )
             .map_err(|e| e.to_string())?;
-        let events = stmt.query_map(params![limit as i64], |row| {
-            Ok(RecoveryEvent {
-                id: row.get(0)?,
-                event_type: row.get(1)?,
-                target_id: row.get(2)?,
-                status: row.get(3)?,
-                details: row.get(4)?,
-                created_at: row.get(5)?,
+        let events = stmt
+            .query_map(params![limit as i64], |row| {
+                Ok(RecoveryEvent {
+                    id: row.get(0)?,
+                    event_type: row.get(1)?,
+                    target_id: row.get(2)?,
+                    status: row.get(3)?,
+                    details: row.get(4)?,
+                    created_at: row.get(5)?,
+                })
             })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
         Ok(events)
     }
 

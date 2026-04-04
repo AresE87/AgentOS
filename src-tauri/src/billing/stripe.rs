@@ -185,16 +185,13 @@ pub async fn create_checkout_session(
         .await
         .map_err(|e| format!("Stripe API error: {}", e))?;
     let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-    json["url"]
-        .as_str()
-        .map(|s| s.to_string())
-        .ok_or_else(|| {
-            let err = json
-                .get("error")
-                .map(|e| format!("{}", e))
-                .unwrap_or_else(|| "No checkout URL in response".into());
-            format!("Stripe error: {}", err)
-        })
+    json["url"].as_str().map(|s| s.to_string()).ok_or_else(|| {
+        let err = json
+            .get("error")
+            .map(|e| format!("{}", e))
+            .unwrap_or_else(|| "No checkout URL in response".into());
+        format!("Stripe error: {}", err)
+    })
 }
 
 /// Create a Stripe Billing Portal session.
@@ -213,16 +210,13 @@ pub async fn create_portal_session(
         .await
         .map_err(|e| format!("Stripe API error: {}", e))?;
     let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-    json["url"]
-        .as_str()
-        .map(|s| s.to_string())
-        .ok_or_else(|| {
-            let err = json
-                .get("error")
-                .map(|e| format!("{}", e))
-                .unwrap_or_else(|| "No portal URL in response".into());
-            format!("Stripe error: {}", err)
-        })
+    json["url"].as_str().map(|s| s.to_string()).ok_or_else(|| {
+        let err = json
+            .get("error")
+            .map(|e| format!("{}", e))
+            .unwrap_or_else(|| "No portal URL in response".into());
+        format!("Stripe error: {}", err)
+    })
 }
 
 /// Retrieve a Stripe customer by ID.

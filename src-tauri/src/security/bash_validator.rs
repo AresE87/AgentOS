@@ -25,25 +25,83 @@ pub enum CommandIntent {
 
 const WRITE_COMMANDS: &[&str] = &[
     // Unix
-    "cp", "mv", "rm", "mkdir", "rmdir", "touch", "chmod", "chown",
-    "ln", "mkfifo", "mknod", "truncate", "shred", "install",
-    "tee", "dd", "mkfs", "mount", "umount",
+    "cp",
+    "mv",
+    "rm",
+    "mkdir",
+    "rmdir",
+    "touch",
+    "chmod",
+    "chown",
+    "ln",
+    "mkfifo",
+    "mknod",
+    "truncate",
+    "shred",
+    "install",
+    "tee",
+    "dd",
+    "mkfs",
+    "mount",
+    "umount",
     // Windows / PowerShell
-    "copy", "move", "del", "rd", "ren", "attrib", "icacls",
-    "New-Item", "Remove-Item", "Copy-Item", "Move-Item", "Rename-Item",
-    "Set-Content", "Add-Content", "Clear-Content", "Out-File",
+    "copy",
+    "move",
+    "del",
+    "rd",
+    "ren",
+    "attrib",
+    "icacls",
+    "New-Item",
+    "Remove-Item",
+    "Copy-Item",
+    "Move-Item",
+    "Rename-Item",
+    "Set-Content",
+    "Add-Content",
+    "Clear-Content",
+    "Out-File",
 ];
 
 const STATE_MODIFYING: &[&str] = &[
     // Unix package managers & system tools
-    "apt", "apt-get", "yum", "dnf", "pacman", "brew", "snap",
-    "npm", "yarn", "pip", "pip3", "cargo", "gem", "go",
-    "docker", "podman", "systemctl", "service", "kill", "pkill",
-    "crontab", "at", "shutdown", "reboot", "halt",
+    "apt",
+    "apt-get",
+    "yum",
+    "dnf",
+    "pacman",
+    "brew",
+    "snap",
+    "npm",
+    "yarn",
+    "pip",
+    "pip3",
+    "cargo",
+    "gem",
+    "go",
+    "docker",
+    "podman",
+    "systemctl",
+    "service",
+    "kill",
+    "pkill",
+    "crontab",
+    "at",
+    "shutdown",
+    "reboot",
+    "halt",
     // Windows
-    "choco", "winget", "scoop", "msiexec", "wmic",
-    "Stop-Process", "Start-Process", "Stop-Service", "Start-Service",
-    "Install-Package", "Uninstall-Package",
+    "choco",
+    "winget",
+    "scoop",
+    "msiexec",
+    "wmic",
+    "Stop-Process",
+    "Start-Process",
+    "Stop-Service",
+    "Start-Service",
+    "Install-Package",
+    "Uninstall-Package",
 ];
 
 // ── Layer 2: Destructive patterns (always blocked) ────────────────
@@ -66,26 +124,75 @@ const DESTRUCTIVE_PATTERNS: &[(&str, &str)] = &[
 // ── Layer 3: System paths ─────────────────────────────────────────
 
 const SYSTEM_PATHS: &[&str] = &[
-    "/etc/", "/usr/", "/var/", "/boot/", "/sys/", "/proc/", "/dev/", "/sbin/", "/lib/", "/opt/",
-    "C:\\Windows\\", "C:\\Program Files\\", "C:\\Program Files (x86)\\",
+    "/etc/",
+    "/usr/",
+    "/var/",
+    "/boot/",
+    "/sys/",
+    "/proc/",
+    "/dev/",
+    "/sbin/",
+    "/lib/",
+    "/opt/",
+    "C:\\Windows\\",
+    "C:\\Program Files\\",
+    "C:\\Program Files (x86)\\",
 ];
 
 // ── Layer 5: Network exfiltration commands ────────────────────────
 
 const NETWORK_COMMANDS: &[&str] = &[
-    "curl", "wget", "ssh", "scp", "rsync", "ping", "traceroute",
-    "nslookup", "dig", "nc", "ncat", "netcat",
-    "Invoke-WebRequest", "Invoke-RestMethod", "Test-Connection",
+    "curl",
+    "wget",
+    "ssh",
+    "scp",
+    "rsync",
+    "ping",
+    "traceroute",
+    "nslookup",
+    "dig",
+    "nc",
+    "ncat",
+    "netcat",
+    "Invoke-WebRequest",
+    "Invoke-RestMethod",
+    "Test-Connection",
 ];
 
 // ── Layer 6: Read-only commands ───────────────────────────────────
 
 const READ_ONLY_COMMANDS: &[&str] = &[
-    "cat", "head", "tail", "less", "more", "wc", "file", "stat",
-    "ls", "dir", "find", "grep", "rg", "awk", "sort", "uniq",
-    "diff", "strings", "hexdump", "od", "xxd", "tree", "du", "df",
-    "Get-Content", "Get-ChildItem", "Get-Item", "Select-String",
-    "Measure-Object", "Get-FileHash", "Test-Path",
+    "cat",
+    "head",
+    "tail",
+    "less",
+    "more",
+    "wc",
+    "file",
+    "stat",
+    "ls",
+    "dir",
+    "find",
+    "grep",
+    "rg",
+    "awk",
+    "sort",
+    "uniq",
+    "diff",
+    "strings",
+    "hexdump",
+    "od",
+    "xxd",
+    "tree",
+    "du",
+    "df",
+    "Get-Content",
+    "Get-ChildItem",
+    "Get-Item",
+    "Select-String",
+    "Measure-Object",
+    "Get-FileHash",
+    "Test-Path",
 ];
 
 // ── Public API ────────────────────────────────────────────────────
@@ -145,10 +252,7 @@ pub fn validate_command(command: &str, read_only: bool) -> ValidationResult {
         for sc in STATE_MODIFYING {
             if first_cmd.eq_ignore_ascii_case(sc) {
                 return ValidationResult::Block {
-                    reason: format!(
-                        "State-modifying command '{}' blocked in read-only mode",
-                        sc
-                    ),
+                    reason: format!("State-modifying command '{}' blocked in read-only mode", sc),
                 };
             }
         }
@@ -179,18 +283,12 @@ pub fn classify_intent(command: &str) -> CommandIntent {
     let fl = first.to_lowercase();
 
     // Read-only commands
-    if READ_ONLY_COMMANDS
-        .iter()
-        .any(|c| fl == c.to_lowercase())
-    {
+    if READ_ONLY_COMMANDS.iter().any(|c| fl == c.to_lowercase()) {
         return CommandIntent::ReadOnly;
     }
 
     // Write commands
-    if WRITE_COMMANDS
-        .iter()
-        .any(|c| fl == c.to_lowercase())
-    {
+    if WRITE_COMMANDS.iter().any(|c| fl == c.to_lowercase()) {
         return CommandIntent::Write;
     }
 
@@ -203,18 +301,12 @@ pub fn classify_intent(command: &str) -> CommandIntent {
     }
 
     // Network commands
-    if NETWORK_COMMANDS
-        .iter()
-        .any(|c| fl == c.to_lowercase())
-    {
+    if NETWORK_COMMANDS.iter().any(|c| fl == c.to_lowercase()) {
         return CommandIntent::Network;
     }
 
     // Package / state management
-    if STATE_MODIFYING
-        .iter()
-        .any(|c| fl == c.to_lowercase())
-    {
+    if STATE_MODIFYING.iter().any(|c| fl == c.to_lowercase()) {
         return CommandIntent::PackageManagement;
     }
 
@@ -257,11 +349,7 @@ fn extract_first_command(command: &str) -> String {
         return part.to_string();
     }
 
-    trimmed
-        .split_whitespace()
-        .next()
-        .unwrap_or("")
-        .to_string()
+    trimmed.split_whitespace().next().unwrap_or("").to_string()
 }
 
 // ── Tests ─────────────────────────────────────────────────────────
@@ -340,10 +428,22 @@ mod tests {
 
     #[test]
     fn classifies_intent_correctly() {
-        assert!(matches!(classify_intent("cat file.txt"), CommandIntent::ReadOnly));
-        assert!(matches!(classify_intent("rm file.txt"), CommandIntent::Write));
-        assert!(matches!(classify_intent("curl http://example.com"), CommandIntent::Network));
-        assert!(matches!(classify_intent("npm install"), CommandIntent::PackageManagement));
+        assert!(matches!(
+            classify_intent("cat file.txt"),
+            CommandIntent::ReadOnly
+        ));
+        assert!(matches!(
+            classify_intent("rm file.txt"),
+            CommandIntent::Write
+        ));
+        assert!(matches!(
+            classify_intent("curl http://example.com"),
+            CommandIntent::Network
+        ));
+        assert!(matches!(
+            classify_intent("npm install"),
+            CommandIntent::PackageManagement
+        ));
     }
 
     #[test]
@@ -389,10 +489,7 @@ mod tests {
     fn classifies_rm_as_write() {
         // `rm` hits WRITE_COMMANDS first in classify_intent; destructive
         // patterns are caught by validate_command (Layer 2), not classify_intent.
-        assert!(matches!(
-            classify_intent("rm -rf /"),
-            CommandIntent::Write
-        ));
+        assert!(matches!(classify_intent("rm -rf /"), CommandIntent::Write));
     }
 
     // ── H3: Security bypass detection tests ──────────────────────

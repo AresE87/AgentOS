@@ -275,7 +275,9 @@ impl SmartPlaybookRunner {
                             last_output = r.output.clone();
                         }
                         // Simple output-based termination check
-                        if last_output.to_lowercase().contains("done") || last_output.to_lowercase().contains("complete") {
+                        if last_output.to_lowercase().contains("done")
+                            || last_output.to_lowercase().contains("complete")
+                        {
                             break;
                         }
                     }
@@ -318,7 +320,8 @@ impl SmartPlaybookRunner {
 
                     let settings = crate::config::Settings::default();
                     let gateway = crate::brain::Gateway::new(&settings);
-                    let response = gateway.complete_with_vision(&prompt, &b64, &settings)
+                    let response = gateway
+                        .complete_with_vision(&prompt, &b64, &settings)
                         .await
                         .map_err(|e| format!("Vision LLM failed: {}", e))?;
 
@@ -349,7 +352,10 @@ impl SmartPlaybookRunner {
                         Ok(StepResult {
                             step_id: step.id.clone(),
                             success: false,
-                            output: format!("Failed to parse vision response for '{}'", resolved_target),
+                            output: format!(
+                                "Failed to parse vision response for '{}'",
+                                resolved_target
+                            ),
                             exit_code: None,
                             duration_ms: start.elapsed().as_millis() as u64,
                         })
@@ -362,7 +368,10 @@ impl SmartPlaybookRunner {
                         return Ok(StepResult {
                             step_id: step.id.clone(),
                             success: true,
-                            output: format!("[dry-run] Browse '{}' for '{}'", resolved_url, resolved_task),
+                            output: format!(
+                                "[dry-run] Browse '{}' for '{}'",
+                                resolved_url, resolved_task
+                            ),
                             exit_code: None,
                             duration_ms: start.elapsed().as_millis() as u64,
                         });
@@ -389,7 +398,10 @@ impl SmartPlaybookRunner {
                                 Err(e) => Ok(StepResult {
                                     step_id: step.id.clone(),
                                     success: true,
-                                    output: format!("Page fetched but LLM analysis failed: {}. Raw: {}", e, page_text),
+                                    output: format!(
+                                        "Page fetched but LLM analysis failed: {}. Raw: {}",
+                                        e, page_text
+                                    ),
                                     exit_code: None,
                                     duration_ms: start.elapsed().as_millis() as u64,
                                 }),
@@ -429,11 +441,13 @@ impl SmartPlaybookRunner {
 
                     let settings = crate::config::Settings::default();
                     let gateway = crate::brain::Gateway::new(&settings);
-                    let response = gateway.complete_with_vision(&prompt, &b64, &settings)
+                    let response = gateway
+                        .complete_with_vision(&prompt, &b64, &settings)
                         .await
                         .map_err(|e| format!("Vision check failed: {}", e))?;
 
-                    let passed = response.content.contains("\"result\": true") || response.content.contains("\"result\":true");
+                    let passed = response.content.contains("\"result\": true")
+                        || response.content.contains("\"result\":true");
                     Ok(StepResult {
                         step_id: step.id.clone(),
                         success: passed,
@@ -470,7 +484,10 @@ impl SmartPlaybookRunner {
                 .get(step_id)
                 .map(|r| r.output.contains(text))
                 .unwrap_or(false),
-            ConditionCheck::VisionMatch { description, threshold: _ } => {
+            ConditionCheck::VisionMatch {
+                description,
+                threshold: _,
+            } => {
                 // Synchronous fallback: always true (async vision check not available in sync context)
                 // Real vision checks should use the VisionCheck step type instead
                 tracing::warn!("VisionMatch condition evaluated as true (use VisionCheck step for async vision)");

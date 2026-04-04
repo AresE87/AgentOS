@@ -4,7 +4,9 @@ pub struct WebBrowseTool;
 
 #[async_trait::async_trait]
 impl Tool for WebBrowseTool {
-    fn name(&self) -> &str { "web_browse" }
+    fn name(&self) -> &str {
+        "web_browse"
+    }
 
     fn description(&self) -> &str {
         "Fetch a web page and extract its readable text content. Returns the page title, URL, and text body."
@@ -20,16 +22,28 @@ impl Tool for WebBrowseTool {
         })
     }
 
-    fn permission_level(&self) -> PermissionLevel { PermissionLevel::ReadOnly }
+    fn permission_level(&self) -> PermissionLevel {
+        PermissionLevel::ReadOnly
+    }
 
-    async fn execute(&self, input: serde_json::Value, _ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
-        let url = input.get("url").and_then(|v| v.as_str())
+    async fn execute(
+        &self,
+        input: serde_json::Value,
+        _ctx: &ToolContext,
+    ) -> Result<ToolOutput, ToolError> {
+        let url = input
+            .get("url")
+            .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError("Missing 'url' parameter".into()))?;
 
-        let page = crate::web::browser::fetch_page(url).await
+        let page = crate::web::browser::fetch_page(url)
+            .await
             .map_err(|e| ToolError(format!("Browse failed: {}", e)))?;
 
-        let result = format!("Title: {}\nURL: {}\nStatus: {}\n\n{}", page.title, page.url, page.status, page.text);
+        let result = format!(
+            "Title: {}\nURL: {}\nStatus: {}\n\n{}",
+            page.title, page.url, page.status, page.text
+        );
 
         // Truncate to 50KB
         let truncated = if result.len() > 50_000 {
@@ -38,6 +52,9 @@ impl Tool for WebBrowseTool {
             result
         };
 
-        Ok(ToolOutput { content: truncated, is_error: false })
+        Ok(ToolOutput {
+            content: truncated,
+            is_error: false,
+        })
     }
 }

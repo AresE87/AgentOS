@@ -652,7 +652,9 @@ pub async fn get_discord_messages(
     let resp = client
         .get(format!(
             "{}/channels/{}/messages?limit={}",
-            DISCORD_API, channel_id, limit.min(100)
+            DISCORD_API,
+            channel_id,
+            limit.min(100)
         ))
         .header("Authorization", format!("Bot {}", token))
         .send()
@@ -681,7 +683,10 @@ pub async fn get_discord_messages_after(
     let resp = client
         .get(format!(
             "{}/channels/{}/messages?after={}&limit={}",
-            DISCORD_API, channel_id, after_id, limit.min(100)
+            DISCORD_API,
+            channel_id,
+            after_id,
+            limit.min(100)
         ))
         .header("Authorization", format!("Bot {}", token))
         .send()
@@ -699,10 +704,7 @@ pub async fn get_discord_messages_after(
 }
 
 /// Get information about a Discord guild (server).
-pub async fn get_guild_info(
-    guild_id: &str,
-    token: &str,
-) -> Result<serde_json::Value, String> {
+pub async fn get_guild_info(guild_id: &str, token: &str) -> Result<serde_json::Value, String> {
     let client = Client::new();
     let resp = client
         .get(format!("{}/guilds/{}", DISCORD_API, guild_id))
@@ -716,7 +718,9 @@ pub async fn get_guild_info(
         return Err(format!("Discord API error: {}", body));
     }
 
-    resp.json().await.map_err(|e| format!("Discord JSON error: {}", e))
+    resp.json()
+        .await
+        .map_err(|e| format!("Discord JSON error: {}", e))
 }
 
 /// List channels in a Discord guild.
@@ -737,7 +741,9 @@ pub async fn get_guild_channels(
         return Err(format!("Discord API error: {}", body));
     }
 
-    resp.json().await.map_err(|e| format!("Discord JSON error: {}", e))
+    resp.json()
+        .await
+        .map_err(|e| format!("Discord JSON error: {}", e))
 }
 
 /// Add a reaction to a message.

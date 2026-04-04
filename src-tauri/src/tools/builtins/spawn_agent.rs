@@ -71,7 +71,10 @@ impl Tool for SpawnAgentTool {
         // Return a sentinel string that the AgentRuntime detects and replaces
         // with actual sub-agent execution (which needs access to Gateway, etc.).
         Ok(ToolOutput {
-            content: format!("__SPAWN_AGENT__:{}:{}:{}", agent_name, max_iter, instructions),
+            content: format!(
+                "__SPAWN_AGENT__:{}:{}:{}",
+                agent_name, max_iter, instructions
+            ),
             is_error: false,
         })
     }

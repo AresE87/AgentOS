@@ -4,7 +4,9 @@ pub struct WebSearchTool;
 
 #[async_trait::async_trait]
 impl Tool for WebSearchTool {
-    fn name(&self) -> &str { "web_search" }
+    fn name(&self) -> &str {
+        "web_search"
+    }
 
     fn description(&self) -> &str {
         "Search the web using DuckDuckGo. Returns a list of results with title, snippet, and URL."
@@ -20,13 +22,22 @@ impl Tool for WebSearchTool {
         })
     }
 
-    fn permission_level(&self) -> PermissionLevel { PermissionLevel::ReadOnly }
+    fn permission_level(&self) -> PermissionLevel {
+        PermissionLevel::ReadOnly
+    }
 
-    async fn execute(&self, input: serde_json::Value, _ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
-        let query = input.get("query").and_then(|v| v.as_str())
+    async fn execute(
+        &self,
+        input: serde_json::Value,
+        _ctx: &ToolContext,
+    ) -> Result<ToolOutput, ToolError> {
+        let query = input
+            .get("query")
+            .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError("Missing 'query' parameter".into()))?;
 
-        let results = crate::web::browser::web_search(query).await
+        let results = crate::web::browser::web_search(query)
+            .await
             .map_err(|e| ToolError(format!("Search failed: {}", e)))?;
 
         if results.is_empty() {
@@ -36,9 +47,11 @@ impl Tool for WebSearchTool {
             });
         }
 
-        let formatted: Vec<String> = results.iter().enumerate().map(|(i, r)| {
-            format!("{}. {}\n   {}\n   {}", i + 1, r.title, r.snippet, r.url)
-        }).collect();
+        let formatted: Vec<String> = results
+            .iter()
+            .enumerate()
+            .map(|(i, r)| format!("{}. {}\n   {}\n   {}", i + 1, r.title, r.snippet, r.url))
+            .collect();
 
         Ok(ToolOutput {
             content: formatted.join("\n\n"),
