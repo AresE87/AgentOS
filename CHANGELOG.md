@@ -1,5 +1,37 @@
 # Changelog
 
+## [10.0.0] - 2026-04-04 -- Production Ready
+
+### Added
+- P10-4: Documentation & Onboarding
+  - `Tooltip.tsx`: contextual hover tooltip with dark bg, cyan border, fade-in animation
+  - `TourGuide.tsx`: interactive tour overlay with spotlight, step indicators, localStorage persistence
+  - Tour definitions for Home, Command Center, Studio, and Marketing pages
+  - `data-tour` attributes on key page elements for tour targeting
+  - `docs/QUICK_START.md`: 3-step install/configure/run guide
+  - `docs/PRESS_KIT.md`: product description, features, logo guidelines, color palette, contacts
+- P10-5: Monitoring & Analytics
+  - `monitoring/product_health.rs`: HealthReport struct with uptime, task counts, mission stats,
+    training metrics, container count, DB size, memory usage, feature tracking, error history
+  - `ProductHealth::collect()` queries DB + system state for comprehensive health snapshot
+  - `product_start_time` in AppState for uptime tracking
+  - IPC command: `cmd_get_product_health`
+- P10-6: Distribution
+  - `installer/sign_and_package.ps1`: build + package script with SHA-256 checksums
+  - Locates NSIS and MSI artifacts, reports sizes, generates checksum file
+- P10-7: Marketing Bootstrap
+  - `marketing/launch.rs`: LaunchPrep with 30-day content generator and 10-item launch checklist
+  - `LaunchPrep::generate_launch_content()` generates platform-specific posts via LLM
+  - `LaunchPrep::launch_checklist()` returns standard pre-launch tasks
+  - "Lanzamiento" tab in Marketing page with interactive checklist, content generation, calendar grid
+  - IPC commands: `cmd_get_launch_checklist`, `cmd_generate_launch_content`
+
+### Changed
+- Version bump to 10.0.0 across Cargo.toml, frontend package.json
+- `marketing/mod.rs`: added launch module export
+- `lib.rs`: added monitoring module, product_start_time to AppState, 3 new IPC commands
+- Marketing page: added 5th tab (Lanzamiento) with Rocket icon
+
 ## [9.0.0] - 2026-04-04 -- Creator Economy
 
 ### Added
