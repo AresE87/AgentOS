@@ -7,6 +7,7 @@ mod memory_search;
 mod read_file;
 mod screenshot;
 mod search_files;
+pub mod social_tools;
 mod spawn_agent;
 mod type_text;
 mod web_browse;
@@ -22,6 +23,7 @@ pub use memory_search::MemorySearchTool;
 pub use read_file::ReadFileTool;
 pub use screenshot::ScreenshotTool;
 pub use search_files::SearchFilesTool;
+pub use social_tools::{SocialEngagementTool, SocialMentionsTool, SocialPostTool, SocialReplyTool};
 pub use spawn_agent::SpawnAgentTool;
 pub use type_text::TypeTextTool;
 pub use web_browse::WebBrowseTool;
@@ -30,7 +32,7 @@ pub use write_file::WriteFileTool;
 
 use super::ToolRegistry;
 
-/// Register all 14 builtin tools into a registry
+/// Register all 18 builtin tools into a registry
 pub fn register_all(registry: &mut ToolRegistry) {
     registry.register(Box::new(BashTool));
     registry.register(Box::new(ReadFileTool));
@@ -46,4 +48,9 @@ pub fn register_all(registry: &mut ToolRegistry) {
     registry.register(Box::new(EmailTool));
     registry.register(Box::new(MemorySearchTool));
     registry.register(Box::new(SpawnAgentTool));
+    // M8-4: Social media tools for marketing agents
+    registry.register(Box::new(SocialPostTool));
+    registry.register(Box::new(SocialReplyTool));
+    registry.register(Box::new(SocialMentionsTool));
+    registry.register(Box::new(SocialEngagementTool));
 }
