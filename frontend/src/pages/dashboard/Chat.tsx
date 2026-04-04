@@ -1002,43 +1002,40 @@ export default function Chat() {
             );
           })}
 
-          {/* I1: Tool progress indicators */}
+          {/* I1: Tool progress — compact single-line indicator */}
           {(activeTools.length > 0 || completedTools.length > 0) && (
-            <div className="space-y-1.5 py-1">
-              {completedTools.map((t) => (
-                <div
-                  key={t.id}
-                  className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg"
-                  style={{ color: T.green, background: `${T.green}08` }}
-                >
-                  <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                  </svg>
-                  <span style={{ fontFamily: T.mono }}>
-                    {t.tool} completado ({(t.durationMs / 1000).toFixed(1)}s)
-                  </span>
-                </div>
-              ))}
-              {activeTools.map((t) => (
-                <div
-                  key={t.id}
-                  className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg"
-                  style={{ color: T.amber, background: `${T.amber}08` }}
-                >
-                  <span
-                    className="inline-block rounded-full animate-spin shrink-0"
-                    style={{
-                      width: 12,
-                      height: 12,
-                      border: `2px solid ${T.amber}`,
-                      borderTopColor: 'transparent',
-                    }}
-                  />
-                  <span style={{ fontFamily: T.mono }}>
-                    Ejecutando {t.tool}...
-                  </span>
-                </div>
-              ))}
+            <div className="flex justify-start py-1">
+              <div
+                className="inline-flex flex-wrap items-center gap-2 rounded-xl px-4 py-2.5 border max-w-[85%]"
+                style={{ background: T.bgSurface, borderColor: 'rgba(0,229,229,0.08)' }}
+              >
+                {/* Active tool — show only the latest one */}
+                {activeTools.length > 0 && (
+                  <div className="flex items-center gap-2 text-xs" style={{ color: T.amber }}>
+                    <span
+                      className="inline-block rounded-full animate-spin shrink-0"
+                      style={{
+                        width: 12,
+                        height: 12,
+                        border: `2px solid ${T.amber}`,
+                        borderTopColor: 'transparent',
+                      }}
+                    />
+                    <span style={{ fontFamily: T.mono }}>
+                      {activeTools[activeTools.length - 1].tool}
+                    </span>
+                  </div>
+                )}
+                {/* Summary of completed tools */}
+                {completedTools.length > 0 && (
+                  <div className="flex items-center gap-1.5 text-xs" style={{ color: T.green }}>
+                    <CheckCircle size={12} />
+                    <span style={{ fontFamily: T.mono }}>
+                      {completedTools.length} herramienta{completedTools.length > 1 ? 's' : ''}
+                    </span>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
