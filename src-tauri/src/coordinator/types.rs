@@ -245,6 +245,8 @@ pub struct DAGNode {
     pub awaiting_approval: bool,
     #[serde(default)]
     pub approved_to_run: bool,
+    #[serde(default)]
+    pub execution_target: ExecutionTarget,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -348,6 +350,25 @@ pub struct MissionSummary {
     pub created_at: DateTime<Utc>,
 }
 
+// === EXECUTION TARGET ===
+// v6: siempre Local. v7: Docker sandbox.
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub enum ExecutionTarget {
+    /// Ejecutar directamente en la PC del host (v6 default)
+    Local,
+    /// Ejecutar en un container Docker local
+    DockerLocal { container_id: String },
+    /// Ejecutar en un container Docker en otra PC del mesh
+    DockerRemote { node_id: String, container_id: String },
+}
+
+impl Default for ExecutionTarget {
+    fn default() -> Self {
+        ExecutionTarget::Local
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -385,6 +406,7 @@ mod tests {
             position: None,
             awaiting_approval: false,
             approved_to_run: false,
+            execution_target: ExecutionTarget::default(),
         }
     }
 

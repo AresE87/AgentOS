@@ -1,5 +1,6 @@
 use crate::coordinator::types::{
-    AgentAssignment, AgentLevel, DAGEdge, DAGNode, EdgeType, NodePosition, SubtaskStatus, TaskDAG,
+    AgentAssignment, AgentLevel, DAGEdge, DAGNode, EdgeType, ExecutionTarget, NodePosition,
+    SubtaskStatus, TaskDAG,
 };
 
 pub struct MissionTemplates;
@@ -380,6 +381,7 @@ fn node(
         position: Some(NodePosition { x, y }),
         awaiting_approval: false,
         approved_to_run: false,
+        execution_target: ExecutionTarget::default(),
     }
 }
 

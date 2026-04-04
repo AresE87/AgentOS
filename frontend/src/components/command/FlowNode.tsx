@@ -95,6 +95,14 @@ export function FlowNode({ data: rawData, selected }: NodeProps) {
             <div className="text-[11px] text-[#AABCB5]">
               {node.assignment.specialist_name ?? node.assignment.specialist ?? 'Sin especialista'}
             </div>
+            {/* Execution target badge — v7 bridge */}
+            {node.execution_target && node.execution_target !== 'Local' && (
+              <div className="text-[9px] font-mono text-[#8A9E97] mt-0.5">
+                {node.execution_target === 'DockerLocal' ? '\uD83D\uDC33 Docker'
+                 : node.execution_target?.startsWith?.('DockerRemote') ? '\uD83C\uDF10 Remote'
+                 : ''}
+              </div>
+            )}
           </div>
         </div>
         <div

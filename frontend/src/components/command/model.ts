@@ -58,6 +58,7 @@ export interface DAGNode {
   approved_to_run?: boolean;
   liveOutput?: string;
   toolState?: { toolName: string; success?: boolean } | null;
+  execution_target?: string;
 }
 
 export interface DAGEdge {

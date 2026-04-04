@@ -139,6 +139,7 @@ impl TaskPlanner {
                 position: None,
                 awaiting_approval: false,
                 approved_to_run: false,
+                execution_target: ExecutionTarget::default(),
             };
 
             dag.add_node(node);

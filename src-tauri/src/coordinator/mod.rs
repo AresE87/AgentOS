@@ -16,5 +16,5 @@ pub use specialists::{SpecialistCategory, SpecialistProfile, SpecialistRegistry}
 pub use templates::MissionTemplates;
 pub use types::{
     AgentAssignment, AgentLevel, AutonomyLevel, CoordinatorMode, DAGEdge, DAGNode, EdgeType,
-    Mission, MissionStatus, MissionSummary, NodePosition, SubtaskStatus, TaskDAG,
+    ExecutionTarget, Mission, MissionStatus, MissionSummary, NodePosition, SubtaskStatus, TaskDAG,
 };

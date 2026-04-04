@@ -28,6 +28,7 @@ pub struct AgentWorker {
     pub assignment: AgentAssignment,
     pub runtime: AgentRuntime,
     pub status: WorkerStatus,
+    pub execution_target: ExecutionTarget,
 }
 
 #[derive(Clone)]
@@ -127,6 +128,7 @@ impl AgentPool {
             assignment: node.assignment.clone(),
             runtime,
             status: WorkerStatus::Idle,
+            execution_target: node.execution_target.clone(),
         };
 
         self.active_workers
@@ -205,13 +207,23 @@ impl AgentPool {
             })
             .unwrap_or_else(|| format!("{:?}", worker.assignment.level));
 
+        let execution_mode = match &worker.execution_target {
+            ExecutionTarget::Local => ExecutionMode::Host,
+            ExecutionTarget::DockerLocal { container_id } => {
+                ExecutionMode::Sandbox { container_id: container_id.clone() }
+            }
+            ExecutionTarget::DockerRemote { container_id, .. } => {
+                ExecutionMode::Sandbox { container_id: container_id.clone() }
+            }
+        };
+
         let ctx = ToolContext {
             agent_name,
             task_id: task_id.clone(),
             db_path: self.db_path.clone(),
             app_data_dir: self.app_data_dir.clone(),
             kill_switch: self.kill_switch.clone(),
-            execution_mode: ExecutionMode::default(),
+            execution_mode,
         };
 
         let system_prompt = worker

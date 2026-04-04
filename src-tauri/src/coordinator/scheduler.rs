@@ -24,6 +24,20 @@ pub enum SchedulerError {
     Join(String),
 }
 
+// v7 INTEGRATION POINT: select_target()
+// When v7 lands, the scheduler will call this before spawning each worker:
+//
+// fn select_target(&self, node: &DAGNode, available_nodes: &[MeshNode]) -> ExecutionTarget {
+//     if sandbox::SandboxManager::is_docker_available().await {
+//         let cid = sandbox::WorkerContainer::start(&worker_id, workspace, port).await?;
+//         ExecutionTarget::DockerLocal { container_id: cid }
+//     } else if let Some(remote) = find_best_remote(available_nodes) {
+//         ExecutionTarget::DockerRemote { node_id: remote.id, container_id: "".into() }
+//     } else {
+//         ExecutionTarget::Local
+//     }
+// }
+
 impl TaskScheduler {
     pub fn new(event_bus: Arc<EventBus>) -> Self {
         Self { event_bus }
