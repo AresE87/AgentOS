@@ -4,6 +4,7 @@ import { Send, Zap, ArrowUp, ArrowDown, Minus } from 'lucide-react';
 import { LineChart, Line, ResponsiveContainer } from 'recharts';
 import { useAgent } from '../../hooks/useAgent';
 import type { AgentStatus, TaskResult } from '../../types/ipc';
+import TourGuide, { HOME_TOUR } from '../../components/TourGuide';
 
 // ---------------------------------------------------------------------------
 // Design tokens (inline)
@@ -250,16 +251,25 @@ export default function Home() {
 
   if (loading) {
     return (
-      <div style={{ padding: 40, display: 'flex', justifyContent: 'center' }}>
-        <span style={{ color: C.textMuted, fontFamily: '"JetBrains Mono", monospace', fontSize: 12 }}>
-          Initializing agent...
-        </span>
+      <div style={{ background: C.bgPrimary, minHeight: '100vh', padding: '32px 40px', fontFamily: 'Inter, sans-serif' }}>
+        <div style={{ height: 32, width: 200, borderRadius: 8, background: C.bgElevated, marginBottom: 24, animation: 'skeletonPulse 2s ease-in-out infinite' }} />
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 32 }}>
+          {[...Array(4)].map((_, i) => (
+            <div key={i} style={{ height: 96, borderRadius: 12, background: C.bgElevated, animation: 'skeletonPulse 2s ease-in-out infinite', animationDelay: `${i * 0.1}s` }} />
+          ))}
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 16 }}>
+          <div style={{ height: 240, borderRadius: 12, background: C.bgElevated, animation: 'skeletonPulse 2s ease-in-out infinite' }} />
+          <div style={{ height: 240, borderRadius: 12, background: C.bgElevated, animation: 'skeletonPulse 2s ease-in-out infinite', animationDelay: '0.15s' }} />
+        </div>
+        <style>{`@keyframes skeletonPulse { 0%,100% { opacity: 0.4; } 50% { opacity: 0.8; } }`}</style>
       </div>
     );
   }
 
   return (
     <div style={{ background: C.bgPrimary, minHeight: '100vh', fontFamily: 'Inter, sans-serif' }}>
+      <TourGuide tourId="home" steps={HOME_TOUR} />
       {/* --- Keyframes for pulse animation --- */}
       <style>{`
         @keyframes aosPulse {
@@ -364,7 +374,7 @@ export default function Home() {
         {/* ==============================================================
             2. KPI CARDS
            ============================================================== */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
+        <div data-tour="home-kpis" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
           <KpiCard
             label="Tasks Today"
             value={String(stats.tasks_today)}
@@ -409,6 +419,7 @@ export default function Home() {
           >
             <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
               <input
+                data-tour="home-input"
                 id="aos-quick-input"
                 type="text"
                 placeholder="What should I do?"
@@ -450,7 +461,7 @@ export default function Home() {
             </div>
 
             {/* Suggestion chips */}
-            <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+            <div data-tour="home-shortcuts" style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
               {suggestions.map((s) => (
                 <button
                   key={s}

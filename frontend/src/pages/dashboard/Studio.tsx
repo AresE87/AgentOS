@@ -8,7 +8,7 @@ import {
   ArrowUpRight, Clock, Radio, ChevronRight, Zap,
   MessageSquare, CreditCard, ArrowUp,
   SortDesc, Activity, Mic, StopCircle,
-  Loader2, Shield, FileText,
+  Shield, FileText,
 } from 'lucide-react';
 import { useAgent } from '../../hooks/useAgent';
 
@@ -422,7 +422,17 @@ function MisTrainings() {
     try { await trainingDelete(id); load(); } catch {}
   };
 
-  if (loading) return <div style={{ color: C.textMuted, textAlign: 'center', padding: 40 }}>Cargando trainings...</div>;
+  if (loading) return (
+    <div style={{ padding: 20 }}>
+      <div style={{ height: 24, width: 180, borderRadius: 8, background: C.bgElevated, marginBottom: 20, animation: 'skeletonPulse 2s ease-in-out infinite' }} />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {[...Array(3)].map((_, i) => (
+          <div key={i} style={{ height: 72, borderRadius: 10, background: C.bgElevated, animation: 'skeletonPulse 2s ease-in-out infinite', animationDelay: `${i * 0.1}s` }} />
+        ))}
+      </div>
+      <style>{`@keyframes skeletonPulse { 0%,100% { opacity: 0.4; } 50% { opacity: 0.8; } }`}</style>
+    </div>
+  );
 
   return (
     <div>
@@ -1396,10 +1406,14 @@ function CreatorDashboard() {
   }, [loading, earnings, balance]);
 
   if (loading) return (
-    <div style={{ padding: 40, textAlign: 'center' }}>
-      <Loader2 size={24} color={C.cyan} style={{ animation: 'spin 1s linear infinite' }} />
-      <div style={{ color: C.textMuted, marginTop: 12, fontSize: 13 }}>Cargando panel de creador...</div>
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    <div style={{ padding: 20 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 24 }}>
+        {[...Array(3)].map((_, i) => (
+          <div key={i} style={{ height: 80, borderRadius: 12, background: C.bgElevated, animation: 'skeletonPulse 2s ease-in-out infinite', animationDelay: `${i * 0.1}s` }} />
+        ))}
+      </div>
+      <div style={{ height: 200, borderRadius: 12, background: C.bgElevated, animation: 'skeletonPulse 2s ease-in-out infinite' }} />
+      <style>{`@keyframes skeletonPulse { 0%,100% { opacity: 0.4; } 50% { opacity: 0.8; } }`}</style>
     </div>
   );
 

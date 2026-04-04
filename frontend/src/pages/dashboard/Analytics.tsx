@@ -238,11 +238,19 @@ export default function Analytics() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full" style={{ background: '#0A0E14' }}>
-        <div className="animate-pulse flex items-center gap-2">
-          <BarChart3 size={18} style={{ color: '#00E5E5' }} />
-          <span className="text-sm" style={{ color: '#3D4F5F' }}>Loading analytics...</span>
+      <div style={{ background: '#0A0E14', minHeight: '100vh', padding: '32px 40px' }}>
+        <div style={{ height: 28, width: 180, borderRadius: 8, background: '#1A1E26', marginBottom: 24, animation: 'skeletonPulse 2s ease-in-out infinite' }} />
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 32 }}>
+          {[...Array(4)].map((_, i) => (
+            <div key={i} style={{ height: 88, borderRadius: 12, background: '#1A1E26', animation: 'skeletonPulse 2s ease-in-out infinite', animationDelay: `${i * 0.1}s` }} />
+          ))}
         </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
+          <div style={{ height: 200, borderRadius: 12, background: '#1A1E26', animation: 'skeletonPulse 2s ease-in-out infinite' }} />
+          <div style={{ height: 200, borderRadius: 12, background: '#1A1E26', animation: 'skeletonPulse 2s ease-in-out infinite', animationDelay: '0.15s' }} />
+        </div>
+        <div style={{ height: 160, borderRadius: 12, background: '#1A1E26', animation: 'skeletonPulse 2s ease-in-out infinite', animationDelay: '0.2s' }} />
+        <style>{`@keyframes skeletonPulse { 0%,100% { opacity: 0.4; } 50% { opacity: 0.8; } }`}</style>
       </div>
     );
   }

@@ -5,9 +5,10 @@ import {
   Megaphone, BarChart3, FileText, MessageCircle, Target,
   Globe, TrendingUp, Users, Clock,
   Send, Edit3, EyeOff, Plus, RefreshCw, Calendar,
-  ChevronRight, Filter, Sparkles, Zap,
+  ChevronRight, Filter, Sparkles, Zap, Rocket, CheckSquare,
 } from 'lucide-react';
 import { useAgent } from '../../hooks/useAgent';
+import TourGuide, { MARKETING_TOUR } from '../../components/TourGuide';
 
 // ---------------------------------------------------------------------------
 // Design tokens
@@ -34,7 +35,7 @@ const C = {
   border: 'rgba(0,229,229,0.08)',
 } as const;
 
-type MarketingTab = 'overview' | 'content' | 'menciones' | 'campanas';
+type MarketingTab = 'overview' | 'content' | 'menciones' | 'campanas' | 'lanzamiento';
 
 // ---------------------------------------------------------------------------
 // Platform helpers
@@ -130,6 +131,7 @@ function KPICard({ label, value, icon: Icon, trend }: {
 // ---------------------------------------------------------------------------
 function OverviewTab() {
   const { socialGetEngagement, socialGetMentions, socialListPlatforms, generateWeeklyPlan } = useAgent();
+  const [loading, setLoading] = useState(true);
   const [kpis, setKpis] = useState({ followers: 0, engagementRate: '0%', postsThisWeek: 0, pendingMentions: 0 });
   const [platforms, setPlatforms] = useState<any[]>([]);
   const [recentActivity, setRecentActivity] = useState<any[]>([]);
@@ -165,7 +167,7 @@ function OverviewTab() {
       if (r?.platforms) {
         setPlatforms(r.platforms.map((p: string) => ({ id: p, connected: true, followers: '--' })));
       }
-    }).catch(() => {});
+    }).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
   const handleGeneratePromo = useCallback(async () => {
@@ -188,10 +190,25 @@ function OverviewTab() {
     }
   }, [promoPlatforms, promoFrequency]);
 
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+          {[...Array(4)].map((_, i) => (
+            <div key={i} style={{ flex: '1 1 200px', height: 88, borderRadius: 12, background: C.bgElevated, animation: 'skeletonPulse 2s ease-in-out infinite', animationDelay: `${i * 0.1}s` }} />
+          ))}
+        </div>
+        <div style={{ height: 200, borderRadius: 12, background: C.bgElevated, animation: 'skeletonPulse 2s ease-in-out infinite' }} />
+        <div style={{ height: 160, borderRadius: 12, background: C.bgElevated, animation: 'skeletonPulse 2s ease-in-out infinite', animationDelay: '0.15s' }} />
+        <style>{`@keyframes skeletonPulse { 0%,100% { opacity: 0.4; } 50% { opacity: 0.8; } }`}</style>
+      </div>
+    );
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       {/* KPI Cards */}
-      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+      <div data-tour="mkt-social" style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
         <KPICard label="Total Seguidores" value={kpis.followers || '--'} icon={Users} trend="+12% vs semana anterior" />
         <KPICard label="Tasa de Engagement" value={kpis.engagementRate} icon={TrendingUp} />
         <KPICard label="Posts esta Semana" value={kpis.postsThisWeek} icon={FileText} />
@@ -231,7 +248,7 @@ function OverviewTab() {
       </div>
 
       {/* M8-5: Self-Promotion Section */}
-      <div style={{ background: C.bgSurface, border: `1px solid ${C.border}`, borderRadius: 12, padding: 20 }}>
+      <div data-tour="mkt-generate" style={{ background: C.bgSurface, border: `1px solid ${C.border}`, borderRadius: 12, padding: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <Sparkles size={18} style={{ color: C.cyan }} />
@@ -750,7 +767,7 @@ function MencionesTab() {
   });
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <div data-tour="mkt-mentions" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       {/* Action bar */}
       <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
         <button
@@ -1204,6 +1221,7 @@ const TABS: { id: MarketingTab; label: string; icon: typeof BarChart3 }[] = [
   { id: 'content', label: 'Contenido', icon: FileText },
   { id: 'menciones', label: 'Menciones', icon: MessageCircle },
   { id: 'campanas', label: 'Campanas', icon: Target },
+  { id: 'lanzamiento', label: 'Lanzamiento', icon: Rocket },
 ];
 
 export default function Marketing() {
@@ -1211,6 +1229,7 @@ export default function Marketing() {
 
   return (
     <div style={{ padding: '24px 32px', maxWidth: 1200, margin: '0 auto' }}>
+      <TourGuide tourId="marketing" steps={MARKETING_TOUR} />
       {/* Header */}
       <div style={{ marginBottom: 24 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
@@ -1254,6 +1273,248 @@ export default function Marketing() {
       {activeTab === 'content' && <ContentTab />}
       {activeTab === 'menciones' && <MencionesTab />}
       {activeTab === 'campanas' && <CampanasTab />}
+      {activeTab === 'lanzamiento' && <LaunchTab />}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// P10-7: Launch Tab — Checklist + Content Generation
+// ---------------------------------------------------------------------------
+function LaunchTab() {
+  const tauriInvoke = async (cmd: string, args?: Record<string, unknown>) => {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke(cmd, args);
+  };
+  const [checklist, setChecklist] = useState<{ task: string; done: boolean }[]>([]);
+  const [generating, setGenerating] = useState(false);
+  const [launchContent, setLaunchContent] = useState<any[]>([]);
+  const [previewIdx, setPreviewIdx] = useState<number | null>(null);
+
+  useEffect(() => {
+    tauriInvoke('cmd_get_launch_checklist').then((r: any) => {
+      if (Array.isArray(r)) setChecklist(r);
+      else if (r?.items) setChecklist(r.items);
+      else setChecklist([
+        { task: 'Configurar cuentas de redes sociales', done: false },
+        { task: 'Generar 30 dias de contenido', done: false },
+        { task: 'Preparar video demo (90 segundos)', done: false },
+        { task: 'Escribir post de Product Hunt', done: false },
+        { task: 'Preparar thread de Twitter/X', done: false },
+        { task: 'Publicar en Reddit (r/SideProject, r/artificial)', done: false },
+        { task: 'Publicar en Hacker News', done: false },
+        { task: 'Enviar a newsletters (TLDR, Ben\'s Bites)', done: false },
+        { task: 'Configurar auto-respuesta a menciones', done: false },
+        { task: 'Verificar que el instalador funciona limpio', done: false },
+      ]);
+    }).catch(() => {
+      setChecklist([
+        { task: 'Configurar cuentas de redes sociales', done: false },
+        { task: 'Generar 30 dias de contenido', done: false },
+        { task: 'Preparar video demo (90 segundos)', done: false },
+        { task: 'Escribir post de Product Hunt', done: false },
+        { task: 'Preparar thread de Twitter/X', done: false },
+        { task: 'Publicar en Reddit (r/SideProject, r/artificial)', done: false },
+        { task: 'Publicar en Hacker News', done: false },
+        { task: 'Enviar a newsletters (TLDR, Ben\'s Bites)', done: false },
+        { task: 'Configurar auto-respuesta a menciones', done: false },
+        { task: 'Verificar que el instalador funciona limpio', done: false },
+      ]);
+    });
+  }, []);
+
+  const toggleItem = (idx: number) => {
+    setChecklist(prev => prev.map((item, i) => i === idx ? { ...item, done: !item.done } : item));
+  };
+
+  const handleGenerate = useCallback(async () => {
+    setGenerating(true);
+    try {
+      const result: any = await tauriInvoke('cmd_generate_launch_content', {
+        productName: 'AgentOS',
+        productDescription: 'Sistema operativo de agentes IA que ejecuta tareas reales en tu escritorio.',
+        platforms: ['twitter', 'linkedin', 'reddit', 'hn'],
+      });
+      if (Array.isArray(result)) setLaunchContent(result);
+      else if (result?.posts) setLaunchContent(result.posts);
+      else setLaunchContent([]);
+    } catch {
+      setLaunchContent([]);
+    }
+    setGenerating(false);
+  }, []);
+
+  const completedCount = checklist.filter(i => i.done).length;
+  const progress = checklist.length > 0 ? Math.round((completedCount / checklist.length) * 100) : 0;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      {/* Progress overview */}
+      <div style={{ background: C.bgSurface, border: `1px solid ${C.border}`, borderRadius: 12, padding: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+          <Rocket size={18} style={{ color: C.cyan }} />
+          <h3 style={{ fontSize: 16, fontWeight: 700, color: C.textPrimary, fontFamily: 'Sora, sans-serif' }}>
+            Preparacion para Lanzamiento
+          </h3>
+          <span style={{
+            fontSize: 12, fontWeight: 700, color: progress === 100 ? '#2ECC71' : C.cyan,
+            fontFamily: 'IBM Plex Mono, monospace',
+          }}>
+            {progress}%
+          </span>
+        </div>
+        <div style={{
+          height: 6, background: 'rgba(0,229,229,0.08)', borderRadius: 3,
+          overflow: 'hidden', marginBottom: 20,
+        }}>
+          <div style={{
+            height: '100%', width: `${progress}%`,
+            background: progress === 100 ? '#2ECC71' : C.cyan,
+            borderRadius: 3, transition: 'width 0.3s ease',
+          }} />
+        </div>
+
+        {/* Checklist */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {checklist.map((item, i) => (
+            <div
+              key={i}
+              onClick={() => toggleItem(i)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 12,
+                padding: '10px 14px', borderRadius: 8,
+                background: item.done ? 'rgba(46,204,113,0.06)' : C.bgElevated,
+                border: `1px solid ${item.done ? 'rgba(46,204,113,0.2)' : C.border}`,
+                cursor: 'pointer', transition: 'background 0.15s, border-color 0.15s',
+              }}
+            >
+              <div style={{
+                width: 20, height: 20, borderRadius: 4,
+                border: `2px solid ${item.done ? '#2ECC71' : C.textMuted}`,
+                background: item.done ? '#2ECC71' : 'transparent',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                transition: 'all 0.15s',
+                flexShrink: 0,
+              }}>
+                {item.done && <CheckSquare size={12} style={{ color: '#0A0E14' }} />}
+              </div>
+              <span style={{
+                fontSize: 13, color: item.done ? '#2ECC71' : C.textPrimary,
+                textDecoration: item.done ? 'line-through' : 'none',
+                opacity: item.done ? 0.7 : 1,
+              }}>
+                {item.task}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Content generation */}
+      <div style={{ background: C.bgSurface, border: `1px solid ${C.border}`, borderRadius: 12, padding: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <Sparkles size={18} style={{ color: C.cyan }} />
+            <h3 style={{ fontSize: 16, fontWeight: 700, color: C.textPrimary, fontFamily: 'Sora, sans-serif' }}>
+              Contenido de Lanzamiento (30 dias)
+            </h3>
+          </div>
+          <button
+            onClick={handleGenerate}
+            disabled={generating}
+            style={{
+              background: generating ? C.bgElevated : 'linear-gradient(135deg, rgba(0,229,229,0.2), rgba(0,229,229,0.08))',
+              border: `1px solid ${C.cyan}40`, borderRadius: 8,
+              padding: '8px 18px', color: C.cyan, fontSize: 12, fontWeight: 600,
+              cursor: generating ? 'wait' : 'pointer',
+              display: 'flex', alignItems: 'center', gap: 6,
+              opacity: generating ? 0.6 : 1,
+            }}
+          >
+            {generating ? <RefreshCw size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Zap size={14} />}
+            {generating ? 'Generando...' : 'Generar contenido de lanzamiento'}
+          </button>
+        </div>
+
+        {launchContent.length === 0 ? (
+          <div style={{
+            textAlign: 'center', padding: '40px 20px',
+            border: `1px dashed ${C.textDim}`, borderRadius: 8,
+          }}>
+            <Rocket size={32} style={{ color: C.textDim, margin: '0 auto 12px' }} />
+            <p style={{ fontSize: 14, color: C.textMuted, marginBottom: 4 }}>
+              Sin contenido generado
+            </p>
+            <p style={{ fontSize: 12, color: C.textDim }}>
+              Genera 30 dias de contenido para todas tus plataformas con un clic.
+            </p>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {/* Calendar-like grid */}
+            <div style={{
+              display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6,
+            }}>
+              {['Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab', 'Dom'].map(d => (
+                <div key={d} style={{
+                  textAlign: 'center', fontSize: 10, color: C.textMuted,
+                  fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, padding: '4px 0',
+                }}>
+                  {d}
+                </div>
+              ))}
+              {launchContent.slice(0, 30).map((post, i) => (
+                <div
+                  key={i}
+                  onClick={() => setPreviewIdx(previewIdx === i ? null : i)}
+                  style={{
+                    background: previewIdx === i ? C.cyanDim : C.bgElevated,
+                    border: `1px solid ${previewIdx === i ? C.cyanBorder : C.border}`,
+                    borderRadius: 6, padding: 8, minHeight: 48, cursor: 'pointer',
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  <div style={{ fontSize: 10, fontWeight: 700, color: C.textMuted, marginBottom: 2 }}>
+                    Dia {i + 1}
+                  </div>
+                  <PlatformIcon platform={post.platform} size={12} />
+                </div>
+              ))}
+            </div>
+
+            {/* Preview */}
+            {previewIdx !== null && launchContent[previewIdx] && (
+              <div style={{
+                background: C.bgElevated, border: `1px solid ${C.cyanBorder}`,
+                borderRadius: 8, padding: 16, marginTop: 8,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <PlatformIcon platform={launchContent[previewIdx].platform} />
+                  <span style={{ fontSize: 12, fontWeight: 600, color: C.textPrimary }}>
+                    Dia {previewIdx + 1} - {launchContent[previewIdx].platform}
+                  </span>
+                  <StatusBadge status={launchContent[previewIdx].status || 'draft'} />
+                </div>
+                <p style={{ fontSize: 13, color: C.textSecondary, lineHeight: 1.6 }}>
+                  {launchContent[previewIdx].content}
+                </p>
+                {launchContent[previewIdx].tags?.length > 0 && (
+                  <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+                    {launchContent[previewIdx].tags.map((tag: string, ti: number) => (
+                      <span key={ti} style={{
+                        fontSize: 10, color: C.cyan, background: C.cyanDim,
+                        padding: '2px 8px', borderRadius: 4,
+                      }}>
+                        #{tag}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
