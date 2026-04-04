@@ -124,6 +124,8 @@ impl CrossTeamOrchestrator {
             if event.processed {
                 continue;
             }
+            // Mark processed immediately so clones reflect the final state
+            event.processed = true;
             for rule in &self.rules {
                 if !rule.active {
                     continue;
@@ -147,7 +149,6 @@ impl CrossTeamOrchestrator {
                     break;
                 }
             }
-            event.processed = true;
         }
         triggered
     }

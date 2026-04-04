@@ -7219,10 +7219,10 @@ async fn cmd_create_campaign(
     description: String,
     platforms: Vec<String>,
 ) -> Result<serde_json::Value, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
-    let conn = db.conn();
+    // Lock async mutex first, then sync -- so the sync guard never crosses an await
     let mut mgr = state.campaign_manager.lock().await;
-    let campaign = mgr.create_and_save(&name, &description, platforms, conn)?;
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let campaign = mgr.create_and_save(&name, &description, platforms, db.conn())?;
     serde_json::to_value(&campaign).map_err(|e| e.to_string())
 }
 
