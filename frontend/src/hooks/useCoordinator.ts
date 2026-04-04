@@ -399,6 +399,26 @@ export function useCoordinator() {
     setMission(nextMission);
   }, []);
 
+  const getDockerStatus = useCallback(async () => {
+    return callInvoke<{ available: boolean; image_exists: boolean; running_workers: Array<{ id: string; name: string; status: string; port?: number }> }>('get_docker_status');
+  }, []);
+
+  const buildWorkerImage = useCallback(async () => {
+    return callInvoke<unknown>('build_worker_image');
+  }, []);
+
+  const listWorkerContainers = useCallback(async () => {
+    return callInvoke<Array<{ id: string; name: string; status: string; port?: number }>>('list_worker_containers');
+  }, []);
+
+  const getContainerLogs = useCallback(async (containerId: string) => {
+    return callInvoke<unknown>('get_container_logs', { container_id: containerId });
+  }, []);
+
+  const killContainer = useCallback(async (containerId: string) => {
+    return callInvoke<void>('kill_container', { container_id: containerId });
+  }, []);
+
   return {
     mission,
     events,
@@ -431,5 +451,10 @@ export function useCoordinator() {
     loadHistory,
     loadSpecialists,
     loadTools,
+    getDockerStatus,
+    buildWorkerImage,
+    listWorkerContainers,
+    getContainerLogs,
+    killContainer,
   };
 }

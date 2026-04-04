@@ -2,6 +2,7 @@ use crate::config::Settings;
 use crate::coordinator::event_bus::{CoordinatorEvent, EventBus};
 use crate::coordinator::pool::{AgentPool, PoolError, SubtaskExecutionResult};
 use crate::coordinator::types::*;
+use crate::sandbox::{SandboxManager, WorkerContainer, WorkerImage};
 use chrono::Utc;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -24,19 +25,41 @@ pub enum SchedulerError {
     Join(String),
 }
 
-// v7 INTEGRATION POINT: select_target()
-// When v7 lands, the scheduler will call this before spawning each worker:
-//
-// fn select_target(&self, node: &DAGNode, available_nodes: &[MeshNode]) -> ExecutionTarget {
-//     if sandbox::SandboxManager::is_docker_available().await {
-//         let cid = sandbox::WorkerContainer::start(&worker_id, workspace, port).await?;
-//         ExecutionTarget::DockerLocal { container_id: cid }
-//     } else if let Some(remote) = find_best_remote(available_nodes) {
-//         ExecutionTarget::DockerRemote { node_id: remote.id, container_id: "".into() }
-//     } else {
-//         ExecutionTarget::Local
-//     }
-// }
+/// Decide where a node should run. If Docker is available and the worker image
+/// exists, start a new container and return `DockerLocal`; otherwise fall back
+/// to `Local`.
+async fn select_target(docker_available: bool, used_ports: &[u16]) -> (ExecutionTarget, Option<u16>) {
+    if !docker_available {
+        return (ExecutionTarget::Local, None);
+    }
+
+    if !WorkerImage::exists().await {
+        return (ExecutionTarget::Local, None);
+    }
+
+    let port = WorkerContainer::next_available_port(used_ports);
+    let worker_id = uuid::Uuid::new_v4().to_string();
+
+    match WorkerContainer::start(&worker_id, None, port).await {
+        Ok(container) => {
+            tracing::info!(
+                "Started worker container {} on port {}",
+                container.container_id,
+                port
+            );
+            (
+                ExecutionTarget::DockerLocal {
+                    container_id: container.container_id,
+                },
+                Some(port),
+            )
+        }
+        Err(e) => {
+            tracing::warn!("Failed to start container, using host: {}", e);
+            (ExecutionTarget::Local, None)
+        }
+    }
+}
 
 impl TaskScheduler {
     pub fn new(event_bus: Arc<EventBus>) -> Self {
@@ -68,6 +91,22 @@ impl TaskScheduler {
         self.event_bus.emit(CoordinatorEvent::MissionStarted {
             mission_id: mission_id.to_string(),
         });
+
+        // ── Docker setup ───────────────────────────────────────────────
+        let docker_available = SandboxManager::is_docker_available().await;
+        if docker_available {
+            tracing::info!("Docker available — workers will run in containers");
+            if let Err(e) = WorkerImage::ensure().await {
+                tracing::warn!("Failed to build worker image, falling back to host: {}", e);
+            }
+        } else {
+            tracing::info!("Docker not available — workers will run on host");
+        }
+
+        // Track ports and container IDs spawned during this mission so we
+        // can clean them up when the mission ends.
+        let mut used_ports: Vec<u16> = Vec::new();
+        let mut spawned_container_ids: Vec<String> = Vec::new();
 
         let started = std::time::Instant::now();
         let mut join_set = JoinSet::<(String, Result<SubtaskExecutionResult, PoolError>)>::new();
@@ -115,7 +154,39 @@ impl TaskScheduler {
                     (node, context)
                 };
 
-                let worker_id = pool.spawn_worker(&node).await?;
+                // If the node has no explicit target yet and Docker is
+                // available, try to spin up a container for it.
+                let mut node_with_target = node.clone();
+                if node_with_target.execution_target == ExecutionTarget::Local && docker_available {
+                    let (target, maybe_port) =
+                        select_target(docker_available, &used_ports).await;
+                    if let Some(port) = maybe_port {
+                        used_ports.push(port);
+                    }
+                    if let ExecutionTarget::DockerLocal { ref container_id } = target {
+                        spawned_container_ids.push(container_id.clone());
+                        self.event_bus.emit(CoordinatorEvent::ContainerStarted {
+                            mission_id: mission_id.to_string(),
+                            subtask_id: node_id.clone(),
+                            container_id: container_id.clone(),
+                        });
+                    }
+                    node_with_target.execution_target = target;
+
+                    // Persist the chosen target back into the DAG so the
+                    // rest of the pipeline can see it.
+                    {
+                        let mut guard = mission_state.lock().await;
+                        if let Some(mission) = guard.as_mut() {
+                            if let Some(dag_node) = mission.dag.nodes.get_mut(&node_id) {
+                                dag_node.execution_target =
+                                    node_with_target.execution_target.clone();
+                            }
+                        }
+                    }
+                }
+
+                let worker_id = pool.spawn_worker(&node_with_target).await?;
                 let pool_ref = pool.clone();
                 let event_bus = self.event_bus.clone();
                 let settings_clone = settings.clone();
@@ -124,12 +195,13 @@ impl TaskScheduler {
                 let nid = node_id.clone();
                 running.insert(node_id.clone());
 
+                let subtask_node = node_with_target;
                 join_set.spawn(async move {
                     let result = pool_ref
                         .execute_subtask(
                             &mid,
                             &worker_id,
-                            &node,
+                            &subtask_node,
                             context,
                             &event_bus,
                             &handle,
@@ -234,6 +306,22 @@ impl TaskScheduler {
                     }
                 }
                 _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {}
+            }
+        }
+
+        // ── Cleanup Docker containers spawned during this mission ──────
+        if !spawned_container_ids.is_empty() {
+            tracing::info!(
+                "Cleaning up {} worker container(s)",
+                spawned_container_ids.len()
+            );
+            for cid in &spawned_container_ids {
+                if let Err(e) = WorkerContainer::stop(cid).await {
+                    tracing::warn!("Failed to stop container {}: {}", cid, e);
+                }
+                self.event_bus.emit(CoordinatorEvent::ContainerStopped {
+                    container_id: cid.clone(),
+                });
             }
         }
 

@@ -122,6 +122,16 @@ pub enum CoordinatorEvent {
         subtask_id: String,
         question: String,
     },
+
+    // Container lifecycle
+    ContainerStarted {
+        mission_id: String,
+        subtask_id: String,
+        container_id: String,
+    },
+    ContainerStopped {
+        container_id: String,
+    },
 }
 
 pub struct EventBus {

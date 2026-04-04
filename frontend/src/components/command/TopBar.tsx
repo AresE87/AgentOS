@@ -19,6 +19,7 @@ interface TopBarProps {
   onPause: () => void;
   onCancel: () => void;
   runDisabledReason?: string;
+  dockerContainerCount?: number;
 }
 
 const views: Array<{ id: CommandView; label: string }> = [
@@ -99,6 +100,7 @@ export function TopBar({
   onPause,
   onCancel,
   runDisabledReason,
+  dockerContainerCount = 0,
 }: TopBarProps) {
   const metrics = kpiValue(mission);
   const canStart =
@@ -235,7 +237,11 @@ export function TopBar({
             <Layers size={10} />
             Agentes
           </div>
-          <div className="text-lg font-semibold text-[#F4EEE5]">{metrics.agents} nodos</div>
+          <div className="text-lg font-semibold text-[#F4EEE5]">
+            {metrics.agents} nodos{dockerContainerCount > 0 && (
+              <span className="ml-1.5 text-sm text-[#5CD4CA]">{'\u00B7'} {dockerContainerCount} {'\uD83D\uDC33'}</span>
+            )}
+          </div>
         </div>
 
         {/* Progress KPI with circular indicator */}

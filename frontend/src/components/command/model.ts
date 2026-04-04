@@ -141,7 +141,9 @@ export type CoordinatorEvent =
   | { type: 'NodeRemoved'; mission_id: string; node_id: string }
   | { type: 'EdgeAdded'; mission_id: string; from: string; to: string }
   | { type: 'EdgeRemoved'; mission_id: string; from: string; to: string }
-  | { type: 'ApprovalRequested'; mission_id: string; subtask_id: string; question: string };
+  | { type: 'ApprovalRequested'; mission_id: string; subtask_id: string; question: string }
+  | { type: 'ContainerStarted'; container_id: string; name: string; port?: number }
+  | { type: 'ContainerStopped'; container_id: string };
 
 export const levelColors: Record<AgentLevel, string> = {
   Junior: '#2ECC71',
