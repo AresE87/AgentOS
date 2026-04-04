@@ -1,9 +1,8 @@
 pub mod audit;
 pub mod org;
-pub mod quotas;
-pub mod scim;
-pub mod sso;
 pub use audit::AuditLog;
 pub use org::OrgManager;
-pub use quotas::QuotaManager;
-pub use scim::SCIMProvider;
+
+// Enterprise roadmap: SSO (OIDC/SAML), SCIM provisioning, and department
+// quota management were removed as stubs in the F2 cleanup. These features
+// will be re-implemented with production-grade backing stores when needed.
