@@ -20,6 +20,7 @@ import {
   Search,
   Plus,
   X,
+  Users,
 } from 'lucide-react';
 import { useAgent } from '../hooks/useAgent';
 import HomePg from './dashboard/Home';
@@ -35,6 +36,7 @@ import FeedbackInsights from './dashboard/FeedbackInsights';
 import Handoffs from './dashboard/Handoffs';
 import Marketing from './dashboard/Marketing';
 import Studio from './dashboard/Studio';
+import Teams from './dashboard/Teams';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -50,6 +52,7 @@ type Tab =
   | 'developer'
   | 'triggers'
   | 'marketing'
+  | 'teams'
   | 'studio'
   | 'settings'
   | 'feedback'
@@ -73,6 +76,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'developer', label: 'Developer', icon: Code2, section: 'main', shortcut: '7' },
   { id: 'triggers', label: 'Triggers', icon: Clock, section: 'main', shortcut: '8' },
   { id: 'marketing', label: 'Marketing', icon: Megaphone, section: 'main' },
+  { id: 'teams', label: 'Teams', icon: Users, section: 'main' },
   { id: 'studio', label: 'Studio', icon: Palette, section: 'main' },
   { id: 'settings', label: 'Settings', icon: Settings, section: 'main', shortcut: '9' },
   { id: 'feedback', label: 'Feedback', icon: ThumbsUp, section: 'more' },
@@ -89,6 +93,7 @@ const TAB_LABELS: Record<Tab, string> = {
   developer: 'Developer Tools',
   triggers: 'Scheduled Tasks',
   marketing: 'Marketing',
+  teams: 'Agent Teams',
   studio: 'Creator Studio',
   settings: 'Settings',
   feedback: 'Feedback & Insights',
@@ -439,6 +444,7 @@ export default function Dashboard({ onResetWizard }: DashboardProps) {
           {activeTab === 'developer' && <Developer />}
           {activeTab === 'triggers' && <ScheduledTasks />}
           {activeTab === 'marketing' && <Marketing />}
+          {activeTab === 'teams' && <Teams />}
           {activeTab === 'studio' && <Studio />}
           {activeTab === 'settings' && <SettingsPg onResetWizard={onResetWizard} />}
           {activeTab === 'feedback' && <FeedbackInsights />}

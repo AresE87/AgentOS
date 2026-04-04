@@ -47,6 +47,7 @@ pub mod security;
 pub mod social;
 pub mod stability;
 pub mod teams;
+pub mod teams_engine;
 pub mod templates;
 pub mod terminal;
 pub mod testing;
@@ -362,6 +363,8 @@ pub struct AppState {
     pub crash_guard: Arc<stability::CrashGuard>,
     /// P10-5: Product start time for uptime tracking
     pub product_start_time: std::time::Instant,
+    /// T11: Agent Teams as a Service — active team configs + statuses
+    pub active_teams: Arc<tokio::sync::Mutex<Vec<(teams_engine::TeamConfig, teams_engine::runner::TeamStatus)>>>,
 }
 
 #[tauri::command]
@@ -7294,6 +7297,102 @@ async fn cmd_generate_launch_content(
     serde_json::to_value(&posts).map_err(|e| e.to_string())
 }
 
+// ── T11: Agent Teams as a Service — IPC commands ────────────────────────
+
+#[tauri::command]
+fn cmd_get_team_templates() -> Result<serde_json::Value, String> {
+    let templates = teams_engine::templates::all_templates();
+    serde_json::to_value(&templates).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn cmd_get_team_template(id: String) -> Result<serde_json::Value, String> {
+    let template = teams_engine::templates::get_template(&id)
+        .ok_or_else(|| format!("Template '{}' not found", id))?;
+    serde_json::to_value(&template).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_activate_team(
+    template_id: String,
+    config: serde_json::Value,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let name = config["name"].as_str().unwrap_or(&template_id).to_string();
+    let team_config = teams_engine::TeamConfig {
+        template_id: template_id.clone(),
+        name,
+        settings: config,
+        active: true,
+        created_at: chrono::Utc::now().to_rfc3339(),
+    };
+    let status = teams_engine::runner::TeamRunner::activate(&team_config)?;
+    let mut teams = state.active_teams.lock().await;
+    // Replace if already exists
+    teams.retain(|(c, _)| c.template_id != template_id);
+    teams.push((team_config, status.clone()));
+    serde_json::to_value(&status).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_deactivate_team(
+    template_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    teams_engine::runner::TeamRunner::deactivate(&template_id)?;
+    let mut teams = state.active_teams.lock().await;
+    teams.retain(|(c, _)| c.template_id != template_id);
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+#[tauri::command]
+async fn cmd_get_team_status(
+    template_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let teams = state.active_teams.lock().await;
+    let status = teams_engine::runner::TeamRunner::get_status(&teams, &template_id)
+        .ok_or_else(|| format!("Team '{}' is not active", template_id))?;
+    serde_json::to_value(&status).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_list_active_teams(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let teams = state.active_teams.lock().await;
+    let statuses = teams_engine::runner::TeamRunner::list_active(&teams);
+    serde_json::to_value(&statuses).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_run_team_cycle(
+    template_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let config = {
+        let teams = state.active_teams.lock().await;
+        teams
+            .iter()
+            .find(|(c, _)| c.template_id == template_id)
+            .map(|(c, _)| c.clone())
+            .ok_or_else(|| format!("Team '{}' is not active", template_id))?
+    };
+    let gateway = state.gateway.lock().await;
+    let settings = state.settings.lock().map_err(|e| e.to_string())?.clone();
+    let result =
+        teams_engine::runner::TeamRunner::run_cycle(&config, &gateway, &settings).await?;
+    // Update last_run timestamp + increment tasks_completed
+    {
+        let mut teams = state.active_teams.lock().await;
+        if let Some((_, status)) = teams.iter_mut().find(|(c, _)| c.template_id == template_id) {
+            status.last_run = Some(chrono::Utc::now().to_rfc3339());
+            status.tasks_completed += result["agents_executed"].as_u64().unwrap_or(0);
+        }
+    }
+    Ok(result)
+}
+
 // ── M8-1: Social Media Connectors — IPC commands ─────────────────────────
 
 #[tauri::command]
@@ -8045,6 +8144,7 @@ pub fn run() {
                 // P10-1: Crash guard
                 crash_guard: crash_guard.clone(),
                 product_start_time: std::time::Instant::now(),
+                active_teams: Arc::new(tokio::sync::Mutex::new(Vec::new())),
             });
 
             // ── R35: Deferred startup — plugin discovery in background ────
@@ -8929,6 +9029,14 @@ pub fn run() {
             // P10-7: Launch Prep
             cmd_get_launch_checklist,
             cmd_generate_launch_content,
+            // T11: Agent Teams as a Service
+            cmd_get_team_templates,
+            cmd_get_team_template,
+            cmd_activate_team,
+            cmd_deactivate_team,
+            cmd_get_team_status,
+            cmd_list_active_teams,
+            cmd_run_team_cycle,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");
