@@ -32,6 +32,7 @@ pub mod marketing;
 pub mod marketplace;
 pub mod memory;
 pub mod metrics;
+pub mod monitoring;
 pub mod monitors;
 pub mod observability;
 pub mod offline;
@@ -44,6 +45,7 @@ pub mod plugins;
 pub mod sandbox;
 pub mod security;
 pub mod social;
+pub mod stability;
 pub mod teams;
 pub mod templates;
 pub mod terminal;
@@ -356,6 +358,10 @@ pub struct AppState {
     pub campaign_manager: Arc<tokio::sync::Mutex<marketing::CampaignManager>>,
     /// E9-1: Training Studio — recorder for capturing training packs
     pub training_recorder: Arc<tokio::sync::Mutex<training_studio::TrainingRecorder>>,
+    /// P10-1: Crash guard for stability hardening
+    pub crash_guard: Arc<stability::CrashGuard>,
+    /// P10-5: Product start time for uptime tracking
+    pub product_start_time: std::time::Instant,
 }
 
 #[tauri::command]
@@ -3265,6 +3271,33 @@ async fn cmd_get_security_status(
             "max_output_kb": sandbox.max_output_bytes / 1024,
         },
         "blocked_patterns_count": sandbox.blocked_patterns_count(),
+    }))
+}
+
+// ── P10-3: 10-point security audit report ──────────────────────────
+#[tauri::command]
+fn cmd_run_security_audit() -> Result<serde_json::Value, String> {
+    let results = security::audit_report::SecurityAudit::run_all();
+    let all_pass = results.iter().all(|r| r.status == "pass");
+    Ok(serde_json::json!({
+        "results": results,
+        "all_pass": all_pass,
+        "total_checks": results.len(),
+        "passed": results.iter().filter(|r| r.status == "pass").count(),
+        "failed": results.iter().filter(|r| r.status == "fail").count(),
+        "warnings": results.iter().filter(|r| r.status == "warning").count(),
+    }))
+}
+
+// ── P10-1: Crash recovery status ───────────────────────────────────
+#[tauri::command]
+fn cmd_get_crash_recovery_status(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let prev = state.crash_guard.check_previous_crash();
+    Ok(serde_json::json!({
+        "had_previous_crash": prev.is_some(),
+        "previous_state": prev,
     }))
 }
 
@@ -7219,6 +7252,48 @@ async fn cmd_generate_promo_content(
     }))
 }
 
+// ── P10-5: Product Health Report ─────────────────────────────────────────
+
+#[tauri::command]
+async fn cmd_get_product_health(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let report = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let app_dir = state.db_path.parent().unwrap_or(std::path::Path::new("."));
+        monitoring::ProductHealth::collect(db.conn(), app_dir, state.product_start_time)
+    };
+    serde_json::to_value(&report).map_err(|e| e.to_string())
+}
+
+// ── P10-7: Launch Prep — IPC commands ────────────────────────────────────
+
+#[tauri::command]
+async fn cmd_get_launch_checklist() -> Result<serde_json::Value, String> {
+    let items = marketing::LaunchPrep::launch_checklist();
+    serde_json::to_value(&items).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_generate_launch_content(
+    product_name: String,
+    product_description: String,
+    platforms: Vec<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let gateway = state.gateway.lock().await;
+    let settings = state.settings.lock().map_err(|e| e.to_string())?.clone();
+    let posts = marketing::LaunchPrep::generate_launch_content(
+        &product_name,
+        &product_description,
+        &platforms,
+        &gateway,
+        &settings,
+    )
+    .await?;
+    serde_json::to_value(&posts).map_err(|e| e.to_string())
+}
+
 // ── M8-1: Social Media Connectors — IPC commands ─────────────────────────
 
 #[tauri::command]
@@ -7744,7 +7819,20 @@ pub fn run() {
                 .expect("failed to get app data dir");
             std::fs::create_dir_all(&app_dir).ok();
 
+            let startup_start = std::time::Instant::now();
             tracing::info!("AgentOS starting, data dir: {:?}", app_dir);
+
+            // ── P10-1: Crash guard — detect & recover from previous crash ──
+            let crash_guard = stability::CrashGuard::new(&app_dir);
+            if let Some(prev_crash) = crash_guard.check_previous_crash() {
+                tracing::warn!("Previous crash detected, recovering...");
+                let report = tauri::async_runtime::block_on(
+                    stability::SessionRecovery::recover(&prev_crash),
+                );
+                tracing::info!("Recovery complete: {:?}", report);
+            }
+            crash_guard.mark_running();
+            let crash_guard = Arc::new(crash_guard);
 
             let db_path = app_dir.join("agentos.db");
             let db = memory::Database::new(&db_path).expect("failed to open database");
@@ -7954,6 +8042,9 @@ pub fn run() {
                 training_recorder: Arc::new(tokio::sync::Mutex::new(
                     training_studio::TrainingRecorder::new(),
                 )),
+                // P10-1: Crash guard
+                crash_guard: crash_guard.clone(),
+                product_start_time: std::time::Instant::now(),
             });
 
             // ── R35: Deferred startup — plugin discovery in background ────
@@ -7971,14 +8062,23 @@ pub fn run() {
                 focus_main_window(&app.handle());
             }
 
+            // ── P10-2: Lazy module loading — heavy init in background ──
             {
                 let pm = app.state::<AppState>().plugin_manager.clone();
+                let local_llm_bg = local_llm.clone();
                 tauri::async_runtime::spawn(async move {
+                    // Plugin discovery (deferred)
                     let mut mgr = pm.lock().await;
                     match mgr.discover() {
                         Ok(found) => tracing::info!("Deferred: discovered {} plugins", found.len()),
                         Err(e) => tracing::warn!("Deferred plugin discovery failed: {}", e),
                     }
+                    // Ollama connectivity pre-check (non-blocking)
+                    let llm_status = local_llm_bg.get_status().await;
+                    tracing::info!(
+                        "Deferred: Ollama available={}",
+                        llm_status.available
+                    );
                 });
             }
 
@@ -8255,6 +8355,10 @@ pub fn run() {
                             }
                         }
                         "quit" => {
+                            // P10-1: Mark clean shutdown before exit
+                            if let Some(state) = app.try_state::<AppState>() {
+                                state.crash_guard.mark_stopped();
+                            }
                             app.exit(0);
                         }
                         _ => {}
@@ -8305,10 +8409,17 @@ pub fn run() {
                 }
             });
 
+            // ── P10-2: Log startup time ──────────────────────────────
+            tracing::info!("AgentOS startup completed in {:?}", startup_start.elapsed());
+
             Ok(())
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // P10-1: Mark clean shutdown via crash guard
+                if let Some(state) = window.app_handle().try_state::<AppState>() {
+                    state.crash_guard.mark_stopped();
+                }
                 // Minimize to tray instead of quitting
                 api.prevent_close();
                 let _ = window.hide();
@@ -8451,6 +8562,10 @@ pub fn run() {
             cmd_validate_command,
             cmd_get_security_status,
             cmd_security_audit,
+            // P10-1: Stability commands
+            cmd_get_crash_recovery_status,
+            // P10-3: Security audit report
+            cmd_run_security_audit,
             // R37: Internationalization
             cmd_set_language,
             // R38: Advanced Analytics commands
@@ -8809,6 +8924,11 @@ pub fn run() {
             // E9-5: Training Quality System
             cmd_training_quality_check,
             cmd_training_quality_check_local,
+            // P10-5: Product Health Monitoring
+            cmd_get_product_health,
+            // P10-7: Launch Prep
+            cmd_get_launch_checklist,
+            cmd_generate_launch_content,
         ])
         .run(tauri::generate_context!())
         .expect("error running AgentOS");
