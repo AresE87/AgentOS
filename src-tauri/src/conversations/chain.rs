@@ -1,3 +1,4 @@
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 const MAX_ROUNDS: usize = 5;
@@ -83,6 +84,77 @@ impl ConversationChain {
             self.current_round(),
             self.status
         )
+    }
+
+    // ── SQLite persistence ──────────────────────────────────────────
+
+    /// Ensure the conversation_chains table exists.
+    pub fn ensure_table(conn: &Connection) -> Result<(), String> {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS conversation_chains (
+                id TEXT PRIMARY KEY,
+                topic TEXT NOT NULL,
+                participants TEXT NOT NULL,
+                messages TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )"
+        ).map_err(|e| e.to_string())
+    }
+
+    /// Persist (upsert) a conversation chain to SQLite.
+    pub fn save_to_db(conn: &Connection, chain: &Self) -> Result<(), String> {
+        Self::ensure_table(conn)?;
+
+        let participants = serde_json::to_string(&chain.participants).unwrap_or_else(|_| "[]".into());
+        let messages = serde_json::to_string(&chain.messages).unwrap_or_else(|_| "[]".into());
+
+        conn.execute(
+            "INSERT OR REPLACE INTO conversation_chains (id, topic, participants, messages, status, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![chain.id, chain.topic, participants, messages, chain.status, chain.created_at],
+        ).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    /// Load all persisted conversation chains from SQLite (most recent first, max 50).
+    pub fn load_all(conn: &Connection) -> Vec<Self> {
+        if Self::ensure_table(conn).is_err() {
+            return Vec::new();
+        }
+
+        let mut stmt = match conn.prepare(
+            "SELECT id, topic, participants, messages, status, created_at FROM conversation_chains ORDER BY created_at DESC LIMIT 50"
+        ) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+
+        let rows = match stmt.query_map([], |row| {
+            let participants_str: String = row.get(2)?;
+            let messages_str: String = row.get(3)?;
+            Ok(ConversationChain {
+                id: row.get(0)?,
+                topic: row.get(1)?,
+                participants: serde_json::from_str(&participants_str).unwrap_or_default(),
+                messages: serde_json::from_str(&messages_str).unwrap_or_default(),
+                max_rounds: MAX_ROUNDS,
+                status: row.get(4)?,
+                created_at: row.get(5)?,
+            })
+        }) {
+            Ok(r) => r,
+            Err(_) => return Vec::new(),
+        };
+
+        rows.filter_map(|r| r.ok()).collect()
+    }
+
+    /// Delete a conversation chain from the database.
+    pub fn delete_from_db(conn: &Connection, id: &str) -> Result<(), String> {
+        Self::ensure_table(conn)?;
+        conn.execute("DELETE FROM conversation_chains WHERE id = ?1", rusqlite::params![id])
+            .map_err(|e| e.to_string())?;
+        Ok(())
     }
 }
 

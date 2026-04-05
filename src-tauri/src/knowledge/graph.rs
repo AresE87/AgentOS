@@ -155,14 +155,29 @@ impl KnowledgeGraph {
 
     /// Search entities by name substring
     pub fn search_entities(&self, query: &str) -> Result<Vec<Entity>, String> {
+        self.search_entities_ranked(query, 50)
+    }
+
+    /// Search entities by name and type with relevance ranking.
+    /// Prefix matches are ranked higher than substring matches.
+    pub fn search_entities_ranked(&self, query: &str, limit: usize) -> Result<Vec<Entity>, String> {
         let pattern = format!("%{}%", query);
+        let prefix = format!("{}%", query);
         let mut stmt = self
             .conn
-            .prepare("SELECT id, name, entity_type, properties FROM kg_entities WHERE name LIKE ?1 LIMIT 50")
+            .prepare(
+                "SELECT id, name, entity_type, properties FROM kg_entities
+                 WHERE name LIKE ?1 OR entity_type LIKE ?1
+                 ORDER BY
+                    CASE WHEN name LIKE ?2 THEN 0 ELSE 1 END,
+                    CASE WHEN entity_type LIKE ?2 THEN 0 ELSE 1 END,
+                    name
+                 LIMIT ?3"
+            )
             .map_err(|e| e.to_string())?;
 
         let rows = stmt
-            .query_map(params![pattern], |row| {
+            .query_map(params![pattern, prefix, limit as i64], |row| {
                 let props_str: String = row.get(3)?;
                 let properties: HashMap<String, String> =
                     serde_json::from_str(&props_str).unwrap_or_default();

@@ -22,7 +22,49 @@ pub struct DaySlot {
 }
 
 impl HeatmapData {
+    /// Return an empty heatmap when no data source is available.
+    pub fn empty() -> Self {
+        let day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+        Self {
+            hours: (0..24)
+                .map(|h| HourSlot {
+                    hour: h as u8,
+                    count: 0,
+                })
+                .collect(),
+            days: day_names
+                .iter()
+                .map(|d| DaySlot {
+                    day: d.to_string(),
+                    count: 0,
+                })
+                .collect(),
+            grid: vec![vec![0u32; 24]; 7],
+        }
+    }
+
     pub fn generate(conn: &Connection) -> Result<Self, String> {
+        // Check if tasks table exists before querying
+        let tasks_exist: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='tasks'",
+                [],
+                |r| r.get::<_, i64>(0).map(|n| n > 0),
+            )
+            .unwrap_or(false);
+
+        if !tasks_exist {
+            return Ok(Self::empty());
+        }
+
+        // Verify created_at column exists
+        let has_created_at = conn
+            .prepare("SELECT created_at FROM tasks LIMIT 0")
+            .is_ok();
+        if !has_created_at {
+            return Ok(Self::empty());
+        }
+
         let mut grid = vec![vec![0u32; 24]; 7];
         let mut hour_counts = vec![0u32; 24];
         let mut day_counts = vec![0u32; 7];
