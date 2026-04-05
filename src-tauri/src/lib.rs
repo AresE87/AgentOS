@@ -7374,6 +7374,155 @@ async fn cmd_auto_respond_mentions(
     }))
 }
 
+// ── M8-7: Social Media Automation Pipeline — Content Calendar + Response Engine ──
+
+#[tauri::command]
+async fn cmd_generate_content_plan(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let gateway = state.gateway.lock().await;
+    let settings = state.settings.lock().map_err(|e| e.to_string())?.clone();
+    let posts =
+        marketing::ContentCalendar::generate_weekly_plan(&state.db_path, &gateway, &settings).await?;
+    serde_json::to_value(&posts).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_get_content_calendar(
+    state: tauri::State<'_, AppState>,
+    week: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let conn = rusqlite::Connection::open(&state.db_path).map_err(|e| e.to_string())?;
+    marketing::ContentCalendar::ensure_tables(&conn)?;
+    if let Some(start) = week {
+        let posts = marketing::ContentCalendar::get_week(&conn, &start)?;
+        serde_json::to_value(&posts).map_err(|e| e.to_string())
+    } else {
+        marketing::ContentCalendar::to_json(&conn)
+    }
+}
+
+#[tauri::command]
+async fn cmd_approve_post(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<serde_json::Value, String> {
+    let conn = rusqlite::Connection::open(&state.db_path).map_err(|e| e.to_string())?;
+    marketing::ContentCalendar::approve_post(&conn, &id)?;
+    Ok(serde_json::json!({ "ok": true, "id": id }))
+}
+
+#[tauri::command]
+async fn cmd_approve_all_posts(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = rusqlite::Connection::open(&state.db_path).map_err(|e| e.to_string())?;
+    let count = marketing::ContentCalendar::approve_all(&conn)?;
+    Ok(serde_json::json!({ "ok": true, "approved": count }))
+}
+
+#[tauri::command]
+async fn cmd_edit_scheduled_post(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    content: String,
+) -> Result<serde_json::Value, String> {
+    let conn = rusqlite::Connection::open(&state.db_path).map_err(|e| e.to_string())?;
+    marketing::ContentCalendar::edit_post(&conn, &id, &content)?;
+    Ok(serde_json::json!({ "ok": true, "id": id }))
+}
+
+#[tauri::command]
+async fn cmd_publish_post_now(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<serde_json::Value, String> {
+    // Load the post
+    let post = {
+        let conn = rusqlite::Connection::open(&state.db_path).map_err(|e| e.to_string())?;
+        marketing::ContentCalendar::ensure_tables(&conn)?;
+        marketing::ContentCalendar::get_post(&conn, &id)?
+            .ok_or_else(|| format!("Post not found: {}", id))?
+    };
+
+    // Publish via social manager
+    let social_mgr = state.social_manager.lock().await;
+    let social_post = crate::social::traits::SocialPost {
+        content: post.content.clone(),
+        media_url: None,
+        reply_to: None,
+        tags: post.hashtags.clone(),
+    };
+    let results = social_mgr
+        .post_to_all(&social_post, &[post.platform.clone()])
+        .await;
+
+    // Update DB based on result
+    let conn = rusqlite::Connection::open(&state.db_path).map_err(|e| e.to_string())?;
+    for (_plat, result) in results {
+        match result {
+            Ok(pr) => {
+                marketing::ContentCalendar::mark_published(&conn, &id, &pr.url)?;
+                return serde_json::to_value(&pr).map_err(|e| e.to_string());
+            }
+            Err(e) => {
+                marketing::ContentCalendar::mark_failed(&conn, &id, &e)?;
+                return Err(e);
+            }
+        }
+    }
+
+    Err("No platform results returned".to_string())
+}
+
+#[tauri::command]
+async fn cmd_get_pending_responses(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = rusqlite::Connection::open(&state.db_path).map_err(|e| e.to_string())?;
+    let pending = marketing::ResponseEngine::get_pending_review(&conn)?;
+    serde_json::to_value(&pending).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_approve_response(
+    state: tauri::State<'_, AppState>,
+    mention_id: String,
+) -> Result<serde_json::Value, String> {
+    let social_mgr = state.social_manager.lock().await;
+    let (mid, text) = marketing::ResponseEngine::approve_response(
+        &state.db_path,
+        &social_mgr,
+        &mention_id,
+    )
+    .await?;
+    Ok(serde_json::json!({ "ok": true, "mention_id": mid, "reply": text }))
+}
+
+#[tauri::command]
+async fn cmd_get_marketing_status(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let conn = rusqlite::Connection::open(&state.db_path).map_err(|e| e.to_string())?;
+    marketing::ContentCalendar::ensure_tables(&conn)?;
+    let calendar_stats = marketing::ContentCalendar::to_json(&conn)?;
+    let pending_responses = marketing::ResponseEngine::get_pending_review(&conn)
+        .map(|p| p.len())
+        .unwrap_or(0);
+    let weekly_analysis = marketing::ContentCalendar::analyze_last_week(&conn).unwrap_or_default();
+
+    Ok(serde_json::json!({
+        "calendar": calendar_stats,
+        "pending_responses": pending_responses,
+        "weekly_analysis": weekly_analysis,
+        "scheduler": {
+            "publish_interval_min": 15,
+            "respond_interval_min": 30,
+            "metrics_interval_min": 60,
+        },
+    }))
+}
+
 // ── P10-5: Product Health Report ─────────────────────────────────────────
 
 #[tauri::command]
@@ -8945,25 +9094,99 @@ pub fn run() {
                 });
             }
 
-            // ── M8-6: Marketing auto-publish scheduler (every 30 min) ──
+            // ── M8-6: Marketing multi-timer scheduler ──────────────────
+            // publish_tick  — every 15 min: publish due content_calendar + scheduled_posts
+            // respond_tick  — every 30 min: auto-respond high-confidence mentions
+            // metrics_tick  — every 60 min: collect engagement metrics for published posts
             {
                 let mkt_db_path = db_path.clone();
                 let mkt_social = app.state::<AppState>().social_manager.clone();
+                let mkt_gateway = app.state::<AppState>().gateway.clone();
+                let mkt_settings = settings.clone();
                 let mkt_handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
+                    let mut publish_tick = tokio::time::interval(Duration::from_secs(15 * 60));
+                    let mut respond_tick = tokio::time::interval(Duration::from_secs(30 * 60));
+                    let mut metrics_tick = tokio::time::interval(Duration::from_secs(60 * 60));
+
                     loop {
-                        tokio::time::sleep(std::time::Duration::from_secs(1800)).await;
-                        let social_mgr = mkt_social.lock().await;
-                        match marketing::CampaignManager::publish_due_posts(&mkt_db_path, &social_mgr).await {
-                            Ok(results) if !results.is_empty() => {
-                                tracing::info!("Marketing scheduler: published {} due posts", results.len());
-                                let _ = mkt_handle.emit("marketing:posts_published", &serde_json::json!({
-                                    "count": results.len(),
-                                    "posts": results,
-                                }));
+                        tokio::select! {
+                            _ = publish_tick.tick() => {
+                                // 1. Publish from content_calendar
+                                if let Ok(conn) = rusqlite::Connection::open(&mkt_db_path) {
+                                    if let Ok(due) = marketing::ContentCalendar::fetch_due(&conn) {
+                                        let social_mgr = mkt_social.lock().await;
+                                        for post in &due {
+                                            let social_post = crate::social::traits::SocialPost {
+                                                content: post.content.clone(),
+                                                media_url: None,
+                                                reply_to: None,
+                                                tags: post.hashtags.clone(),
+                                            };
+                                            let results = social_mgr.post_to_all(
+                                                &social_post,
+                                                &[post.platform.clone()],
+                                            ).await;
+                                            for (_plat, result) in results {
+                                                if let Ok(conn2) = rusqlite::Connection::open(&mkt_db_path) {
+                                                    match result {
+                                                        Ok(pr) => {
+                                                            let _ = marketing::ContentCalendar::mark_published(&conn2, &post.id, &pr.url);
+                                                        }
+                                                        Err(e) => {
+                                                            let _ = marketing::ContentCalendar::mark_failed(&conn2, &post.id, &e);
+                                                            tracing::warn!("Calendar publish failed for {}: {}", post.id, e);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        if !due.is_empty() {
+                                            tracing::info!("Marketing scheduler: processed {} calendar posts", due.len());
+                                            let _ = mkt_handle.emit("marketing:posts_published", &serde_json::json!({
+                                                "source": "content_calendar",
+                                                "count": due.len(),
+                                            }));
+                                        }
+                                    }
+                                }
+
+                                // 2. Also publish from legacy scheduled_posts
+                                {
+                                    let social_mgr = mkt_social.lock().await;
+                                    match marketing::CampaignManager::publish_due_posts(&mkt_db_path, &social_mgr).await {
+                                        Ok(results) if !results.is_empty() => {
+                                            tracing::info!("Marketing scheduler: published {} legacy scheduled posts", results.len());
+                                        }
+                                        Ok(_) => {}
+                                        Err(e) => tracing::warn!("Legacy scheduled posts error: {}", e),
+                                    }
+                                }
                             }
-                            Ok(_) => {} // nothing due
-                            Err(e) => tracing::warn!("Marketing scheduler error: {}", e),
+                            _ = respond_tick.tick() => {
+                                let social_mgr = mkt_social.lock().await;
+                                let gateway = mkt_gateway.lock().await;
+                                match marketing::ResponseEngine::auto_respond(
+                                    &mkt_db_path, &social_mgr, &gateway, &mkt_settings,
+                                ).await {
+                                    Ok(replied) if !replied.is_empty() => {
+                                        tracing::info!("Marketing scheduler: auto-replied to {} mentions", replied.len());
+                                        let _ = mkt_handle.emit("marketing:auto_responded", &serde_json::json!({
+                                            "count": replied.len(),
+                                        }));
+                                    }
+                                    Ok(_) => {}
+                                    Err(e) => tracing::warn!("Response engine error: {}", e),
+                                }
+                            }
+                            _ = metrics_tick.tick() => {
+                                // Collect engagement metrics for recently published posts
+                                let social_mgr = mkt_social.lock().await;
+                                let metrics = social_mgr.get_total_engagement(7).await;
+                                if !metrics.is_empty() {
+                                    tracing::debug!("Marketing scheduler: collected metrics from {} platforms", metrics.len());
+                                }
+                            }
                         }
                     }
                 });
@@ -9547,6 +9770,16 @@ pub fn run() {
             cmd_publish_due_posts,
             cmd_auto_promote,
             cmd_auto_respond_mentions,
+            // M8-7: Social Media Automation Pipeline
+            cmd_generate_content_plan,
+            cmd_get_content_calendar,
+            cmd_approve_post,
+            cmd_approve_all_posts,
+            cmd_edit_scheduled_post,
+            cmd_publish_post_now,
+            cmd_get_pending_responses,
+            cmd_approve_response,
+            cmd_get_marketing_status,
             // M8-1: Social Media Connectors commands
             cmd_social_connect_platform,
             cmd_social_disconnect_platform,
