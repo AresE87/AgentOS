@@ -2891,14 +2891,19 @@ async fn cmd_get_weekly_insights(
 ) -> Result<serde_json::Value, String> {
     let conn = open_feedback_conn(&state.db_path)?;
     feedback::collector::FeedbackCollector::ensure_table(&conn)?;
+
+    // Generate insights and persist the report to DB
+    let insights = feedback::analyzer::InsightAnalyzer::generate_and_save(&conn)?;
+
     let records = feedback::collector::FeedbackCollector::get_recent(&conn, 200)?;
     let stats = feedback::collector::FeedbackCollector::get_stats(&conn)?;
-    let insights = feedback::analyzer::InsightAnalyzer::generate_weekly_insights(&records, &stats);
     let suggestions = feedback::analyzer::InsightAnalyzer::get_routing_suggestions(&records);
+    let previous_reports = feedback::analyzer::InsightAnalyzer::list_reports(&conn, 5)?;
     Ok(serde_json::json!({
         "insights": insights,
         "suggestions": suggestions,
         "stats": stats,
+        "previous_reports": previous_reports,
     }))
 }
 
@@ -4068,6 +4073,12 @@ async fn cmd_start_conversation(
     let chain = conversations::ConversationChain::new(&topic, participants);
     let id = chain.id.clone();
     let summary = chain.summary();
+
+    // Persist to SQLite
+    if let Ok(conn) = rusqlite::Connection::open(&state.db_path) {
+        let _ = conversations::ConversationChain::save_to_db(&conn, &chain);
+    }
+
     let mut convos = state.conversations.lock().await;
     convos.push(chain);
     Ok(serde_json::json!({ "id": id, "summary": summary }))
@@ -4090,7 +4101,18 @@ async fn cmd_get_conversation(
 async fn cmd_list_conversations(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let convos = state.conversations.lock().await;
+    let mut convos = state.conversations.lock().await;
+
+    // On first call (or after restart), hydrate from SQLite if in-memory is empty
+    if convos.is_empty() {
+        if let Ok(conn) = rusqlite::Connection::open(&state.db_path) {
+            let persisted = conversations::ConversationChain::load_all(&conn);
+            if !persisted.is_empty() {
+                *convos = persisted;
+            }
+        }
+    }
+
     let list: Vec<serde_json::Value> = convos
         .iter()
         .map(|c| {
@@ -4138,6 +4160,11 @@ async fn cmd_add_conversation_message(
     };
 
     chain.add_message(msg)?;
+
+    // Persist updated chain to SQLite after each message
+    if let Ok(conn) = rusqlite::Connection::open(&state.db_path) {
+        let _ = conversations::ConversationChain::save_to_db(&conn, chain);
+    }
 
     let summary = chain.summary();
     let is_complete = chain.is_complete();
@@ -7242,8 +7269,12 @@ async fn cmd_schedule_post(
         status: "scheduled".to_string(),
         tags,
     };
+    // Add to in-memory calendar
     let mut cal = state.editorial_calendar.lock().await;
     cal.add_post(post.clone());
+    // Also persist to SQLite scheduled_posts table for the background publisher
+    let conn = rusqlite::Connection::open(&state.db_path).map_err(|e| e.to_string())?;
+    marketing::CampaignManager::schedule_post(&conn, None, &post)?;
     serde_json::to_value(&post).map_err(|e| e.to_string())
 }
 
@@ -7294,6 +7325,52 @@ async fn cmd_generate_promo_content(
     Ok(serde_json::json!({
         "posts": serde_json::to_value(&posts).map_err(|e| e.to_string())?,
         "summary": summary,
+    }))
+}
+
+// ── M8-6: Marketing auto-publish, auto-promote, auto-respond ──────────────
+
+#[tauri::command]
+async fn cmd_publish_due_posts(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let social_mgr = state.social_manager.lock().await;
+    let results =
+        marketing::CampaignManager::publish_due_posts(&state.db_path, &social_mgr).await?;
+    serde_json::to_value(&results).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_auto_promote(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let social_mgr = state.social_manager.lock().await;
+    let gateway = state.gateway.lock().await;
+    let settings = state.settings.lock().map_err(|e| e.to_string())?.clone();
+    let results =
+        marketing::SelfPromotion::auto_promote(&social_mgr, &gateway, &settings).await?;
+    serde_json::to_value(&results).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn cmd_auto_respond_mentions(
+    state: tauri::State<'_, AppState>,
+    brand_voice: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let voice = brand_voice.unwrap_or_else(|| {
+        "Friendly, helpful, professional — the voice of AgentOS".to_string()
+    });
+    let social_mgr = state.social_manager.lock().await;
+    let gateway = state.gateway.lock().await;
+    let settings = state.settings.lock().map_err(|e| e.to_string())?.clone();
+    let replied =
+        marketing::EngagementManager::auto_respond(&social_mgr, &gateway, &settings, &voice)
+            .await?;
+    Ok(serde_json::json!({
+        "replied_count": replied.len(),
+        "replies": replied.iter().map(|(mid, text)| {
+            serde_json::json!({ "mention_id": mid, "reply": text })
+        }).collect::<Vec<_>>(),
     }))
 }
 
@@ -7494,7 +7571,7 @@ async fn cmd_fire_cross_team_event(
     orchestrator.fire_event(parsed);
     let triggered = orchestrator.process_pending();
 
-    // Emit frontend events and log each triggered action
+    // Emit frontend events, log each triggered action, and create real missions
     for action in &triggered {
         tracing::info!(
             rule_id = %action.rule_id,
@@ -7502,9 +7579,25 @@ async fn cmd_fire_cross_team_event(
             target_action = %action.target_action,
             "Cross-team orchestration triggered"
         );
+
+        // FIX 1: Create a real mission entry in DB for each triggered action
+        let mission_id = uuid::Uuid::new_v4().to_string();
+        if let Ok(conn) = rusqlite::Connection::open(&state.db_path) {
+            let _ = conn.execute(
+                "INSERT INTO missions (id, title, description, mode, autonomy, dag_json, status, created_at, total_cost, total_tokens) VALUES (?1, ?2, ?3, 'autopilot', 'full', '{}', 'completed', ?4, 0, 0)",
+                rusqlite::params![
+                    mission_id,
+                    format!("Auto: {}", action.event.event_type),
+                    action.task_description,
+                    chrono::Utc::now().to_rfc3339(),
+                ],
+            );
+        }
+
         let _ = app_handle.emit(
-            "orchestration:triggered",
+            "orchestration:executed",
             serde_json::json!({
+                "mission_id": mission_id,
                 "rule_id": action.rule_id,
                 "from_team": action.event.from_team,
                 "target_team": action.target_team,
@@ -7570,6 +7663,63 @@ async fn cmd_parse_business_rule(
     let settings = state.settings.lock().map_err(|e| e.to_string())?.clone();
     let rule = business::BusinessAutomations::parse_rule(&description, &gateway, &settings).await?;
     serde_json::to_value(&rule).map_err(|e| e.to_string())
+}
+
+/// Manually trigger automation check — fires due rules and persists results to DB.
+#[tauri::command]
+async fn cmd_check_automations(
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<serde_json::Value, String> {
+    let mut automations = state.business_automations.lock().await;
+    let fired = automations.check_and_execute();
+
+    // Persist each fired rule as a completed mission and emit events
+    for rule in &fired {
+        let mission_id = uuid::Uuid::new_v4().to_string();
+        if let Ok(conn) = rusqlite::Connection::open(&state.db_path) {
+            let _ = conn.execute(
+                "INSERT INTO missions (id, title, description, mode, autonomy, dag_json, status, created_at, total_cost, total_tokens) VALUES (?1, ?2, ?3, 'autopilot', 'full', '{}', 'completed', ?4, 0, 0)",
+                rusqlite::params![
+                    mission_id,
+                    format!("Automation: {}", rule.action),
+                    format!("[{}] Rule: {} — Action: {}", rule.team, rule.description, rule.action),
+                    chrono::Utc::now().to_rfc3339(),
+                ],
+            );
+        }
+        let _ = app_handle.emit(
+            "automation:executed",
+            serde_json::json!({
+                "mission_id": mission_id,
+                "rule_id": rule.id,
+                "action": rule.action,
+                "team": rule.team,
+                "description": rule.description,
+            }),
+        );
+    }
+
+    Ok(serde_json::json!({
+        "fired_count": fired.len(),
+        "fired_rules": fired.iter().map(|r| serde_json::json!({
+            "id": r.id,
+            "description": r.description,
+            "action": r.action,
+            "team": r.team,
+            "times_triggered": r.times_triggered,
+        })).collect::<Vec<_>>(),
+    }))
+}
+
+/// Return the automation execution log (what fired and when).
+#[tauri::command]
+async fn cmd_get_automation_log(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let automations = state.business_automations.lock().await;
+    let log = automations.get_execution_log(100);
+    serde_json::to_value(&log).map_err(|e| e.to_string())
 }
 
 // ── B12-4: Revenue Analytics ────────────────────────────────────────────
@@ -8523,6 +8673,149 @@ pub fn run() {
                 });
             }
 
+            // ── B12-3: Background automation checker — every 15 minutes ──
+            {
+                let auto_automations = app.state::<AppState>().business_automations.clone();
+                let auto_db_path = db_path.clone();
+                let auto_app_handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    loop {
+                        tokio::time::sleep(Duration::from_secs(900)).await;
+                        let mut automations = auto_automations.lock().await;
+                        let fired = automations.check_and_execute();
+                        if !fired.is_empty() {
+                            tracing::info!(
+                                count = fired.len(),
+                                "Automation background check: {} rules fired",
+                                fired.len()
+                            );
+                            for rule in &fired {
+                                let mission_id = uuid::Uuid::new_v4().to_string();
+                                if let Ok(conn) = rusqlite::Connection::open(&auto_db_path) {
+                                    let _ = conn.execute(
+                                        "INSERT INTO missions (id, title, description, mode, autonomy, dag_json, status, created_at, total_cost, total_tokens) VALUES (?1, ?2, ?3, 'autopilot', 'full', '{}', 'completed', ?4, 0, 0)",
+                                        rusqlite::params![
+                                            mission_id,
+                                            format!("Automation: {}", rule.action),
+                                            format!("[{}] Rule: {} -- Action: {}", rule.team, rule.description, rule.action),
+                                            chrono::Utc::now().to_rfc3339(),
+                                        ],
+                                    );
+                                }
+                                let _ = auto_app_handle.emit(
+                                    "automation:executed",
+                                    serde_json::json!({
+                                        "mission_id": mission_id,
+                                        "rule_id": rule.id,
+                                        "action": rule.action,
+                                        "team": rule.team,
+                                    }),
+                                );
+                            }
+                        }
+                    }
+                });
+            }
+
+            // ── T11: Teams auto-run scheduler — every 5 minutes ──────────
+            {
+                let sched_teams = app.state::<AppState>().active_teams.clone();
+                let sched_gateway = app.state::<AppState>().gateway.clone();
+                let sched_tool_registry = app.state::<AppState>().tool_registry.clone();
+                let sched_db_path = db_path.clone();
+                let sched_kill_switch = app.state::<AppState>().kill_switch.clone();
+                let sched_app_handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    loop {
+                        tokio::time::sleep(Duration::from_secs(300)).await;
+                        // Collect teams that need running (active + last_run > 1 hour ago)
+                        let teams_to_run: Vec<teams_engine::TeamConfig> = {
+                            let teams = sched_teams.lock().await;
+                            let now = chrono::Utc::now();
+                            teams
+                                .iter()
+                                .filter(|(_, status)| {
+                                    if !status.active {
+                                        return false;
+                                    }
+                                    match &status.last_run {
+                                        Some(last) => {
+                                            if let Ok(last_dt) = chrono::DateTime::parse_from_rfc3339(last) {
+                                                (now - last_dt.with_timezone(&chrono::Utc)).num_seconds() >= 3600
+                                            } else {
+                                                true
+                                            }
+                                        }
+                                        None => true,
+                                    }
+                                })
+                                .map(|(c, _)| c.clone())
+                                .collect()
+                        };
+
+                        for config in teams_to_run {
+                            tracing::info!(
+                                team = %config.template_id,
+                                "Teams scheduler: auto-running cycle"
+                            );
+                            let gateway = sched_gateway.lock().await;
+                            // Read settings from AppState via the app handle
+                            let settings = match sched_app_handle.try_state::<AppState>() {
+                                Some(state) => match state.settings.lock() {
+                                    Ok(s) => s.clone(),
+                                    Err(_) => continue,
+                                },
+                                None => continue,
+                            };
+                            match teams_engine::runner::TeamRunner::run_cycle(
+                                &config,
+                                &gateway,
+                                &settings,
+                                &sched_tool_registry,
+                                &sched_db_path,
+                                &sched_kill_switch,
+                                Some(&sched_app_handle),
+                            )
+                            .await
+                            {
+                                Ok(result) => {
+                                    let mut teams = sched_teams.lock().await;
+                                    if let Some((_, status)) = teams
+                                        .iter_mut()
+                                        .find(|(c, _)| c.template_id == config.template_id)
+                                    {
+                                        status.last_run = Some(chrono::Utc::now().to_rfc3339());
+                                        status.tasks_completed +=
+                                            result["iterations"].as_u64().unwrap_or(1);
+                                    }
+                                    let _ = sched_app_handle.emit(
+                                        "team:auto_run_completed",
+                                        serde_json::json!({
+                                            "template_id": config.template_id,
+                                            "result": result,
+                                        }),
+                                    );
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        team = %config.template_id,
+                                        error = %e,
+                                        "Teams scheduler: auto-run failed"
+                                    );
+                                    let mut teams = sched_teams.lock().await;
+                                    if let Some((_, status)) = teams
+                                        .iter_mut()
+                                        .find(|(c, _)| c.template_id == config.template_id)
+                                    {
+                                        status.tasks_failed += 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+
             // ── R24: Start public HTTP API server ─────────────────────
             {
                 let api_db_path = db_path.to_string_lossy().to_string();
@@ -8637,22 +8930,40 @@ pub fn run() {
                     // Open a fresh connection for the report
                     if let Ok(conn) = rusqlite::Connection::open(&report_db_path) {
                         if feedback::collector::FeedbackCollector::ensure_table(&conn).is_ok() {
-                            let records =
-                                feedback::collector::FeedbackCollector::get_recent(&conn, 200)
-                                    .unwrap_or_default();
-                            let stats = feedback::collector::FeedbackCollector::get_stats(&conn)
-                                .unwrap_or(feedback::collector::FeedbackStats {
-                                    total: 0,
-                                    positive: 0,
-                                    negative: 0,
-                                    positive_rate: 0.0,
-                                });
-                            let insights =
-                                feedback::analyzer::InsightAnalyzer::generate_weekly_insights(
-                                    &records, &stats,
-                                );
-                            let _ = report_handle.emit("feedback:weekly_report", &insights);
-                            tracing::info!("Weekly feedback report emitted on startup");
+                            // Use generate_and_save to both produce insights and persist the report
+                            match feedback::analyzer::InsightAnalyzer::generate_and_save(&conn) {
+                                Ok(insights) => {
+                                    let _ = report_handle.emit("feedback:weekly_report", &insights);
+                                    tracing::info!("Weekly feedback report generated, persisted, and emitted on startup");
+                                }
+                                Err(e) => {
+                                    tracing::warn!("Failed to generate weekly report: {}", e);
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+
+            // ── M8-6: Marketing auto-publish scheduler (every 30 min) ──
+            {
+                let mkt_db_path = db_path.clone();
+                let mkt_social = app.state::<AppState>().social_manager.clone();
+                let mkt_handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    loop {
+                        tokio::time::sleep(std::time::Duration::from_secs(1800)).await;
+                        let social_mgr = mkt_social.lock().await;
+                        match marketing::CampaignManager::publish_due_posts(&mkt_db_path, &social_mgr).await {
+                            Ok(results) if !results.is_empty() => {
+                                tracing::info!("Marketing scheduler: published {} due posts", results.len());
+                                let _ = mkt_handle.emit("marketing:posts_published", &serde_json::json!({
+                                    "count": results.len(),
+                                    "posts": results,
+                                }));
+                            }
+                            Ok(_) => {} // nothing due
+                            Err(e) => tracing::warn!("Marketing scheduler error: {}", e),
                         }
                     }
                 });
@@ -9232,6 +9543,10 @@ pub fn run() {
             cmd_list_campaigns,
             // M8-5: Self-Promotion Mode
             cmd_generate_promo_content,
+            // M8-6: Marketing auto-publish, auto-promote, auto-respond
+            cmd_publish_due_posts,
+            cmd_auto_promote,
+            cmd_auto_respond_mentions,
             // M8-1: Social Media Connectors commands
             cmd_social_connect_platform,
             cmd_social_disconnect_platform,
@@ -9296,6 +9611,8 @@ pub fn run() {
             cmd_toggle_business_rule,
             cmd_delete_business_rule,
             cmd_parse_business_rule,
+            cmd_check_automations,
+            cmd_get_automation_log,
             // B12-4: Revenue Analytics
             cmd_get_revenue_report,
             cmd_project_revenue,

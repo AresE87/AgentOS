@@ -1,5 +1,6 @@
 use crate::brain::Gateway;
 use crate::config::Settings;
+use crate::social::manager::SocialManager;
 use serde::{Deserialize, Serialize};
 
 pub struct EngagementManager;
@@ -182,6 +183,70 @@ impl EngagementManager {
             "engagement_rate": format!("{:.2}%", engagement_rate),
             "by_platform": by_platform,
         })
+    }
+
+    /// Process mentions AND auto-reply to high-confidence positive ones.
+    ///
+    /// 1. Fetches mentions from all connected platforms (last 24h).
+    /// 2. Classifies each via the LLM.
+    /// 3. Auto-replies to those with `auto_reply == true` and `confidence > 0.8`.
+    ///
+    /// Returns a list of (mention_id, reply_text) pairs that were actually sent.
+    pub async fn auto_respond(
+        social_manager: &SocialManager,
+        gateway: &Gateway,
+        settings: &Settings,
+        brand_voice: &str,
+    ) -> Result<Vec<(String, String)>, String> {
+        // 1. Get mentions from all connected platforms
+        let social_mentions = social_manager.get_all_mentions(24).await;
+
+        // Convert social::traits::Mention -> marketing::engagement::Mention
+        let mentions: Vec<Mention> = social_mentions
+            .iter()
+            .map(|m| Mention {
+                id: m.id.clone(),
+                platform: m.platform.clone(),
+                author: m.author.clone(),
+                content: m.content.clone(),
+                timestamp: m.created_at.clone(),
+                url: Some(m.url.clone()),
+            })
+            .collect();
+
+        if mentions.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // 2. Process each with LLM
+        let responses = Self::process_mentions(&mentions, brand_voice, gateway, settings).await?;
+
+        // 3. Auto-reply to high-confidence positive ones
+        let mut replied = Vec::new();
+        for resp in &responses {
+            if resp.auto_reply && resp.confidence > 0.8 {
+                if let Some(platform) = social_manager.get(&resp.platform) {
+                    match platform.reply(&resp.mention_id, &resp.suggested_reply).await {
+                        Ok(_pr) => {
+                            replied.push((
+                                resp.mention_id.clone(),
+                                resp.suggested_reply.clone(),
+                            ));
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "Auto-reply failed for mention {} on {}: {}",
+                                resp.mention_id,
+                                resp.platform,
+                                e
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(replied)
     }
 }
 

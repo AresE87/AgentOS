@@ -1,4 +1,6 @@
 use super::content::ScheduledPost;
+use crate::social::manager::SocialManager;
+use crate::social::traits::{PostResult, SocialPost};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -266,6 +268,160 @@ impl CampaignManager {
             "total_campaigns": self.campaigns.len(),
             "campaigns": serde_json::to_value(&self.campaigns).unwrap_or(serde_json::Value::Array(vec![])),
         })
+    }
+
+    // ── Scheduled Posts — auto-publish infrastructure ────────────────────
+
+    /// Ensure the scheduled_posts table exists for auto-publishing.
+    pub fn ensure_scheduled_posts_table(conn: &rusqlite::Connection) -> Result<(), String> {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS scheduled_posts (
+                id TEXT PRIMARY KEY,
+                campaign_id TEXT,
+                platform TEXT NOT NULL,
+                content TEXT NOT NULL,
+                tags TEXT NOT NULL DEFAULT '[]',
+                scheduled_for TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'draft',
+                post_url TEXT,
+                error TEXT,
+                created_at TEXT NOT NULL
+            )",
+        )
+        .map_err(|e| e.to_string())
+    }
+
+    /// Insert a scheduled post into SQLite for later auto-publish.
+    pub fn schedule_post(
+        conn: &rusqlite::Connection,
+        campaign_id: Option<&str>,
+        post: &ScheduledPost,
+    ) -> Result<(), String> {
+        Self::ensure_scheduled_posts_table(conn)?;
+        let tags_json =
+            serde_json::to_string(&post.tags).unwrap_or_else(|_| "[]".into());
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT OR REPLACE INTO scheduled_posts \
+             (id, campaign_id, platform, content, tags, scheduled_for, status, created_at) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+            rusqlite::params![
+                post.id,
+                campaign_id,
+                post.platform,
+                post.content,
+                tags_json,
+                post.scheduled_for,
+                post.status,
+                now,
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    /// Fetch due posts from SQLite (synchronous — no .await).
+    pub fn fetch_due_posts(
+        conn: &rusqlite::Connection,
+    ) -> Result<Vec<(String, String, String, String)>, String> {
+        Self::ensure_scheduled_posts_table(conn)?;
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, platform, content, tags FROM scheduled_posts \
+                 WHERE status = 'scheduled' AND scheduled_for <= ?1",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(rusqlite::params![now], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?;
+        let collected: Vec<_> = rows.filter_map(|r| r.ok()).collect();
+        Ok(collected)
+    }
+
+    /// Mark a scheduled post as published or failed (synchronous — no .await).
+    pub fn mark_post_published(
+        conn: &rusqlite::Connection,
+        post_id: &str,
+        post_url: &str,
+    ) -> Result<(), String> {
+        conn.execute(
+            "UPDATE scheduled_posts SET status = 'published', post_url = ?1 WHERE id = ?2",
+            rusqlite::params![post_url, post_id],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn mark_post_failed(
+        conn: &rusqlite::Connection,
+        post_id: &str,
+        error: &str,
+    ) -> Result<(), String> {
+        conn.execute(
+            "UPDATE scheduled_posts SET status = 'failed', error = ?1 WHERE id = ?2",
+            rusqlite::params![error, post_id],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    /// Check for scheduled posts that are due and publish them via SocialManager.
+    ///
+    /// Uses `db_path` instead of a `Connection` reference to avoid holding a
+    /// non-Send rusqlite handle across `.await` points.
+    pub async fn publish_due_posts(
+        db_path: &std::path::Path,
+        social_manager: &SocialManager,
+    ) -> Result<Vec<PostResult>, String> {
+        // Phase 1: collect due posts (sync — conn dropped before await)
+        let due_posts = {
+            let conn = rusqlite::Connection::open(db_path).map_err(|e| e.to_string())?;
+            Self::fetch_due_posts(&conn)?
+        };
+
+        // Phase 2: post to social platforms (async)
+        let mut outcomes: Vec<(String, Result<PostResult, String>)> = Vec::new();
+        for (id, platform, content, tags_json) in &due_posts {
+            let tags: Vec<String> =
+                serde_json::from_str(tags_json).unwrap_or_default();
+            let social_post = SocialPost {
+                content: content.clone(),
+                media_url: None,
+                reply_to: None,
+                tags,
+            };
+            let platform_results =
+                social_manager.post_to_all(&social_post, &[platform.clone()]).await;
+            for (_plat, result) in platform_results {
+                outcomes.push((id.clone(), result));
+            }
+        }
+
+        // Phase 3: update DB with results (sync — fresh conn)
+        let conn = rusqlite::Connection::open(db_path).map_err(|e| e.to_string())?;
+        let mut results = Vec::new();
+        for (id, outcome) in outcomes {
+            match outcome {
+                Ok(pr) => {
+                    Self::mark_post_published(&conn, &id, &pr.url).ok();
+                    results.push(pr);
+                }
+                Err(e) => {
+                    Self::mark_post_failed(&conn, &id, &e).ok();
+                    tracing::warn!("Failed to publish scheduled post {}: {}", id, e);
+                }
+            }
+        }
+
+        Ok(results)
     }
 }
 

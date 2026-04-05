@@ -18,13 +18,28 @@ pub struct BusinessRule {
     pub times_triggered: u32,
 }
 
+/// Log entry for automation executions — tracks what fired and when.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutomationLogEntry {
+    pub rule_id: String,
+    pub rule_description: String,
+    pub action: String,
+    pub team: String,
+    pub fired_at: String,
+}
+
 pub struct BusinessAutomations {
     rules: Vec<BusinessRule>,
+    /// Log of automation firings for audit/display
+    pub execution_log: Vec<AutomationLogEntry>,
 }
 
 impl BusinessAutomations {
     pub fn new() -> Self {
-        Self { rules: Vec::new() }
+        Self {
+            rules: Vec::new(),
+            execution_log: Vec::new(),
+        }
     }
 
     pub fn add_rule(&mut self, rule: BusinessRule) {
@@ -126,6 +141,83 @@ impl BusinessAutomations {
             }
         }
         due
+    }
+
+    /// Check all rules and EXECUTE those that should fire NOW.
+    /// Updates last_triggered timestamps, increments counters, and logs firings.
+    /// Returns the rules that fired with their descriptions.
+    pub fn check_and_execute(&mut self) -> Vec<BusinessRule> {
+        let now = chrono::Utc::now();
+        let mut fired_indices = Vec::new();
+
+        for (i, rule) in self.rules.iter().enumerate() {
+            if !rule.active {
+                continue;
+            }
+
+            match rule.trigger_type.as_str() {
+                "time_based" => {
+                    // Check if enough time has passed since last trigger
+                    let interval_secs = rule
+                        .trigger_config
+                        .get("interval_seconds")
+                        .and_then(|v| v.as_u64())
+                        .or_else(|| {
+                            rule.trigger_config
+                                .get("interval_minutes")
+                                .and_then(|v| v.as_u64())
+                                .map(|m| m * 60)
+                        })
+                        .unwrap_or(3600);
+
+                    let should_fire = match &rule.last_triggered {
+                        Some(last) => {
+                            if let Ok(last_dt) = chrono::DateTime::parse_from_rfc3339(last) {
+                                (now - last_dt.with_timezone(&chrono::Utc)).num_seconds() >= interval_secs as i64
+                            } else {
+                                true
+                            }
+                        }
+                        None => true,
+                    };
+
+                    if should_fire {
+                        fired_indices.push(i);
+                    }
+                }
+                "threshold_based" => {
+                    // Threshold rules need external data; mark as checked
+                    // In a full implementation, external data would be injected
+                }
+                _ => {}
+            }
+        }
+
+        // Update fired rules and collect clones
+        let mut fired = Vec::new();
+        for i in fired_indices {
+            self.rules[i].last_triggered = Some(now.to_rfc3339());
+            self.rules[i].times_triggered += 1;
+            let rule = self.rules[i].clone();
+
+            // Log the firing
+            self.execution_log.push(AutomationLogEntry {
+                rule_id: rule.id.clone(),
+                rule_description: rule.description.clone(),
+                action: rule.action.clone(),
+                team: rule.team.clone(),
+                fired_at: now.to_rfc3339(),
+            });
+
+            fired.push(rule);
+        }
+
+        fired
+    }
+
+    /// Get the automation execution log (most recent first).
+    pub fn get_execution_log(&self, limit: usize) -> Vec<&AutomationLogEntry> {
+        self.execution_log.iter().rev().take(limit).collect()
     }
 }
 

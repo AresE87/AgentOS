@@ -1,5 +1,7 @@
 use crate::brain::Gateway;
 use crate::config::Settings;
+use crate::social::manager::SocialManager;
+use crate::social::traits::{PostResult, SocialPost};
 use super::content::{ContentGenerator, ScheduledPost};
 
 pub struct SelfPromotion;
@@ -54,6 +56,38 @@ impl SelfPromotion {
             settings,
         )
         .await
+    }
+
+    /// Generate AND publish promotional content to all configured platforms.
+    pub async fn auto_promote(
+        social_manager: &SocialManager,
+        gateway: &Gateway,
+        settings: &Settings,
+    ) -> Result<Vec<PostResult>, String> {
+        let content = Self::generate_promo_week(gateway, settings).await?;
+        let mut results = Vec::new();
+
+        for post in &content {
+            let social_post = SocialPost {
+                content: post.content.clone(),
+                media_url: None,
+                reply_to: None,
+                tags: post.tags.clone(),
+            };
+
+            let platform_results =
+                social_manager
+                    .post_to_all(&social_post, &[post.platform.clone()])
+                    .await;
+            for (platform, result) in platform_results {
+                match result {
+                    Ok(pr) => results.push(pr),
+                    Err(e) => tracing::warn!("Failed to post promo to {}: {}", platform, e),
+                }
+            }
+        }
+
+        Ok(results)
     }
 
     /// Generate a promotional JSON summary (topics + context)
