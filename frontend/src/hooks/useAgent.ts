@@ -1435,6 +1435,27 @@ export function useAgent() {
     // M8-5: Self-Promotion Mode
     const generatePromoContent = () => callInvoke<any>('generate_promo_content');
 
+    // M8-7: Social Media Automation Pipeline
+    const generateContentPlan = () => callInvoke<any>('generate_content_plan');
+    const getContentCalendar = (week?: string) =>
+        callInvoke<any>('get_content_calendar', { week: week || null });
+    const approvePost = (id: string) =>
+        callInvoke<{ ok: boolean; id: string }>('approve_post', { id });
+    const approveAllPosts = () =>
+        callInvoke<{ ok: boolean; approved: number }>('approve_all_posts');
+    const editScheduledPost = (id: string, content: string) =>
+        callInvoke<{ ok: boolean; id: string }>('edit_scheduled_post', { id, content });
+    const publishPostNow = (id: string) =>
+        callInvoke<any>('publish_post_now', { id });
+    const getPendingResponses = () =>
+        callInvoke<any[]>('get_pending_responses');
+    const approveResponse = (mentionId: string) =>
+        callInvoke<{ ok: boolean; mention_id: string; reply: string }>('approve_response', { mention_id: mentionId });
+    const getMarketingStatus = () =>
+        callInvoke<any>('get_marketing_status');
+    const toggleMarketingAutopilot = (enabled: boolean) =>
+        callInvoke<{ ok: boolean; enabled: boolean }>('toggle_marketing_autopilot', { enabled });
+
     // E9-1: Training Studio
     const trainingStartRecording = (title: string, description: string, category: string, creatorId: string, creatorName: string) =>
         callInvoke<string>('training_start_recording', { title, description, category, creator_id: creatorId, creator_name: creatorName });
@@ -1754,6 +1775,10 @@ export function useAgent() {
         createCampaign, getCampaign, listCampaigns,
         // M8-5: Self-Promotion Mode
         generatePromoContent,
+        // M8-7: Social Media Automation Pipeline
+        generateContentPlan, getContentCalendar, approvePost, approveAllPosts,
+        editScheduledPost, publishPostNow, getPendingResponses, approveResponse,
+        getMarketingStatus, toggleMarketingAutopilot,
         // E9-1: Training Studio
         trainingStartRecording, trainingStartExample, trainingRecordToolCall,
         trainingFinishExample, trainingAddCorrection, trainingStopRecording, trainingExecute,

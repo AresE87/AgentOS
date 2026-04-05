@@ -94,6 +94,16 @@ pub struct Settings {
     #[serde(default)]
     pub training_telemetry_url: String,
 
+    // Bloque 4: Telegram notification chat ID for marketing alerts
+    #[serde(default)]
+    pub telegram_chat_id: i64,
+
+    // Bloque 6: Marketing plan limits (graceful degradation)
+    #[serde(default = "default_marketing_posts_per_week_free")]
+    pub marketing_posts_per_week_free: u32,
+    #[serde(default = "default_marketing_responses_per_day_free")]
+    pub marketing_responses_per_day_free: u32,
+
     // C1: Stripe Billing
     #[serde(default)]
     pub stripe_secret_key: String,
@@ -193,6 +203,12 @@ fn default_screenshot_quality() -> u8 {
 }
 fn default_plan_type() -> String {
     "free".to_string()
+}
+fn default_marketing_posts_per_week_free() -> u32 {
+    3
+}
+fn default_marketing_responses_per_day_free() -> u32 {
+    5
 }
 fn default_whatsapp_verify_token() -> String {
     uuid::Uuid::new_v4().to_string()
@@ -335,6 +351,15 @@ impl Settings {
             }
             "voice_auto_listen" => {
                 self.voice_auto_listen = value == "true" || value == "1";
+            }
+            "telegram_chat_id" => {
+                self.telegram_chat_id = value.parse().unwrap_or(0);
+            }
+            "marketing_posts_per_week_free" => {
+                self.marketing_posts_per_week_free = value.parse().unwrap_or(3);
+            }
+            "marketing_responses_per_day_free" => {
+                self.marketing_responses_per_day_free = value.parse().unwrap_or(5);
             }
             "stripe_secret_key" => {
                 self.stripe_secret_key = value.to_string();
@@ -665,6 +690,9 @@ impl Default for Settings {
             openai_api_key: String::new(),
             google_api_key: String::new(),
             telegram_bot_token: String::new(),
+            telegram_chat_id: 0,
+            marketing_posts_per_week_free: default_marketing_posts_per_week_free(),
+            marketing_responses_per_day_free: default_marketing_responses_per_day_free(),
             whatsapp_phone_number_id: String::new(),
             whatsapp_access_token: String::new(),
             whatsapp_verify_token: default_whatsapp_verify_token(),
